@@ -171,9 +171,14 @@ def test_draft_omits_an_unchecked_figure(tmp_path, monkeypatch):
     assert dispatch("studium_figure_check", {"id": omitted["figure"]["id"]}, session=session)["checked"] is False
     rendered = dispatch("studium_render", {}, session=session)
     tex = (root / "latex" / "draft.tex").read_text(encoding="utf-8")
-    assert figure_gap(omitted["figure"]["id"]) in tex
+    chapter, _marker, appendix = tex.partition(r"\chapter{Source audit}")
+    warning = figure_gap(omitted["figure"]["id"])
+    assert warning not in chapter
+    assert warning in appendix
+    assert omitted["figure"]["id"] in appendix
+    assert omitted["figure"]["id"] not in chapter
     assert _OMITTED_CAPTION not in tex
-    assert _CHECKED_CAPTION in tex
+    assert _CHECKED_CAPTION in chapter
     assert r"\includegraphics" in tex
     assert checked["figure"]["id"] in tex
     assert tex.count(r"\includegraphics") == 1
@@ -186,6 +191,100 @@ def test_draft_omits_an_unchecked_figure(tmp_path, monkeypatch):
     else:
         assert rendered["status"] == "compiler_missing"
         assert not (root / "latex" / "draft.pdf").exists()
+
+
+def test_removed_figure_is_absent_and_the_warning_stays_in_the_audit(tmp_path, monkeypatch):
+    monkeypatch.setattr("urllib.request.urlopen", _explode)
+    session = open_workspace(str(tmp_path))
+    created = dispatch(
+        "studium_project_create",
+        {"slug": "historia", "topic": "Historia de la programación", "language": "es"},
+        session=session,
+    )
+    assert created["status"] == "created"
+    root = tmp_path / "historia"
+    excerpt_id = _ready(session)
+    dispatch(
+        "studium_paragraph_record",
+        {
+            "section": "tema-1",
+            "text": "La página abierta describe el volumen de control.",
+            "excerpts": [excerpt_id],
+        },
+        session=session,
+    )
+    checked = dispatch(
+        "studium_figure_record",
+        {
+            "section": "tema-1",
+            "caption": _CHECKED_CAPTION,
+            "kind": "python",
+            "source": _PLOT,
+            "excerpts": [excerpt_id],
+        },
+        session=session,
+    )
+    omitted = dispatch(
+        "studium_figure_record",
+        {
+            "section": "tema-1",
+            "caption": _OMITTED_CAPTION,
+            "kind": "python",
+            "source": "raise SystemExit(1)\n",
+            "excerpts": [excerpt_id],
+        },
+        session=session,
+    )
+    assert dispatch("studium_figure_check", {"id": checked["figure"]["id"]}, session=session)["checked"] is True
+    assert dispatch("studium_figure_check", {"id": omitted["figure"]["id"]}, session=session)["checked"] is False
+    state_before = (root / ".studium" / "state.json").read_bytes()
+    paragraphs_before = (root / "draft" / "paragraphs.jsonl").read_bytes()
+    excerpts_before = (root / "bibliography" / "excerpts.jsonl").read_bytes()
+    sources_before = (root / "bibliography" / "public.jsonl").read_bytes()
+    rendered = dispatch("studium_render", {}, session=session)
+    tex = (root / "latex" / "draft.tex").read_text(encoding="utf-8")
+    warning = "Esta figura no está comprobada. El dibujo se omite."
+    chapter, _marker, appendix = tex.partition(r"\chapter{Auditoría de fuentes}")
+    assert _marker
+    assert warning not in chapter
+    assert warning in appendix
+    assert omitted["figure"]["id"] in appendix
+    assert omitted["figure"]["id"] not in chapter
+    assert _CHECKED_CAPTION in chapter
+    assert r"\includegraphics" in chapter
+    assert rendered["released"] is False
+    assert rendered["project_state"] != "RELEASED"
+
+    removed = dispatch("studium_figure_remove", {"id": omitted["figure"]["id"]}, session=session)
+    assert removed["status"] == "removed"
+    assert removed["figure_id"] == omitted["figure"]["id"]
+    assert removed["released"] is False
+    assert removed["applied"] is False
+    assert removed["project_state"] != "RELEASED"
+    assert (root / ".studium" / "state.json").read_bytes() == state_before
+    assert (root / "draft" / "paragraphs.jsonl").read_bytes() == paragraphs_before
+    assert (root / "bibliography" / "excerpts.jsonl").read_bytes() == excerpts_before
+    assert (root / "bibliography" / "public.jsonl").read_bytes() == sources_before
+    again = dispatch("studium_render", {}, session=session)
+    tex_after = (root / "latex" / "draft.tex").read_text(encoding="utf-8")
+    assert omitted["figure"]["id"] not in tex_after
+    assert warning not in tex_after
+    assert _OMITTED_CAPTION not in tex_after
+    assert _CHECKED_CAPTION in tex_after
+    assert r"\includegraphics" in tex_after
+    assert again["released"] is False
+    assert again["project_state"] != "RELEASED"
+    figures_before = (root / "figures" / "figures.jsonl").read_text(encoding="utf-8")
+    missing = dispatch("studium_figure_remove", {"id": "FIG-9999"}, session=session)
+    assert missing["status"] == "figure.not_found"
+    assert missing["checked"] is False
+    assert missing["status"] != "removed"
+    blank = dispatch("studium_figure_remove", {}, session=session)
+    assert blank["status"] == "mcp.invalid_input"
+    assert (root / "figures" / "figures.jsonl").read_text(encoding="utf-8") == figures_before
+    assert (root / ".studium" / "state.json").read_bytes() == state_before
+    assert json.loads(state_before)["state"] != "RELEASED"
+    assert "studium_figure_remove" in tool_names()
 
 
 def test_tikz_without_an_output_stays_unchecked(tmp_path, monkeypatch):

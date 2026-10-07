@@ -19,7 +19,7 @@ from studium.domain.profiles import BOOK_TOPIC
 from studium.research.public_sources import bibliography_counts
 from studium.storage.init_project import book_kind, load_project_toml, load_state_holding_lock
 from studium.storage.locking import ProjectLocked, project_lock
-from studium.storage.records import AUDITS, COMPUTATIONS, PROBLEMS, PUBLIC_BIBLIOGRAPHY, fold_by_id
+from studium.storage.records import AUDITS, COMPUTATIONS, FIGURES, PROBLEMS, PUBLIC_BIBLIOGRAPHY, fold_by_id
 
 _TEX_NAME = "draft.tex"
 _PDF_NAME = "draft.pdf"
@@ -643,11 +643,12 @@ def _labeled(label: str, text: str) -> list[str]:
 
 
 def _figure_lines(root: Path, section_id: str, copy: dict[str, str]) -> list[str]:
+    """Checked drawings only. An unchecked figure is listed in the source audit."""
+
     lines: list[str] = []
     for record in figures_in_section(root, section_id):
         output = _checked_output(root, record)
         if output is None:
-            lines.extend(["", r"\noindent " + latex_escape(copy["figure_gap"])])
             continue
         caption = record.get("caption") if isinstance(record.get("caption"), str) else ""
         lines.extend(
@@ -769,6 +770,11 @@ def _audit_lines(
             target = ""
         check_kind = record.get("kind") if isinstance(record.get("kind"), str) else ""
         lines.extend(["", r"\noindent " + latex_escape(f"{identifier}: {target} {check_kind}".strip())])
+    for record in fold_by_id(root / FIGURES):
+        if _checked_output(root, record) is not None:
+            continue
+        identifier = record.get("id") if isinstance(record.get("id"), str) else "figure"
+        lines.extend(["", r"\noindent " + latex_escape(f"{identifier}: {copy['figure_gap']}")])
     return lines
 
 

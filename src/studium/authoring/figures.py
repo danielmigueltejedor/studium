@@ -285,6 +285,55 @@ def check_figure(root: Path, figure_id: object) -> dict[str, object]:
     return body
 
 
+def remove_figure(
+    root: Path,
+    figure_id: object,
+    *,
+    actor: dict[str, object] | None = None,
+) -> dict[str, object]:
+    """Delete one stored figure. Sources, paragraphs, and excerpts stay.
+
+    A missing id is an error. This does not change project state and does not
+    release the book.
+    """
+
+    identifier = _identifier(figure_id)
+    if identifier is None:
+        return _error("mcp.invalid_input", "id is required")
+    current = _find(root, identifier)
+    if current is None:
+        return _error("figure.not_found", "no stored figure with that id")
+    try:
+        with project_lock(root):
+            state = load_state_holding_lock(root)
+            again = _find(root, identifier)
+            if again is None:
+                return _error("figure.not_found", "no stored figure with that id")
+            append_jsonl(
+                root / FIGURES,
+                {
+                    "schema_version": "1.0.0",
+                    "id": identifier,
+                    "deleted": True,
+                    "recorded_at": utc_now(),
+                },
+            )
+            _audit(root, record=again, actor=actor, operation="remove_figure")
+            fresh = load_state_holding_lock(root)
+    except ProjectLocked:
+        return _error("storage.locked", "project is locked")
+    return {
+        "status": "removed",
+        "checked": False,
+        "figure_id": identifier,
+        "message": "The figure is removed from the book. Sources, paragraphs, and excerpts are unchanged.",
+        "released": fresh.get("state") == "RELEASED",
+        "applied": False,
+        "project_state": fresh.get("state"),
+        "local_sources": _local(fresh),
+    }
+
+
 def figures_in_section(root: Path, section_id: str) -> list[dict[str, object]]:
     """Stored figures for one blueprint section, newest record per id."""
 
