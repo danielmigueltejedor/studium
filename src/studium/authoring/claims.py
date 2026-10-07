@@ -4,7 +4,7 @@ import hashlib
 from pathlib import Path
 
 from studium.authoring.blueprint import current_sections
-from studium.authoring.support import citation_blockers
+from studium.authoring.support import citation_blockers, corroboration_for_excerpts
 from studium.policy.trust import contains_directive, directive_changes_policy
 from studium.storage.init_project import load_state_holding_lock
 from studium.storage.locking import ProjectLocked, project_lock
@@ -85,6 +85,8 @@ def record_claim(
                 record["excerpts"] = excerpt_ids
             if section_id is not None:
                 record["section"] = section_id
+            if corroboration_for_excerpts(root, excerpt_ids) == "two_witnesses":
+                record["corroboration"] = "two_witnesses"
             append_jsonl(root / CLAIMS, record)
             _audit(root, record=record, actor=actor)
             fresh = load_state_holding_lock(root)
@@ -118,6 +120,8 @@ def _public(record: dict[str, object]) -> dict[str, object]:
         visible["excerpts"] = record.get("excerpts")
     if isinstance(record.get("section"), str):
         visible["section"] = record["section"]
+    if record.get("corroboration") == "two_witnesses":
+        visible["corroboration"] = "two_witnesses"
     if record.get("content_directives_ignored") is True:
         visible["content_directives_ignored"] = True
     return visible

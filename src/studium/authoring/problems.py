@@ -1,8 +1,9 @@
 """Problems on a blueprint section.
 
-A Rust test is checked only after three passing runs. A numeric answer with
-two stored excerpts is ``two_witnesses``, not verified. The model is not a
-source, and a model-written solution is not correct until the check passes.
+A Rust test is checked only after three passing runs. A numeric answer is
+``two_witnesses`` only when its two stored excerpts come from different public
+sources. That is not verified. The model is not a source, and a model-written
+solution is not correct until the check passes.
 """
 
 import hashlib
@@ -13,7 +14,7 @@ from pathlib import Path
 
 from studium.authoring.blueprint import current_sections
 from studium.authoring.excerpts import excerpts_by_id
-from studium.authoring.support import paragraph_citation_blockers
+from studium.authoring.support import corroboration_for_excerpts, paragraph_citation_blockers
 from studium.policy.trust import contains_directive, directive_changes_policy
 from studium.storage.init_project import load_state_holding_lock
 from studium.storage.locking import ProjectLocked, project_lock
@@ -95,7 +96,9 @@ def record_problem(
                 record["kind"] = "numeric"
                 record["expected"] = numeric["expected"]
                 record["excerpts"] = numeric["excerpts"]
-                record["status"] = "two_witnesses"
+                if corroboration_for_excerpts(root, numeric["excerpts"]) == "two_witnesses":
+                    record["status"] = "two_witnesses"
+                    record["corroboration"] = "two_witnesses"
             append_jsonl(root / PROBLEMS, record)
             _audit(root, record=record, actor=actor, operation="record_problem")
             fresh_state = load_state_holding_lock(root)
@@ -132,15 +135,17 @@ def check_problem(root: Path, problem_id: object) -> dict[str, object]:
 def _check_numeric(root: Path, record: dict[str, object]) -> dict[str, object]:
     excerpts = record.get("excerpts")
     stored = excerpts_by_id(root)
-    present = (
-        isinstance(excerpts, list)
-        and len(excerpts) == 2
-        and all(isinstance(item, str) and item in stored for item in excerpts)
-    )
+    excerpt_ids = list(excerpts) if isinstance(excerpts, list) and all(isinstance(item, str) for item in excerpts) else []
+    present = len(excerpt_ids) == 2 and all(item in stored for item in excerpt_ids)
+    independent = present and corroboration_for_excerpts(root, excerpt_ids) == "two_witnesses"
     updated = dict(record)
-    updated["status"] = "two_witnesses" if present else "unchecked"
+    updated["status"] = "two_witnesses" if independent else "unchecked"
     updated["correct"] = False
     updated["classification"] = "PENDING"
+    if independent:
+        updated["corroboration"] = "two_witnesses"
+    else:
+        updated.pop("corroboration", None)
     if updated != record:
         try:
             with project_lock(root):
@@ -148,7 +153,7 @@ def _check_numeric(root: Path, record: dict[str, object]) -> dict[str, object]:
         except ProjectLocked:
             return _error("storage.locked", "project is locked")
     state = _read_state(root)
-    body = _body(state, updated, status="two_witnesses" if present else "unchecked")
+    body = _body(state, updated, status="two_witnesses" if independent else "unchecked")
     body["checked"] = False
     return body
 
@@ -409,6 +414,8 @@ def _public(record: dict[str, object]) -> dict[str, object]:
         visible["expected"] = record.get("expected")
         visible["excerpts"] = record.get("excerpts")
         visible["status"] = "two_witnesses" if record.get("status") == "two_witnesses" else record.get("status")
+        if record.get("corroboration") == "two_witnesses" and visible["status"] == "two_witnesses":
+            visible["corroboration"] = "two_witnesses"
     return visible
 
 

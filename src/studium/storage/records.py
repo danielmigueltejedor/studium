@@ -12,6 +12,7 @@ BLUEPRINT = "blueprint/outline.jsonl"
 CLAIMS = "claims/claims.jsonl"
 PARAGRAPHS = "draft/paragraphs.jsonl"
 PROBLEMS = "problems/problems.jsonl"
+COMPUTATIONS = "problems/computations.jsonl"
 
 
 def read_jsonl(path: Path) -> list[dict[str, object]]:

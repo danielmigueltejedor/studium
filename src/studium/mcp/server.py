@@ -25,7 +25,9 @@ from studium.domain.profiles import (
 )
 from studium.mcp import MCP_API_VERSION
 from studium.authoring.blueprint import get_blueprint, store_blueprint
+from studium.authoring.book_next import book_next
 from studium.authoring.claims import list_claims, record_claim
+from studium.authoring.computation import check_computation
 from studium.authoring.excerpts import get_excerpt, list_excerpts, record_excerpt
 from studium.authoring.paragraphs import annotate_next_action, draft_completeness, list_paragraphs, record_paragraph
 from studium.authoring.problems import check_problem, list_problems, record_problem
@@ -104,6 +106,17 @@ _TOOLS: tuple[dict[str, object], ...] = (
         "name": "studium_project_status",
         "class": "READ",
         "description": "Read the active book, or the book named by project. If none is active, next_action is create.",
+    },
+    {
+        "name": "studium_book_next",
+        "class": "READ",
+        "description": (
+            "Return the next concrete tool call for this book: create or record sources, "
+            "store an opened excerpt, write the missing section paragraph, record a problem, "
+            "run studium_problem_check or studium_computation_check, then render. "
+            "Does not ask the user when that step can be done from open sources or from sources already given. "
+            "Does not fetch URLs and does not move the book to RELEASED."
+        ),
     },
     {"name": "studium_source_capabilities", "class": "READ"},
     {"name": "studium_source_status", "class": "READ"},
@@ -317,8 +330,8 @@ _TOOLS: tuple[dict[str, object], ...] = (
         "description": (
             "Store a problem on a blueprint section. "
             "Either a Rust test (source file text plus a rustc or cargo test invocation limited to files inside the book) "
-            "or a numeric expected answer tied to two stored excerpt ids. "
-            "A numeric problem is two_witnesses, not verified. "
+            "or a numeric expected answer tied to two stored excerpt ids from different public sources. "
+            "A numeric problem is two_witnesses only when those excerpts are independent, and it is not verified. "
             "A model-written solution is not correct until studium_problem_check passes. "
             "Does not fetch URLs, does not run the test, and does not move the book to RELEASED."
         ),
@@ -329,8 +342,19 @@ _TOOLS: tuple[dict[str, object], ...] = (
         "description": (
             "Run a stored Rust test 3 times with a timeout and no network. "
             "Record each pass or fail. The problem is checked only when all 3 runs pass. "
-            "A numeric problem stays two_witnesses and is not verified. "
+            "A numeric problem stays two_witnesses only when the excerpts are independent, and it is not verified. "
             "If rustc or cargo is missing, return compiler_missing and do not pretend the test passed. "
+            "Does not fetch URLs and does not move the book to RELEASED."
+        ),
+    },
+    {
+        "name": "studium_computation_check",
+        "class": "WRITE",
+        "description": (
+            "Store an expression and the reported result, then evaluate that expression again. "
+            "The result is accepted only when the server's value matches. "
+            "Do not trust a number the model reports. "
+            "A match is replayed, not verified, and it is not absolute truth. "
             "Does not fetch URLs and does not move the book to RELEASED."
         ),
     },
@@ -505,8 +529,18 @@ _INSTRUCTIONS = (
             "Call studium_problem_record with a prompt and either a Rust test or a numeric answer tied to two stored excerpt ids. "
             "studium_problem_check runs a Rust test 3 times with a timeout and no network. "
             "The problem is checked only when all 3 runs pass. "
-            "A numeric problem is two_witnesses, not verified. "
+            "A numeric problem is two_witnesses only when the two excerpts come from different public sources, and it is not verified. "
+            "Two excerpts that agree are two_witnesses, not verified and not absolute truth. "
             "A model-written solution is not correct until the check passes. "
+            "Call studium_book_next and perform that tool call. "
+            "Search open sources, open the page, and record the excerpt. "
+            "Fill every empty section from an opened excerpt, or leave the gap. "
+            "Where the section is code or a replayable calculation, add at least one checked problem. "
+            "studium_computation_check stores the expression and the result and accepts it only when the server evaluates the same expression again. "
+            "Do not trust a number the model reports. "
+            "Render the DRAFT. Do not request release. "
+            "Refuse pirate copies and conflicting citations. "
+            "Do not ask the user what to do next. "
             "If rustc or cargo is missing, the check returns compiler_missing and does not pretend the test passed. "
             "corpus_started may pass only when every section has a supported paragraph. That check does not release the book. "
             "Do not implement a release. verification_passed and reviews_current stay unimplemented. "
@@ -732,6 +766,17 @@ def _dispatch(session: McpSession, name: str, arguments: Mapping[str, object]) -
     if root is None:
         if name == "studium_project_status":
             return _no_active_project(session)
+        if name == "studium_book_next":
+            return {
+                "status": "ok",
+                "tool": "studium_project_create",
+                "arguments": {},
+                "reason": "Create the book with slug and topic, or with course, university, and degree.",
+                "ask_user": False,
+                "released": False,
+                "project_state": None,
+                "local_sources": {"status": "UNKNOWN", "prompted": False, "source_count": 0},
+            }
         return {
             "status": "project.not_found",
             "message": "project.not_found",
@@ -741,6 +786,8 @@ def _dispatch(session: McpSession, name: str, arguments: Mapping[str, object]) -
     actor = arguments.get("actor") if isinstance(arguments.get("actor"), dict) else {"kind": "mcp"}
     if name == "studium_project_status":
         return annotate_next_action(root, project_status(root))
+    if name == "studium_book_next":
+        return book_next(root)
     if name == "studium_source_capabilities":
         return source_capabilities(root)
     if name == "studium_source_status":
@@ -852,6 +899,15 @@ def _dispatch(session: McpSession, name: str, arguments: Mapping[str, object]) -
         )
     if name == "studium_problem_check":
         return check_problem(root, arguments.get("id") if "id" in arguments else None)
+    if name == "studium_computation_check":
+        return check_computation(
+            root,
+            expression=arguments.get("expression") if "expression" in arguments else None,
+            result=arguments.get("result") if "result" in arguments else None,
+            computation_id=arguments.get("id") if "id" in arguments else None,
+            section=arguments.get("section") if "section" in arguments else None,
+            actor=actor if isinstance(actor, dict) else None,
+        )
     if name == "studium_problem_list":
         return list_problems(root)
     if name == "studium_paragraph_record":
@@ -1522,6 +1578,29 @@ def _schema(tool: Mapping[str, object]) -> dict[str, object]:
             "required": ["section", "prompt"],
             "additionalProperties": True,
         }
+    elif name == "studium_book_next":
+        input_schema = {
+            "type": "object",
+            "properties": {"project": _project_property()},
+            "additionalProperties": True,
+        }
+    elif name == "studium_computation_check":
+        input_schema = {
+            "type": "object",
+            "properties": {
+                "project": _project_property(),
+                "expression": {
+                    "type": "string",
+                    "description": "Numeric expression the server evaluates again. Names and calls are rejected.",
+                },
+                "result": {
+                    "description": "Reported result. Accepted only when the server evaluates the same expression to this value.",
+                },
+                "id": {"type": "string", "description": "Stored computation id. Replay evaluates the stored expression again."},
+                "section": {"type": "string", "description": "Optional blueprint section id."},
+            },
+            "additionalProperties": True,
+        }
     elif name == "studium_problem_check":
         input_schema = {
             "type": "object",
@@ -1649,6 +1728,7 @@ def _failed(payload: Mapping[str, object]) -> bool:
         "created",
         "recorded",
         "rendered",
+        "replayed",
         "bibliographic_conflict",
         "bibliographic_identity",
     }:

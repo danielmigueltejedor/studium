@@ -46,6 +46,8 @@ Workflow:
           [--project-dir PATH]
   studium status [--json] [--project PATH]
   studium next [--json] [--project PATH]
+  studium book-next [--json] [--project PATH]
+  studium computation --expression STR --result STR [--json] [--project PATH]
   studium run [--project PATH]
   studium blueprint set --section ID TITLE [--section ID TITLE ...] [--json] [--project PATH]
   studium excerpt add --source ID --url URL --text STR [--json] [--project PATH]
@@ -133,7 +135,18 @@ def main(argv: list[str] | None = None) -> int:
         return _next(args)
     if args.command == "sources":
         return _sources(args)
-    if args.command in {"blueprint", "claim", "verify", "render", "excerpt", "paragraph", "completeness", "problem"}:
+    if args.command in {
+        "blueprint",
+        "claim",
+        "verify",
+        "render",
+        "excerpt",
+        "paragraph",
+        "completeness",
+        "problem",
+        "book-next",
+        "computation",
+    }:
         return _authoring(args)
     if args.command == "mcp":
         return _mcp(args)
