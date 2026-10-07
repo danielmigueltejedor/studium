@@ -5,6 +5,8 @@ from pathlib import Path
 
 from studium.domain.ids import IdAllocator
 
+COURSE_CANDIDATES = "course/candidates.jsonl"
+
 
 def read_jsonl(path: Path) -> list[dict[str, object]]:
     if not path.is_file():

@@ -12,9 +12,8 @@ from studium.policy.trust import contains_directive, directive_changes_policy
 from studium.storage.init_project import load_state_holding_lock
 from studium.storage.locking import ProjectLocked, project_lock
 from studium.storage.migrate import utc_now
-from studium.storage.records import append_jsonl, fold_by_id
+from studium.storage.records import COURSE_CANDIDATES, append_jsonl, fold_by_id
 
-_CANDIDATES = "course/candidates.jsonl"
 _AUDIT = "audit/audit.jsonl"
 _MAX_TITLE = 500
 _MAX_TEXT = 2_000_000
@@ -63,7 +62,7 @@ def record_course_document(
             state = load_state_holding_lock(root)
             local = _local(state)
             project_state = state.get("state")
-            existing = fold_by_id(root / _CANDIDATES)
+            existing = fold_by_id(root / COURSE_CANDIDATES)
             prior = next((item for item in existing if item.get("id") == digest), None)
             if prior is not None:
                 return {
@@ -72,7 +71,7 @@ def record_course_document(
                     "local_sources": local,
                     "project_state": project_state,
                 }
-            append_jsonl(root / _CANDIDATES, record)
+            append_jsonl(root / COURSE_CANDIDATES, record)
             append_jsonl(
                 root / _AUDIT,
                 {
@@ -131,6 +130,28 @@ def _text(value: object) -> tuple[str | None, str | None]:
     if not value.strip():
         return None, None
     return value, None
+
+
+def list_course_documents(root: Path) -> dict[str, object]:
+    """Read stored official documents. Does not fetch, scan, or change them."""
+
+    documents = [
+        _listed(record)
+        for record in fold_by_id(root / COURSE_CANDIDATES)
+        if record.get("origin") == SourceOrigin.OFFICIAL_WEB.value
+    ]
+    return {"status": "ok", "documents": documents}
+
+
+def _listed(record: dict[str, object]) -> dict[str, object]:
+    return {
+        "title": record.get("title"),
+        "url": record.get("url"),
+        "state": record.get("state"),
+        "classification": record.get("classification"),
+        "source_class": record.get("source_class"),
+        "authority_status": record.get("authority_status"),
+    }
 
 
 def _public(record: dict[str, object]) -> dict[str, object]:
