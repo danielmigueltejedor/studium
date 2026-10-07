@@ -9,6 +9,7 @@ from studium.authoring.blueprint import get_blueprint, store_blueprint
 from studium.authoring.claims import list_claims, record_claim
 from studium.authoring.excerpts import get_excerpt, list_excerpts, record_excerpt
 from studium.authoring.paragraphs import draft_completeness, list_paragraphs, record_paragraph
+from studium.authoring.problems import check_problem, list_problems, record_problem
 from studium.authoring.render import render_draft
 from studium.authoring.verify import verify_book
 
@@ -72,6 +73,22 @@ def register(subparsers: argparse._SubParsersAction) -> None:
 
     completeness = subparsers.add_parser("completeness", help=argparse.SUPPRESS)
     _project(completeness)
+
+    problem = subparsers.add_parser("problem", help=argparse.SUPPRESS)
+    problem_commands = problem.add_subparsers(dest="problem_command")
+    problem_add = problem_commands.add_parser("add")
+    problem_add.add_argument("--section", required=True)
+    problem_add.add_argument("--prompt", required=True)
+    problem_add.add_argument("--source-text")
+    problem_add.add_argument("--invocation", nargs="+")
+    problem_add.add_argument("--expected")
+    problem_add.add_argument("--excerpt", action="append")
+    _project(problem_add)
+    problem_check = problem_commands.add_parser("check")
+    problem_check.add_argument("problem_id")
+    _project(problem_check)
+    problem_list = problem_commands.add_parser("list")
+    _project(problem_list)
 
 
 def run(args: argparse.Namespace, root: Path) -> int:
@@ -142,6 +159,27 @@ def run(args: argparse.Namespace, root: Path) -> int:
         return 3
     if command == "completeness":
         return _emit(draft_completeness(root), args.json)
+    if command == "problem":
+        if args.problem_command == "add":
+            return _emit(
+                record_problem(
+                    root,
+                    section=args.section,
+                    prompt=args.prompt,
+                    source_text=args.source_text,
+                    invocation=list(args.invocation) if args.invocation else None,
+                    expected=args.expected,
+                    excerpts=list(args.excerpt) if args.excerpt else None,
+                    actor={"kind": "cli"},
+                ),
+                args.json,
+            )
+        if args.problem_command == "check":
+            return _emit(check_problem(root, args.problem_id), args.json)
+        if args.problem_command == "list":
+            return _emit(list_problems(root), args.json)
+        print("unknown command: problem", file=sys.stderr)
+        return 3
     print("unknown command", file=sys.stderr)
     return 3
 

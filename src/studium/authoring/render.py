@@ -116,6 +116,7 @@ def _document(root: Path) -> str:
     claims = supported_drafts(root)
     paragraphs = supported_paragraphs(root)
     titles = _source_titles(root)
+    sources = _source_records(root)
     excerpts = excerpts_by_id(root)
     counts = bibliography_counts(root)
     book = _book_name(root)
@@ -154,12 +155,12 @@ def _document(root: Path) -> str:
             lines.extend(["", r"\noindent " + latex_escape(GAP_LABEL)])
             continue
         for paragraph in section_paragraphs:
-            lines.extend(_claim_lines(paragraph, titles, excerpts))
+            lines.extend(_claim_lines(paragraph, titles, excerpts, sources))
     lines.extend(["", r"\section*{Draft claims}"])
     if not claims:
         lines.append("No supported draft claims.")
     for claim in claims:
-        lines.extend(_claim_lines(claim, titles, excerpts))
+        lines.extend(_claim_lines(claim, titles, excerpts, sources))
     lines.extend(["", r"\end{document}", ""])
     return "\n".join(lines)
 
@@ -185,12 +186,13 @@ def _claim_lines(
     claim: dict[str, object],
     titles: dict[str, str],
     excerpts: dict[str, dict[str, object]],
+    sources: dict[str, dict[str, object]] | None = None,
 ) -> list[str]:
     text = claim.get("text") if isinstance(claim.get("text"), str) else ""
-    sources = claim.get("sources") if isinstance(claim.get("sources"), list) else []
+    cited_sources = claim.get("sources") if isinstance(claim.get("sources"), list) else []
     excerpt_ids = claim.get("excerpts") if isinstance(claim.get("excerpts"), list) else []
     labels: list[str] = []
-    for source_id in sources:
+    for source_id in cited_sources:
         if not isinstance(source_id, str):
             continue
         labels.append(f"{titles.get(source_id, source_id)} (PENDING)")
@@ -201,7 +203,13 @@ def _claim_lines(
         excerpt = excerpts.get(excerpt_id)
         source_id = excerpt.get("source_id") if isinstance(excerpt, dict) else None
         title = titles.get(source_id, source_id) if isinstance(source_id, str) else excerpt_id
-        excerpt_labels.append(f"{excerpt_id} {title} (PENDING)")
+        source = sources.get(source_id) if isinstance(sources, dict) and isinstance(source_id, str) else None
+        if isinstance(source, dict) and source.get("open_supplement") is True and source.get("course_guide_cited") is not True:
+            excerpt_labels.append(
+                f"Open supplement: {excerpt_id} {title} (PENDING). Not the guide bibliography."
+            )
+        else:
+            excerpt_labels.append(f"{excerpt_id} {title} (PENDING)")
     identifier = claim.get("id") if isinstance(claim.get("id"), str) else "draft"
     lines = [
         "",
@@ -214,6 +222,15 @@ def _claim_lines(
     if excerpt_labels:
         lines.extend(["", r"\noindent Excerpts: " + latex_escape(", ".join(excerpt_labels)) + "."])
     return lines
+
+
+def _source_records(root: Path) -> dict[str, dict[str, object]]:
+    records: dict[str, dict[str, object]] = {}
+    for record in fold_by_id(root / PUBLIC_BIBLIOGRAPHY):
+        identifier = record.get("id")
+        if isinstance(identifier, str):
+            records[identifier] = record
+    return records
 
 
 def _source_titles(root: Path) -> dict[str, str]:

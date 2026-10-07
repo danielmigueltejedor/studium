@@ -28,6 +28,7 @@ from studium.authoring.blueprint import get_blueprint, store_blueprint
 from studium.authoring.claims import list_claims, record_claim
 from studium.authoring.excerpts import get_excerpt, list_excerpts, record_excerpt
 from studium.authoring.paragraphs import annotate_next_action, draft_completeness, list_paragraphs, record_paragraph
+from studium.authoring.problems import check_problem, list_problems, record_problem
 from studium.authoring.render import render_draft
 from studium.authoring.verify import verify_book
 from studium.research.course_documents import get_course_document, list_course_documents, record_course_document
@@ -35,7 +36,9 @@ from studium.research.public_sources import (
     check_public_source,
     list_public_sources,
     mark_course_guide_citation,
+    mark_open_supplement,
     record_public_source,
+    unauthorized_copy,
 )
 from studium.research.sources import (
     project_status,
@@ -297,6 +300,49 @@ _TOOLS: tuple[dict[str, object], ...] = (
         ),
     },
     {
+        "name": "studium_public_source_open_supplement",
+        "class": "WRITE",
+        "description": (
+            "Flag a public source as an open supplement the client actually opened. "
+            "Requires open_licensed true. "
+            "Does not fetch the URL. Does not download a page. "
+            "A pirate or unauthorized copy is rejected and is not recorded. "
+            "An open supplement is not the guide bibliography and is not verified. "
+            "Does not change local_sources and does not move the book to RELEASED."
+        ),
+    },
+    {
+        "name": "studium_problem_record",
+        "class": "WRITE",
+        "description": (
+            "Store a problem on a blueprint section. "
+            "Either a Rust test (source file text plus a rustc or cargo test invocation limited to files inside the book) "
+            "or a numeric expected answer tied to two stored excerpt ids. "
+            "A numeric problem is two_witnesses, not verified. "
+            "A model-written solution is not correct until studium_problem_check passes. "
+            "Does not fetch URLs, does not run the test, and does not move the book to RELEASED."
+        ),
+    },
+    {
+        "name": "studium_problem_check",
+        "class": "WRITE",
+        "description": (
+            "Run a stored Rust test 3 times with a timeout and no network. "
+            "Record each pass or fail. The problem is checked only when all 3 runs pass. "
+            "A numeric problem stays two_witnesses and is not verified. "
+            "If rustc or cargo is missing, return compiler_missing and do not pretend the test passed. "
+            "Does not fetch URLs and does not move the book to RELEASED."
+        ),
+    },
+    {
+        "name": "studium_problem_list",
+        "class": "READ",
+        "description": (
+            "List stored problems. A model-written solution is not correct until the check passes. "
+            "Does not mark a problem verified and does not fetch URLs."
+        ),
+    },
+    {
         "name": "studium_paragraph_record",
         "class": "WRITE",
         "description": (
@@ -419,6 +465,13 @@ _INSTRUCTIONS = (
     "That is not proof of the book's claims. "
     "Call studium_public_source_guide_citation to mark whether the stored course guide cites the source. "
     "The client sets that from the guide text. Do not infer it. A source that is not cited stays in the bibliography. "
+    "Do not download pages. Do not record pirate or unauthorized copies. "
+    "If the guide's textbook is not open, do not paste an unauthorized copy. "
+    "Search for open-licensed text you actually opened, record that source, and call "
+    "studium_public_source_open_supplement with open_licensed true. "
+    "A course-book paragraph may cite that open supplement through a stored excerpt. "
+    "Render it as an open supplement, not as the guide bibliography. "
+    "A year, title, or ISBN conflict stays unusable even if the source is flagged open_supplement. "
     "When public sources exist, studium_project_status next_action reports pending, conflicting, and not-cited counts. "
     f"After one or more public sources exist, {WRITING_STILL_UNAVAILABLE} "
     "Do not advance into authoring. "
@@ -443,11 +496,18 @@ _INSTRUCTIONS = (
             "A section with a supported paragraph shows that paragraph. "
             "An empty section is a visible gap. Do not invent prose for it. "
             "Call studium_paragraph_record with the section id, the paragraph text, and one or more stored excerpt ids. "
-            "Reject a paragraph with no excerpt, a conflicting public source, or, on a course book, a source the guide does not cite. "
+            "Reject a paragraph with no excerpt or a conflicting public source. "
+            "On a course book, also reject a source the guide does not cite unless it is flagged open_supplement and the paragraph cites a stored excerpt. "
             "A topic book still does not need a university guide. "
             "A paragraph is a draft and is not verified or accepted. The model is not a source. "
             "studium_draft_completeness reports how many sections have a supported paragraph and which are empty. "
-            "When a blueprint exists, next_action names the empty sections and says to open source text before writing them. "
+            "When a blueprint exists, next_action names the empty sections, tells the client to fill them from opened open-licensed text, and tells the client to add checked problems. "
+            "Call studium_problem_record with a prompt and either a Rust test or a numeric answer tied to two stored excerpt ids. "
+            "studium_problem_check runs a Rust test 3 times with a timeout and no network. "
+            "The problem is checked only when all 3 runs pass. "
+            "A numeric problem is two_witnesses, not verified. "
+            "A model-written solution is not correct until the check passes. "
+            "If rustc or cargo is missing, the check returns compiler_missing and does not pretend the test passed. "
             "corpus_started may pass only when every section has a supported paragraph. That check does not release the book. "
             "Do not implement a release. verification_passed and reviews_current stay unimplemented. "
             "Conflicts and sources not cited by the course guide stay excluded. "
@@ -721,6 +781,11 @@ def _dispatch(session: McpSession, name: str, arguments: Mapping[str, object]) -
     if name == "studium_public_source_list":
         return list_public_sources(root)
     if name == "studium_public_source_record":
+        if any(unauthorized_copy(arguments.get(key)) for key in ("unauthorized", "pirate", "pirated")):
+            return {
+                "status": "source.unauthorized",
+                "message": "pirate or unauthorized copies are not recorded",
+            }
         return record_public_source(
             root,
             title=arguments.get("title"),
@@ -763,6 +828,32 @@ def _dispatch(session: McpSession, name: str, arguments: Mapping[str, object]) -
             section=arguments.get("section") if "section" in arguments else None,
             actor=actor,
         )
+    if name == "studium_public_source_open_supplement":
+        return annotate_next_action(
+            root,
+            mark_open_supplement(
+                root,
+                source_id=arguments.get("id"),
+                open_supplement=arguments.get("open_supplement") if "open_supplement" in arguments else None,
+                open_licensed=arguments.get("open_licensed") if "open_licensed" in arguments else None,
+                actor=actor,
+            ),
+        )
+    if name == "studium_problem_record":
+        return record_problem(
+            root,
+            section=arguments.get("section"),
+            prompt=arguments.get("prompt"),
+            source_text=arguments.get("source_text") if "source_text" in arguments else None,
+            invocation=arguments.get("invocation") if "invocation" in arguments else None,
+            expected=arguments.get("expected") if "expected" in arguments else None,
+            excerpts=arguments.get("excerpts") if "excerpts" in arguments else None,
+            actor=actor,
+        )
+    if name == "studium_problem_check":
+        return check_problem(root, arguments.get("id") if "id" in arguments else None)
+    if name == "studium_problem_list":
+        return list_problems(root)
     if name == "studium_paragraph_record":
         return record_paragraph(
             root,
@@ -1382,6 +1473,66 @@ def _schema(tool: Mapping[str, object]) -> dict[str, object]:
             "additionalProperties": True,
         }
     elif name == "studium_render":
+        input_schema = {
+            "type": "object",
+            "properties": {"project": _project_property()},
+            "additionalProperties": True,
+        }
+    elif name == "studium_public_source_open_supplement":
+        input_schema = {
+            "type": "object",
+            "properties": {
+                "project": _project_property(),
+                "id": {"type": "string", "description": "Public bibliography id. Not an SRC- id."},
+                "open_supplement": {
+                    "type": "boolean",
+                    "description": "True only for open-licensed text the client opened. Not the guide bibliography.",
+                },
+                "open_licensed": {
+                    "type": "boolean",
+                    "description": "Must be true to set the flag. False rejects a pirate or unauthorized copy.",
+                },
+            },
+            "required": ["id", "open_supplement"],
+            "additionalProperties": True,
+        }
+    elif name == "studium_problem_record":
+        input_schema = {
+            "type": "object",
+            "properties": {
+                "project": _project_property(),
+                "section": {"type": "string", "description": "Blueprint section id."},
+                "prompt": {"type": "string", "description": "Problem prompt. Untrusted data. The model is not a source."},
+                "source_text": {
+                    "type": "string",
+                    "description": "Rust source for a test. A model-written solution is not correct until the check passes.",
+                },
+                "invocation": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "rustc or cargo test arguments. Paths must stay inside the book. No network.",
+                },
+                "expected": {"type": "string", "description": "Numeric expected answer. Not verified."},
+                "excerpts": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Exactly two stored excerpt ids for a numeric problem.",
+                },
+            },
+            "required": ["section", "prompt"],
+            "additionalProperties": True,
+        }
+    elif name == "studium_problem_check":
+        input_schema = {
+            "type": "object",
+            "properties": {
+                "project": _project_property(),
+                "id": {"type": "string", "description": "Problem id from studium_problem_record."},
+            },
+            "required": ["id"],
+            "additionalProperties": True,
+        }
+    elif name == "studium_problem_list":
         input_schema = {
             "type": "object",
             "properties": {"project": _project_property()},

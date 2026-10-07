@@ -63,7 +63,7 @@ def test_full_outline_renders_in_order_and_labels_a_gap(tmp_path, monkeypatch):
     assert report["released"] is False
     status = dispatch("studium_project_status", {}, session=session)
     assert "Empty sections: momentum (Momentum)." in status["next_action"]
-    assert "Open source text before writing them." in status["next_action"]
+    assert "Fill them from opened open-licensed text and add checked problems." in status["next_action"]
     assert status["state"] == "SOURCE_DISCOVERY"
     rendered = dispatch("studium_render", {}, session=session)
     tex = (root / "latex" / "draft.tex").read_text(encoding="utf-8")
@@ -165,6 +165,7 @@ def test_verify_still_blocks_release(tmp_path, monkeypatch):
     assert main(["verify", "--full", "--project", str(root)]) == 2
     status = dispatch("studium_project_status", {}, session=session)
     assert "Every blueprint section has a supported paragraph." in status["next_action"]
+    assert "Add checked problems." in status["next_action"]
     assert "Do not mark the book released." in status["next_action"]
     assert json.loads((root / ".studium" / "state.json").read_text(encoding="utf-8"))["state"] != "RELEASED"
 
