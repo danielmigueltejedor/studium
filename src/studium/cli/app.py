@@ -15,7 +15,7 @@ from studium.config.resolve import resolve_project
 from studium.domain.enums import ProjectState
 from studium.mcp.server import build_parser as register_mcp
 from studium.mcp.server import serve as serve_mcp
-from studium.research.sources import project_status
+from studium.research.sources import agent_pack, project_status
 from studium.state.gates import PROJECT_TOML, gate_for
 from studium.state.machine import earlier_gates_fail
 from studium.storage.init_project import (
@@ -123,6 +123,8 @@ def main(argv: list[str] | None = None) -> int:
         return _sources(args)
     if args.command == "mcp":
         return serve_mcp(sys.stdin.buffer, sys.stdout.buffer, default_project=args.project)
+    if args.command == "agent-pack":
+        return _agent_pack(args)
     parser.print_help(sys.stderr)
     return 3
 
@@ -153,6 +155,11 @@ def _build_parser() -> StudiumParser:
     nxt = commands.add_parser("next", help=argparse.SUPPRESS)
     nxt.add_argument("--json", action="store_true")
     nxt.add_argument("--project")
+
+    pack = commands.add_parser("agent-pack", help=argparse.SUPPRESS)
+    pack.add_argument("--task")
+    pack.add_argument("--json", action="store_true")
+    pack.add_argument("--project")
     register_sources(commands)
     register_mcp(commands)
     return parser
@@ -241,6 +248,61 @@ def _status(args: argparse.Namespace) -> int:
     print(f"course.university: {fields.get('university', '')}")
     print(f"course.degree: {fields.get('degree', '')}")
     return 0
+
+
+def _agent_pack(args: argparse.Namespace) -> int:
+    root = _require_project(args.project)
+    if root is None:
+        return 3
+    try:
+        payload = agent_pack(root, task=args.task)
+    except (OSError, json.JSONDecodeError, UnicodeError, tomllib.TOMLDecodeError, TypeError, AttributeError):
+        print("invalid project", file=sys.stderr)
+        return 1
+    if args.json:
+        print(_json(payload))
+        return 0
+    print(_agent_pack_text(payload))
+    return 0
+
+
+def _agent_pack_text(payload: dict[str, object]) -> str:
+    lines = [
+        "kind: local_sources",
+        "scope: local_sources_only",
+        f"course_discovery: {_yes_no(payload.get('course_discovery'))}",
+        f"research: {_yes_no(payload.get('research'))}",
+        f"task: {payload.get('task') or 'none'}",
+        f"local_sources.status: {payload.get('status')}",
+        f"local_sources.prompted: {str(payload.get('prompted')).lower()}",
+        f"local_sources.source_count: {payload.get('source_count')}",
+        f"should_ask: {_yes_no(payload.get('should_ask'))}",
+        f"do_not_ask: {_yes_no(payload.get('do_not_ask'))}",
+        f"accept_files: {_yes_no(payload.get('accept_files'))}",
+        "scan_home: no",
+    ]
+    status = payload.get("status")
+    if payload.get("should_ask") and isinstance(payload.get("question"), str):
+        lines.append(f"question: {payload['question']}")
+    elif status in {"NONE", "SKIPPED"} or (status == "UNKNOWN" and payload.get("should_ask") is not True):
+        lines.append("do not ask again")
+    if status == "AVAILABLE":
+        lines.append("accept files")
+        lines.append("do not scan the home directory")
+    sources = payload.get("sources")
+    if status == "IMPORTED" and isinstance(sources, list):
+        for item in sources:
+            if isinstance(item, dict):
+                roles = item.get("roles") or []
+                role_text = ",".join(str(role) for role in roles) if isinstance(roles, list) else ""
+                lines.append(
+                    f"{item.get('id')} roles={role_text} classification={item.get('classification')}"
+                )
+    return "\n".join(lines)
+
+
+def _yes_no(value: object) -> str:
+    return "yes" if value is True else "no"
 
 
 def _sources(args: argparse.Namespace) -> int:

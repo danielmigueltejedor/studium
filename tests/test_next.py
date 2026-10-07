@@ -70,7 +70,7 @@ def test_blocked_human_exits_2(tmp_path, monkeypatch, capsys):
 
 @pytest.mark.parametrize(
     "command",
-    ["agent-pack", "run", "research", "verify", "build", "release", "doctor", "graph", "source"],
+    ["run", "research", "verify", "build", "release", "doctor", "graph", "source"],
 )
 def test_commands_outside_stage_0_are_unknown(capsys, command):
     rc = main([command, "--task", "TSK-0001"])

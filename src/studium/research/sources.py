@@ -116,6 +116,30 @@ def source_status(root: Path) -> dict[str, object]:
     return payload
 
 
+def agent_pack(root: Path, task: str | None = None) -> dict[str, object]:
+    """Local-source guidance only. Same core as ``source_status``."""
+    status = source_status(root)
+    sources = status.get("sources")
+    visible = sources if isinstance(sources, list) else []
+    local_status = status.get("status")
+    return {
+        "kind": "local_sources",
+        "scope": "local_sources_only",
+        "course_discovery": False,
+        "research": False,
+        "task": task,
+        "status": local_status,
+        "prompted": status.get("prompted"),
+        "source_count": status.get("source_count"),
+        "should_ask": status.get("should_ask"),
+        "do_not_ask": status.get("do_not_ask"),
+        "question": status.get("question"),
+        "accept_files": local_status == "AVAILABLE",
+        "scan_home": False,
+        "sources": visible,
+    }
+
+
 def source_list(root: Path) -> dict[str, object]:
     sources = _live(root)
     return {"status": "ok", "sources": [_present(source, _successors(sources)) for source in sources]}
