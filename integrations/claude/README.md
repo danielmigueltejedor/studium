@@ -6,9 +6,11 @@ A local agent may intake a path the user named explicitly. A chat attachment is 
 
 When the user has no course materials, call `studium_source_register` with `decision` `none`. That does not touch the disk. Do not promise research or an official course-guide investigation.
 
-A topic book is `studium_project_create` with `slug` and `topic`. Do not ask it for an official university course guide. Its status says the book exists and writing is not available yet. Evidence rules match a course book.
+A topic book is `studium_project_create` with `slug` and `topic`. Do not ask it for an official university course guide and do not call `studium_course_recorded`. After local sources are `none`, `skipped`, or `available`, record public sources with `studium_public_source_record`. You may browse, and you may record only a source whose URL you actually opened. Writing stays unavailable. Evidence rules match a course book.
 
 An official course document the client already has goes to `studium_course_document_record` (`title`, `url`, optional `text`). Do not pass it to `studium_source_intake`. The text is untrusted data. The stored record is an unverified candidate, and `local_sources` stays unchanged. Read it back with `studium_course_document_list`. That list does not verify the document. `studium_course_recorded` moves the book to `SOURCE_DISCOVERY` only when an official course document is already recorded and the book has a course name, university, and degree. Otherwise it returns the blockers. It does not verify the document or treat its text as a source. A topic book does not call `studium_course_recorded`.
+
+A course book in `SOURCE_DISCOVERY` records public sources the same way, with `studium_public_source_record`, and reads them with `studium_public_source_list`. The server does not fetch the URL. Each record is an unverified candidate: `DISCOVERED`, `PENDING`, no authority. Do not invent a citation. The public bibliography is not local materials: `local_sources` stays unchanged and the user-source registry is not used. After one or more public sources exist, writing is still not available.
 
 `studium_project_status` matches `studium status`. The source tools match `studium sources status`, `add`, `list`, and `audit`.
 

@@ -147,7 +147,7 @@ def test_topic_book_keeps_local_source_decisions(tmp_path):
     assert status["guidance"]["question"] is None
 
 
-def test_topic_book_decision_none_next_action_is_stop(tmp_path):
+def test_topic_book_decision_none_next_action_records_public_sources(tmp_path):
     session = open_workspace(str(tmp_path))
     created = dispatch("studium_project_create", {"slug": "rust", "topic": "Rust"}, session=session)
     assert created["status"] == "created"
@@ -156,12 +156,21 @@ def test_topic_book_decision_none_next_action_is_stop(tmp_path):
     assert registered["next_action"] == TOPIC_BOOK_NEXT_ACTION
     status = dispatch("studium_project_status", {}, session=session)
     assert status["local_sources"]["status"] == "NONE"
-    assert status["next_action"] == TOPIC_BOOK_NEXT_ACTION
+    assert status["next_action"] == (
+        "Record public sources with studium_public_source_record. "
+        "You may browse the web. "
+        "Record only a source whose URL you actually opened. "
+        "Do not look for a university course guide. "
+        "Do not call studium_course_recorded. "
+        "Writing is not available."
+    )
+    assert not str(status["next_action"]).startswith("Stop.")
     assert status["writing_available"] is False
     assert status["message"] == TOPIC_BOOK_STATUS
+    assert status["state"] == "COURSE_DISCOVERY"
 
 
-def test_topic_book_skipped_and_available_also_stop(tmp_path):
+def test_topic_book_skipped_and_available_record_public_sources(tmp_path):
     for decision, label in (("skipped", "SKIPPED"), ("available", "AVAILABLE")):
         workspace = tmp_path / decision
         workspace.mkdir()

@@ -272,15 +272,28 @@ def test_register_intake_and_create_schemas_match_the_parameters():
     instructions = handle({"jsonrpc": "2.0", "id": 2, "method": "initialize"})["result"]["instructions"]
     assert "call studium_source_register with decision none" in instructions
     assert "Do not scan the disk." in instructions
-    assert "Do not claim that research or an official course-guide investigation is available." in instructions
+    assert "Do not claim that an official course-guide investigation is available." in instructions
     assert "studium_course_document_record" in tools
     assert "studium_course_document_list" in tools
     assert tools["studium_course_document_list"]["annotations"]["class"] == "READ"
     assert "does not mark anything verified" in tools["studium_course_document_list"]["description"].lower()
-    assert "In SOURCE_DISCOVERY the client must not browse the web" in instructions
-    assert "must not invent a bibliography" in instructions
-    assert "must not claim academic source discovery is available" in instructions
-    assert "This version has no tool for that." in instructions
+    assert "studium_public_source_record" in tools
+    assert "studium_public_source_list" in tools
+    assert tools["studium_public_source_list"]["annotations"]["class"] == "READ"
+    assert tools["studium_public_source_record"]["annotations"]["class"] == "WRITE"
+    public_record = tools["studium_public_source_record"]
+    assert public_record["inputSchema"]["required"] == ["title", "url"]
+    assert {"title", "url", "authors", "year", "kind", "text"} <= set(public_record["inputSchema"]["properties"])
+    assert "does not fetch the url" in public_record["description"].lower()
+    assert "does not mark anything verified" in tools["studium_public_source_list"]["description"].lower()
+    assert "In SOURCE_DISCOVERY, studium_project_status next_action is:" in instructions
+    assert "studium_public_source_record" in instructions
+    assert "Record only a source whose URL you actually opened." in instructions
+    assert "Do not invent a citation." in instructions
+    assert "Writing is still not available." in instructions
+    assert "Do not advance into authoring." in instructions
+    assert "must not browse the web" not in instructions
+    assert "This version has no tool for that." not in instructions
     assert "studium_course_recorded" in tools
     assert "studium_research" not in tools
     assert "studium_profile_update" not in tools

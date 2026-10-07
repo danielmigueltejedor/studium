@@ -17,11 +17,14 @@ from studium.domain.enums import (
 )
 from studium.domain.profiles import (
     BOOK_TOPIC,
+    COURSE_PUBLIC_SOURCE_NEXT_ACTION,
     EVIDENCE_RULE,
+    TOPIC_BOOK_LOCAL_DECISIONS,
     TOPIC_BOOK_NEXT_ACTION,
     TOPIC_BOOK_STATUS,
-    TOPIC_BOOK_STOP_DECISIONS,
+    WRITING_STILL_UNAVAILABLE,
 )
+from studium.research.public_sources import public_source_count
 from studium.policy.authority import authority_assignment_error, source_class_error
 from studium.policy.trust import contains_directive, directive_changes_policy
 from studium.research.attachments import attachment_to_intake
@@ -108,8 +111,11 @@ def project_status(root: Path) -> dict[str, object]:
         payload["message"] = TOPIC_BOOK_STATUS
         payload["writing_available"] = False
         payload["course_guide_required"] = False
-        if local.get("status") in TOPIC_BOOK_STOP_DECISIONS:
+        if local.get("status") in TOPIC_BOOK_LOCAL_DECISIONS:
             payload["next_action"] = TOPIC_BOOK_NEXT_ACTION
+    elif state.get("state") == "SOURCE_DISCOVERY":
+        payload["next_action"] = COURSE_PUBLIC_SOURCE_NEXT_ACTION
+    _note_public_sources(root, payload)
     return payload
 
 
@@ -166,8 +172,11 @@ def agent_pack(root: Path, task: str | None = None) -> dict[str, object]:
         payload["message"] = TOPIC_BOOK_STATUS
         payload["writing_available"] = False
         payload["course_guide_required"] = False
-        if local_status in TOPIC_BOOK_STOP_DECISIONS:
+        if local_status in TOPIC_BOOK_LOCAL_DECISIONS:
             payload["next_action"] = TOPIC_BOOK_NEXT_ACTION
+    elif load_state(root).get("state") == "SOURCE_DISCOVERY":
+        payload["next_action"] = COURSE_PUBLIC_SOURCE_NEXT_ACTION
+    _note_public_sources(root, payload)
     return payload
 
 
@@ -328,9 +337,18 @@ def _register_result(
         "local_sources": local,
         "project_state": state.get("state"),
     }
-    if book_kind(root) == BOOK_TOPIC and local.get("status") in TOPIC_BOOK_STOP_DECISIONS:
+    if book_kind(root) == BOOK_TOPIC and local.get("status") in TOPIC_BOOK_LOCAL_DECISIONS:
         payload["next_action"] = TOPIC_BOOK_NEXT_ACTION
     return payload
+
+
+def _note_public_sources(root: Path, payload: dict[str, object]) -> None:
+    """Public bibliography does not open authoring."""
+
+    if public_source_count(root) < 1:
+        return
+    payload["writing_available"] = False
+    payload["writing_status"] = WRITING_STILL_UNAVAILABLE
 
 
 def source_audit(
