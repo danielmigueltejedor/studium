@@ -26,7 +26,7 @@ from studium.authoring.section_blocks import blocked_ids, blocked_sections, mark
 from studium.authoring.support import draft_source_usable
 from studium.domain.profiles import BOOK_TOPIC
 from studium.research.course_documents import list_course_documents
-from studium.research.public_sources import public_source_count
+from studium.research.public_sources import license_forbids_use
 from studium.storage.init_project import book_kind, load_project_toml, load_state
 from studium.storage.records import (
     BLUEPRINT,
@@ -48,23 +48,37 @@ from studium.storage.records import (
 _ASK = "ask the user"
 _FORMAT = "do not ask the user how to format the page."
 _MIN_SECTIONS = 8
-_MIN_SOURCES = 8
+_MIN_SOURCES = 12
 _MIN_EXPLANATION_WORDS = 400
+_MIN_EXPLANATION_SECTIONS = 2
+_LOCAL_REGISTRY = "sources/registry.jsonl"
+_PIRATE_KINDS = frozenset({"pirate", "pirated", "unauthorized", "unauthorised"})
 _TOO_SHORT = (
     "The study book is too short. Store at least 8 blueprint sections before writing or rendering."
 )
 _NEED_SOURCES = (
-    "Search open sources and record another public source. "
-    "Fewer than 8 distinct public sources are stored. Do not write or render yet."
+    "Search open sources and record another source. "
+    "Fewer than 12 distinct sources are stored. "
+    "User-provided local sources and open-web sources both count. "
+    "Pirate copies and forbidden licenses do not. Do not write or render yet."
+)
+_RUST_PROBLEM = (
+    "A Rust test cannot be the worked problem of a book that is not COMPUTER_SCIENCE. "
+    "Record a replayed computation or a numeric result cited from two excerpts."
+)
+_TWO_SECTIONS = (
+    "This chapter needs at least two section blocks of explanation, not a single Explicación, "
+    "plus the lead, one consejo, one worked problem, and one autoficha."
 )
 _CHAPTER = (
     "Write a full chapter in Spanish, several paragraphs of explanation as body text, not a summary and not a sentence. "
-    "The explanation needs at least 400 words. "
+    "The explanation needs at least two section blocks and 400 words. "
     "Use the same shape every chapter: a short lead, the explanation, at most one consejo, "
     "definitions only for new terms, one worked problem with enunciado, resolución, and respuesta, "
     "and one autoficha. "
     "Boxes are only those four. Cite stored excerpts. "
     "A formula must be quoted in an excerpt or replayed. "
+    "A worked problem in a book that is not COMPUTER_SCIENCE is a replayed computation or a numeric result cited from two excerpts. "
     "Code behavior needs two sources or a test that passed 3 times. "
     "Do not ask the user how to format the page. The renderer owns the boxes."
 )
@@ -152,6 +166,10 @@ def book_next(root: Path) -> dict[str, object]:
     quality = _chapter_gate(state, root, sections)
     if quality is not None:
         return quality
+    if _profile(root) == "COMPUTER_SCIENCE" and _foreign_rust(root) is None:
+        problem = _pending_problem(root, sections)
+        if problem is not None and problem.get("tool") == "studium_problem_check":
+            return _step(state, str(problem["tool"]), _arguments(problem.get("arguments")), str(problem["reason"]))
     pending = _pending_paragraph(root, sections)
     if pending is not None:
         section, excerpt_id = pending
@@ -404,6 +422,8 @@ def _source_without_excerpt(root: Path) -> dict[str, object] | None:
         if isinstance(record.get("source_id"), str)
     }
     for source in _usable_sources(root):
+        if not _source_counts(source):
+            continue
         if source.get("id") not in opened:
             return source
     return None
@@ -527,7 +547,7 @@ def _outline_gate(
             {},
             f"{_TOO_SHORT} Chapters follow the stored course guide.",
         )
-    if public_source_count(root) < _MIN_SOURCES:
+    if _usable_source_count(root) < _MIN_SOURCES:
         return _step(state, "studium_public_source_record", {}, _NEED_SOURCES)
     return None
 
@@ -537,8 +557,23 @@ def _chapter_gate(
     root: Path,
     sections: list[dict[str, str]],
 ) -> dict[str, object] | None:
-    """Explanation length, then a real resolution, then the autoficha."""
+    """Rust misuse, then two explanation sections, then the rest of the chapter."""
 
+    rust = _foreign_rust(root)
+    if rust is not None:
+        section_id = rust.get("section") if isinstance(rust.get("section"), str) else sections[0]["id"]
+        return _step(
+            state,
+            "studium_computation_check",
+            {"section": section_id},
+            _RUST_PROBLEM,
+            blocked=blocked_sections(root),
+        )
+    for section in sections:
+        if not _is_written(root, section["id"]):
+            continue
+        if _explanation_count(root, section["id"]) < _MIN_EXPLANATION_SECTIONS:
+            return _explanation_step(state, root, section, two_sections=True)
     for section in sections:
         if not _is_written(root, section["id"]):
             continue
@@ -566,22 +601,11 @@ def _chapter_gate(
     for section in sections:
         if not _is_written(root, section["id"]):
             continue
-        if _explanation_words(root, section["id"]) < _MIN_EXPLANATION_WORDS or _has_autoficha(root, section["id"]):
+        if _explanation_words(root, section["id"]) < _MIN_EXPLANATION_WORDS or _explanation_count(root, section["id"]) < _MIN_EXPLANATION_SECTIONS:
             continue
-        excerpt_id = _excerpt_for_section(root, section["id"])
-        if excerpt_id is None:
-            return _step(state, "studium_public_source_record", {}, _NEED_SOURCES)
-        return _step(
-            state,
-            "studium_paragraph_record",
-            {"section": section["id"], "excerpts": [excerpt_id], "role": "self_check"},
-            (
-                f"Add one autoficha for {section['id']} ({section['title']}). "
-                "The explanation above must still teach from the excerpts. "
-                + _CHAPTER
-            ),
-            blocked=blocked_sections(root),
-        )
+        gap = _shape_gap(state, root, section)
+        if gap is not None:
+            return gap
     return None
 
 
@@ -589,6 +613,77 @@ def _explanation_step(
     state: dict[str, object],
     root: Path,
     section: dict[str, str],
+    *,
+    two_sections: bool = False,
+) -> dict[str, object]:
+    excerpt_id = _excerpt_for_section(root, section["id"])
+    if excerpt_id is None:
+        return _step(state, "studium_public_source_record", {}, _NEED_SOURCES)
+    if two_sections:
+        reason = (
+            f"Write another explanation section for {section['id']} ({section['title']}). "
+            + _TWO_SECTIONS
+            + " "
+            + _CHAPTER
+        )
+    else:
+        reason = (
+            f"Write the explanation for {section['id']} ({section['title']}) as body text. "
+            "This chapter is too short. It needs at least 400 words of explanation. "
+            "Search open sources before writing. Cite a stored excerpt. "
+            + _CHAPTER
+        )
+    return _step(
+        state,
+        "studium_paragraph_record",
+        {"section": section["id"], "excerpts": [excerpt_id], "role": "explanation"},
+        reason,
+        blocked=blocked_sections(root),
+    )
+
+
+def _shape_gap(
+    state: dict[str, object],
+    root: Path,
+    section: dict[str, str],
+) -> dict[str, object] | None:
+    if not _has_role(root, section["id"], "purpose"):
+        return _role_step(state, root, section, "purpose", f"Write the lead for {section['id']} ({section['title']}). {_TWO_SECTIONS}")
+    if not _has_role(root, section["id"], "consejo"):
+        return _role_step(state, root, section, "consejo", f"Add one consejo for {section['id']} ({section['title']}). {_TWO_SECTIONS}")
+    if _profile(root) != "COMPUTER_SCIENCE" and not _worked_ok(root, section["id"]):
+        return _step(
+            state,
+            "studium_computation_check",
+            {"section": section["id"]},
+            (
+                f"Record a worked problem for {section['id']} ({section['title']}): "
+                "a replayed computation or a numeric result cited from two excerpts. "
+                + _RUST_PROBLEM
+            ),
+            blocked=blocked_sections(root),
+        )
+    if not _has_autoficha(root, section["id"]):
+        return _role_step(
+            state,
+            root,
+            section,
+            "self_check",
+            (
+                f"Add one autoficha for {section['id']} ({section['title']}). "
+                "The explanation above must still teach from the excerpts. "
+                + _CHAPTER
+            ),
+        )
+    return None
+
+
+def _role_step(
+    state: dict[str, object],
+    root: Path,
+    section: dict[str, str],
+    role: str,
+    reason: str,
 ) -> dict[str, object]:
     excerpt_id = _excerpt_for_section(root, section["id"])
     if excerpt_id is None:
@@ -596,19 +691,29 @@ def _explanation_step(
     return _step(
         state,
         "studium_paragraph_record",
-        {"section": section["id"], "excerpts": [excerpt_id], "role": "explanation"},
-        (
-            f"Write the explanation for {section['id']} ({section['title']}) as body text. "
-            "This chapter is too short. It needs at least 400 words of explanation. "
-            "Search open sources before writing. Cite a stored excerpt. "
-            + _CHAPTER
-        ),
+        {"section": section["id"], "excerpts": [excerpt_id], "role": role},
+        reason,
         blocked=blocked_sections(root),
     )
 
 
 def _is_written(root: Path, section_id: str) -> bool:
     return any(record.get("section") == section_id for record in supported_paragraphs(root))
+
+
+def _explanation_count(root: Path, section_id: str) -> int:
+    return len(_explanation_paragraphs(root, section_id))
+
+
+def _explanation_paragraphs(root: Path, section_id: str) -> list[dict[str, object]]:
+    found: list[dict[str, object]] = []
+    for record in supported_paragraphs(root):
+        if record.get("section") != section_id or record.get("role") in _BODY_SKIP:
+            continue
+        text = record.get("text") if isinstance(record.get("text"), str) else ""
+        if text.strip():
+            found.append(record)
+    return found
 
 
 def _explanation_words(root: Path, section_id: str) -> int:
@@ -665,6 +770,69 @@ def _arithmetic_only(text: str) -> bool:
     if not compact or not any(operator in compact for operator in "+-*/×÷·"):
         return False
     return _ARITHMETIC.fullmatch(compact) is not None
+
+
+def _usable_source_count(root: Path) -> int:
+    found: set[str] = set()
+    for record in _public_records(root):
+        identifier = record.get("id")
+        if isinstance(identifier, str) and _source_counts(record):
+            found.add("public:" + identifier)
+    for record in fold_by_id(root / _LOCAL_REGISTRY):
+        identifier = record.get("id")
+        if isinstance(identifier, str) and _source_counts(record):
+            found.add("local:" + identifier)
+    return len(found)
+
+
+def _source_counts(record: dict[str, object]) -> bool:
+    for key in ("kind", "probable_kind"):
+        kind = record.get(key)
+        if isinstance(kind, str) and kind.strip().lower() in _PIRATE_KINDS:
+            return False
+    if license_forbids_use(record.get("license_forbids")) or license_forbids_use(record.get("rights_status")):
+        return False
+    if record.get("rejection_reason"):
+        return False
+    classification = record.get("classification")
+    if isinstance(classification, str) and classification.strip().lower() in {"rejected", "unauthorized"}:
+        return False
+    return True
+
+
+def _foreign_rust(root: Path) -> dict[str, object] | None:
+    if _profile(root) == "COMPUTER_SCIENCE":
+        return None
+    for record in fold_by_id(root / PROBLEMS):
+        if record.get("kind") == "rust":
+            return record
+    return None
+
+
+def _has_role(root: Path, section_id: str, role: str) -> bool:
+    return any(record.get("section") == section_id and record.get("role") == role for record in supported_paragraphs(root))
+
+
+def _worked_ok(root: Path, section_id: str) -> bool:
+    if _profile(root) == "COMPUTER_SCIENCE":
+        return any(
+            record.get("section") == section_id and record.get("kind") == "rust"
+            for record in fold_by_id(root / PROBLEMS)
+        )
+    if _arithmetic_resolution(root, section_id) is not None:
+        return False
+    for record in fold_by_id(root / COMPUTATIONS):
+        if record.get("section") != section_id or record.get("status") != "replayed" or record.get("correct") is not True:
+            continue
+        expression = record.get("expression") if isinstance(record.get("expression"), str) else ""
+        if expression.strip() and not _arithmetic_only(expression):
+            return True
+    for record in fold_by_id(root / PROBLEMS):
+        if record.get("section") != section_id or record.get("kind") != "numeric":
+            continue
+        if record.get("corroboration") == "two_witnesses" or record.get("status") == "two_witnesses":
+            return True
+    return False
 
 
 def _has_autoficha(root: Path, section_id: str) -> bool:
