@@ -6,14 +6,17 @@ Acceptance is ``replayed``, not verified, and it is not absolute truth.
 """
 
 import hashlib
+import re
 from fractions import Fraction
 from pathlib import Path
 
 import ast
 
 from studium.authoring.blueprint import current_sections
+from studium.authoring.excerpts import excerpts_by_id
+from studium.authoring.paragraphs import supported_paragraphs
 from studium.policy.trust import directive_changes_policy
-from studium.storage.init_project import load_state_holding_lock
+from studium.storage.init_project import load_state, load_state_holding_lock
 from studium.storage.locking import ProjectLocked, project_lock
 from studium.storage.migrate import utc_now
 from studium.storage.records import COMPUTATIONS, allocate_id, append_jsonl, fold_by_id
@@ -77,6 +80,9 @@ def check_computation(
         server_result = evaluate(parsed)
     except ComputationError as exc:
         return _error("computation.invalid", str(exc))
+    refusal = _small_integer_refusal(root, parsed, section_id)
+    if refusal is not None:
+        return refusal
     return _store(
         root,
         identifier=None,
@@ -118,6 +124,9 @@ def _replay(
     except ComputationError as exc:
         return _error("computation.invalid", str(exc))
     section = current.get("section") if isinstance(current.get("section"), str) else None
+    refusal = _small_integer_refusal(root, stored_expression, section)
+    if refusal is not None:
+        return refusal
     return _store(
         root,
         identifier=identifier,
@@ -169,6 +178,80 @@ def _store(
     if not matched:
         body["message"] = "The server evaluated a different result. The reported number was not accepted."
     return body
+
+
+def _small_integer_refusal(root: Path, expression: str, section_id: str | None) -> dict[str, object] | None:
+    """Reject toy arithmetic unless one cited excerpt contains every number."""
+
+    numbers = _small_integer_numbers(expression)
+    if numbers is None or _cited_excerpt_has_numbers(root, section_id, numbers):
+        return None
+    state = load_state(root)
+    return {
+        "status": "computation.ungrounded",
+        "message": "The expression is only small-integer arithmetic and its numbers are not in a cited excerpt.",
+        "accepted": False,
+        "correct": False,
+        "released": state.get("state") == "RELEASED",
+        "applied": False,
+    }
+
+
+def _small_integer_numbers(expression: str) -> set[str] | None:
+    """Integers combined with + - * / . A decimal, name, power, or unit is not this class."""
+
+    try:
+        tree = ast.parse(expression.strip(), mode="eval")
+    except SyntaxError:
+        return None
+    if not isinstance(tree, ast.Expression):
+        return None
+    numbers: set[str] = set()
+    ok, binary = _walk_small(tree.body, numbers, False)
+    if not ok or not binary or not numbers:
+        return None
+    return numbers
+
+
+def _walk_small(node: ast.AST, numbers: set[str], binary: bool) -> tuple[bool, bool]:
+    if isinstance(node, ast.Constant):
+        value = node.value
+        if isinstance(value, bool) or not isinstance(value, int):
+            return False, binary
+        numbers.add(str(value))
+        return True, binary
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub)):
+        return _walk_small(node.operand, numbers, binary)
+    if isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Add, ast.Sub, ast.Mult, ast.Div)):
+        left_ok, _left_binary = _walk_small(node.left, numbers, True)
+        if not left_ok:
+            return False, True
+        return _walk_small(node.right, numbers, True)
+    return False, binary
+
+
+def _cited_excerpt_has_numbers(root: Path, section_id: str | None, numbers: set[str]) -> bool:
+    stored = excerpts_by_id(root)
+    for paragraph in supported_paragraphs(root):
+        if section_id is not None and paragraph.get("section") != section_id:
+            continue
+        excerpt_ids = paragraph.get("excerpts")
+        if not isinstance(excerpt_ids, list):
+            continue
+        for excerpt_id in excerpt_ids:
+            if not isinstance(excerpt_id, str):
+                continue
+            record = stored.get(excerpt_id)
+            if not isinstance(record, dict):
+                continue
+            text = record.get("text")
+            if isinstance(text, str) and all(_number_in_text(text, number) for number in numbers):
+                return True
+    return False
+
+
+def _number_in_text(text: str, number: str) -> bool:
+    return re.search(rf"(?<!\d){re.escape(number)}(?!\d)", text) is not None
 
 
 def _new_inputs(

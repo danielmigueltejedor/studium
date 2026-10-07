@@ -132,6 +132,53 @@ def check_problem(root: Path, problem_id: object) -> dict[str, object]:
     return _check_rust(root, current)
 
 
+def remove_problem(
+    root: Path,
+    problem_id: object,
+    *,
+    actor: dict[str, object] | None = None,
+) -> dict[str, object]:
+    """Delete one stored problem. Sources and paragraphs stay.
+
+    A missing id is an error. This does not change project state and does not
+    release the book.
+    """
+
+    identifier = _identifier(problem_id)
+    if identifier is None:
+        return _error("mcp.invalid_input", "id is required")
+    current = _find(root, identifier)
+    if current is None:
+        return _error("problem.not_found", "no stored problem with that id")
+    try:
+        with project_lock(root):
+            again = _find(root, identifier)
+            if again is None:
+                return _error("problem.not_found", "no stored problem with that id")
+            append_jsonl(
+                root / PROBLEMS,
+                {
+                    "schema_version": "1.0.0",
+                    "id": identifier,
+                    "deleted": True,
+                    "recorded_at": utc_now(),
+                },
+            )
+            _audit(root, record=again, actor=actor, operation="remove_problem")
+            fresh = load_state_holding_lock(root)
+    except ProjectLocked:
+        return _error("storage.locked", "project is locked")
+    return {
+        "status": "removed",
+        "problem_id": identifier,
+        "message": "The problem is removed from the book. Sources and paragraphs are unchanged.",
+        "released": fresh.get("state") == "RELEASED",
+        "applied": False,
+        "project_state": fresh.get("state"),
+        "local_sources": _local(fresh),
+    }
+
+
 def _check_numeric(root: Path, record: dict[str, object]) -> dict[str, object]:
     excerpts = record.get("excerpts")
     stored = excerpts_by_id(root)

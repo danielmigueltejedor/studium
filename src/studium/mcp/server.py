@@ -38,7 +38,7 @@ from studium.authoring.paragraphs import (
     record_paragraph,
     replace_paragraph,
 )
-from studium.authoring.problems import check_problem, list_problems, record_problem
+from studium.authoring.problems import check_problem, list_problems, record_problem, remove_problem
 from studium.authoring.render import render_draft
 from studium.authoring.verify import verify_book
 from studium.research.course_documents import get_course_document, list_course_documents, record_course_document
@@ -128,6 +128,7 @@ _TOOLS: tuple[dict[str, object], ...] = (
             "under 400 words of explanation, a missing lead, consejo, worked problem, or autoficha, "
             "a worked problem's resolution is only an arithmetic expression, or a Rust test is the worked problem "
             "of a book that is not COMPUTER_SCIENCE. "
+            "Remove that stored Rust problem with studium_problem_remove before recording a new computation. "
             "User-provided local sources and open-web sources both count. Pirate copies and forbidden licenses do not. "
             "The order is write, then audit, then contradiction scan, then review, then render. "
             "Each chapter is a short lead, several paragraphs of explanation as body text, at most one consejo, "
@@ -359,6 +360,15 @@ _TOOLS: tuple[dict[str, object], ...] = (
         ),
     },
     {
+        "name": "studium_problem_remove",
+        "class": "WRITE",
+        "description": (
+            "Delete one stored problem by id. Later renders omit it. "
+            "Does not delete sources or paragraphs. "
+            "A missing id is an error. Does not move the book to RELEASED."
+        ),
+    },
+    {
         "name": "studium_problem_check",
         "class": "WRITE",
         "description": (
@@ -441,6 +451,8 @@ _TOOLS: tuple[dict[str, object], ...] = (
         "description": (
             "Store an expression and the reported result, then evaluate that expression again. "
             "The result is accepted only when the server's value matches. "
+            "An expression that uses only integers and the four operators is accepted only when "
+            "every one of those numbers appears in one excerpt cited by a paragraph. "
             "Do not trust a number the model reports. "
             "A match is replayed, not verified, and it is not absolute truth. "
             "Does not fetch URLs and does not move the book to RELEASED."
@@ -655,6 +667,8 @@ _INSTRUCTIONS = (
             "Call studium_problem_record with a prompt and either a Rust test or a numeric answer tied to two stored excerpt ids. "
             "studium_problem_check runs a Rust test 3 times with a timeout and no network. "
             "The problem is checked only when all 3 runs pass. "
+            "studium_problem_remove deletes one problem by id. A missing id is an error. "
+            "It does not delete sources or paragraphs. "
             "A numeric problem is two_witnesses only when the two excerpts come from different public sources, and it is not verified. "
             "Two excerpts that agree are two_witnesses, not verified and not absolute truth. "
             "A model-written solution is not correct until the check passes. "
@@ -663,6 +677,7 @@ _INSTRUCTIONS = (
             "Fill every empty section from an opened excerpt, or leave the gap. "
             "Where the section is code or a replayable calculation, add at least one checked problem. "
             "studium_computation_check stores the expression and the result and accepts it only when the server evaluates the same expression again. "
+            "An expression that uses only integers and the four operators is accepted only when those numbers appear in one cited excerpt. "
             "Do not trust a number the model reports. "
             "A figure inside an explanation must be executed. "
             "studium_figure_record stores a caption, the blueprint section, TikZ or Python source, "
@@ -708,6 +723,7 @@ _INSTRUCTIONS = (
             "a missing lead, consejo, worked problem, or autoficha, "
             "a worked problem's resolution is only an arithmetic expression, "
             "or a Rust test is the worked problem of a book that is not COMPUTER_SCIENCE. "
+            "Remove that stored Rust problem with studium_problem_remove before recording a new computation. "
             "A programming book may keep the 3-pass rustc check. "
             "User-provided local sources and open-web sources both count. Pirate copies and forbidden licenses do not. "
             "A worked problem outside COMPUTER_SCIENCE is a replayed computation or a numeric result cited from two excerpts. "
@@ -1129,6 +1145,12 @@ def _dispatch(session: McpSession, name: str, arguments: Mapping[str, object]) -
         )
     if name == "studium_problem_check":
         return check_problem(root, arguments.get("id") if "id" in arguments else None)
+    if name == "studium_problem_remove":
+        return remove_problem(
+            root,
+            arguments.get("id") if "id" in arguments else None,
+            actor=actor if isinstance(actor, dict) else None,
+        )
     if name == "studium_figure_record":
         return record_figure(
             root,
@@ -1995,6 +2017,19 @@ def _schema(tool: Mapping[str, object]) -> dict[str, object]:
             "properties": {
                 "project": _project_property(),
                 "id": {"type": "string", "description": "Problem id from studium_problem_record."},
+            },
+            "required": ["id"],
+            "additionalProperties": True,
+        }
+    elif name == "studium_problem_remove":
+        input_schema = {
+            "type": "object",
+            "properties": {
+                "project": _project_property(),
+                "id": {
+                    "type": "string",
+                    "description": "Problem id to delete. Sources and paragraphs are not deleted.",
+                },
             },
             "required": ["id"],
             "additionalProperties": True,
