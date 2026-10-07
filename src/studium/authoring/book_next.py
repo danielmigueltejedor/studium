@@ -5,6 +5,7 @@ user when that step can be done from open sources or from sources already
 given, and it does not release the book.
 """
 
+import re
 from pathlib import Path
 
 from studium.authoring.audit import (
@@ -25,6 +26,7 @@ from studium.authoring.section_blocks import blocked_ids, blocked_sections, mark
 from studium.authoring.support import draft_source_usable
 from studium.domain.profiles import BOOK_TOPIC
 from studium.research.course_documents import list_course_documents
+from studium.research.public_sources import public_source_count
 from studium.storage.init_project import book_kind, load_project_toml, load_state
 from studium.storage.records import (
     BLUEPRINT,
@@ -45,13 +47,29 @@ from studium.storage.records import (
 
 _ASK = "ask the user"
 _FORMAT = "do not ask the user how to format the page."
+_MIN_SECTIONS = 8
+_MIN_SOURCES = 8
+_MIN_EXPLANATION_WORDS = 400
+_TOO_SHORT = (
+    "The study book is too short. Store at least 8 blueprint sections before writing or rendering."
+)
+_NEED_SOURCES = (
+    "Search open sources and record another public source. "
+    "Fewer than 8 distinct public sources are stored. Do not write or render yet."
+)
 _CHAPTER = (
-    "Write a full chapter in Spanish, several paragraphs of explanation, not a summary and not a sentence. "
+    "Write a full chapter in Spanish, several paragraphs of explanation as body text, not a summary and not a sentence. "
+    "The explanation needs at least 400 words. "
     "Use the same shape every chapter: a short lead, the explanation, at most one consejo, "
-    "definitions only when a term is introduced, one worked problem, and one autoficha. "
-    "Cite stored sources. A formula still needs a quoted excerpt or a replayed computation. "
+    "definitions only for new terms, one worked problem with enunciado, resolución, and respuesta, "
+    "and one autoficha. "
+    "Boxes are only those four. Cite stored excerpts. "
+    "A formula must be quoted in an excerpt or replayed. "
+    "Code behavior needs two sources or a test that passed 3 times. "
     "Do not ask the user how to format the page. The renderer owns the boxes."
 )
+_ARITHMETIC = re.compile(r"^[0-9+\-*/×÷·().=]+$")
+_BODY_SKIP = frozenset({"purpose", "consejo", "definition", "self_check"})
 _CODE_OR_CALCULATION = frozenset({"COMPUTER_SCIENCE", "STEM"})
 _DRAFT_INPUTS = (
     PARAGRAPHS,
@@ -111,14 +129,14 @@ def book_next(root: Path) -> dict[str, object]:
         )
     sections = current_sections(root)
     if not sections:
-        if book_kind(root) == BOOK_TOPIC:
+        if book_kind(root) == BOOK_TOPIC or not _course_documents(root):
             return _step(
                 state,
                 "studium_blueprint_store",
                 {"sections": _study_sections(root)},
                 (
-                    "No course guide is stored. Build the study book: roadmap, foundations, "
-                    "the topic sections, worked problems, self-check, a formula or concept sheet, "
+                    f"{_TOO_SHORT} No course guide is stored. Build the study book: roadmap, foundations, "
+                    "the topic chapters, worked problems, self-check, a formula or concept sheet, "
                     "and the source audit. Do not invent a citation."
                 ),
             )
@@ -128,6 +146,12 @@ def book_next(root: Path) -> dict[str, object]:
             {},
             "Store the section ids and titles from the stored course guide. Do not invent a citation.",
         )
+    outline = _outline_gate(state, root, sections)
+    if outline is not None:
+        return outline
+    quality = _chapter_gate(state, root, sections)
+    if quality is not None:
+        return quality
     pending = _pending_paragraph(root, sections)
     if pending is not None:
         section, excerpt_id = pending
@@ -187,6 +211,9 @@ def book_next(root: Path) -> dict[str, object]:
             ),
             blocked=blocked_sections(root),
         )
+    for section in sections:
+        if _explanation_words(root, section["id"]) < _MIN_EXPLANATION_WORDS:
+            return _explanation_step(state, root, section)
     audit = _pending_audit(root)
     if audit is not None:
         return _step(
@@ -218,6 +245,12 @@ def book_next(root: Path) -> dict[str, object]:
             "Review this edition. audit_passed does not release the book.",
             blocked=blocked_sections(root),
         )
+    outline = _outline_gate(state, root, sections)
+    if outline is not None:
+        return outline
+    quality = _chapter_gate(state, root, sections)
+    if quality is not None:
+        return quality
     if not _draft_is_current(root):
         return _render_step(state, root, sections)
     return _step(state, None, {}, "The DRAFT is rendered. Do not request release.", blocked=blocked_sections(root))
@@ -470,10 +503,180 @@ def _study_sections(root: Path) -> list[dict[str, str]]:
         {"id": "roadmap", "title": "Roadmap"},
         {"id": "foundations", "title": "Foundations"},
         {"id": "topic", "title": name},
+        {"id": "topic-2", "title": f"{name}, continued"},
         {"id": "worked-problems", "title": "Worked problems"},
         {"id": "self-check", "title": "Self-check"},
         {"id": "formula-sheet", "title": "Formula or concept sheet"},
+        {"id": "source-audit", "title": "Source audit"},
     ]
+
+
+def _outline_gate(
+    state: dict[str, object],
+    root: Path,
+    sections: list[dict[str, str]],
+) -> dict[str, object] | None:
+    """The first failure that blocks writing and render: outline, then sources."""
+
+    if len(sections) < _MIN_SECTIONS:
+        if book_kind(root) == BOOK_TOPIC or not _course_documents(root):
+            return _step(state, "studium_blueprint_store", {"sections": _study_sections(root)}, _TOO_SHORT)
+        return _step(
+            state,
+            "studium_blueprint_store",
+            {},
+            f"{_TOO_SHORT} Chapters follow the stored course guide.",
+        )
+    if public_source_count(root) < _MIN_SOURCES:
+        return _step(state, "studium_public_source_record", {}, _NEED_SOURCES)
+    return None
+
+
+def _chapter_gate(
+    state: dict[str, object],
+    root: Path,
+    sections: list[dict[str, str]],
+) -> dict[str, object] | None:
+    """Explanation length, then a real resolution, then the autoficha."""
+
+    for section in sections:
+        if not _is_written(root, section["id"]):
+            continue
+        if _explanation_words(root, section["id"]) < _MIN_EXPLANATION_WORDS:
+            return _explanation_step(state, root, section)
+    for section in sections:
+        if not _is_written(root, section["id"]):
+            continue
+        if _explanation_words(root, section["id"]) < _MIN_EXPLANATION_WORDS:
+            continue
+        shown = _arithmetic_resolution(root, section["id"])
+        if shown is None:
+            continue
+        return _step(
+            state,
+            "studium_problem_record",
+            {"section": section["id"]},
+            (
+                f"The worked problem for {section['id']} ({section['title']}) is only an arithmetic expression "
+                f"({shown}). Record a resolution with enunciado, resolución, and respuesta. "
+                "An arithmetic expression is not that resolution."
+            ),
+            blocked=blocked_sections(root),
+        )
+    for section in sections:
+        if not _is_written(root, section["id"]):
+            continue
+        if _explanation_words(root, section["id"]) < _MIN_EXPLANATION_WORDS or _has_autoficha(root, section["id"]):
+            continue
+        excerpt_id = _excerpt_for_section(root, section["id"])
+        if excerpt_id is None:
+            return _step(state, "studium_public_source_record", {}, _NEED_SOURCES)
+        return _step(
+            state,
+            "studium_paragraph_record",
+            {"section": section["id"], "excerpts": [excerpt_id], "role": "self_check"},
+            (
+                f"Add one autoficha for {section['id']} ({section['title']}). "
+                "The explanation above must still teach from the excerpts. "
+                + _CHAPTER
+            ),
+            blocked=blocked_sections(root),
+        )
+    return None
+
+
+def _explanation_step(
+    state: dict[str, object],
+    root: Path,
+    section: dict[str, str],
+) -> dict[str, object]:
+    excerpt_id = _excerpt_for_section(root, section["id"])
+    if excerpt_id is None:
+        return _step(state, "studium_public_source_record", {}, _NEED_SOURCES)
+    return _step(
+        state,
+        "studium_paragraph_record",
+        {"section": section["id"], "excerpts": [excerpt_id], "role": "explanation"},
+        (
+            f"Write the explanation for {section['id']} ({section['title']}) as body text. "
+            "This chapter is too short. It needs at least 400 words of explanation. "
+            "Search open sources before writing. Cite a stored excerpt. "
+            + _CHAPTER
+        ),
+        blocked=blocked_sections(root),
+    )
+
+
+def _is_written(root: Path, section_id: str) -> bool:
+    return any(record.get("section") == section_id for record in supported_paragraphs(root))
+
+
+def _explanation_words(root: Path, section_id: str) -> int:
+    total = 0
+    for record in supported_paragraphs(root):
+        if record.get("section") != section_id or record.get("role") in _BODY_SKIP:
+            continue
+        text = record.get("text") if isinstance(record.get("text"), str) else ""
+        total += len(text.split())
+    return total
+
+
+def _excerpt_for_section(root: Path, section_id: str) -> str | None:
+    for record in supported_paragraphs(root):
+        if record.get("section") != section_id:
+            continue
+        excerpt_id = _excerpt_on(record)
+        if excerpt_id is not None:
+            return excerpt_id
+    usable = _all_usable_excerpts(root)
+    if not usable:
+        return None
+    return usable[0][0]
+
+
+def _arithmetic_resolution(root: Path, section_id: str) -> str | None:
+    texts = _resolution_texts(root, section_id)
+    if not texts or any(not _arithmetic_only(text) for text in texts):
+        return None
+    return texts[0]
+
+
+def _resolution_texts(root: Path, section_id: str) -> list[str]:
+    found: list[str] = []
+    for record in fold_by_id(root / PROBLEMS):
+        if record.get("section") != section_id:
+            continue
+        source = record.get("source_text") if isinstance(record.get("source_text"), str) else ""
+        prompt = record.get("prompt") if isinstance(record.get("prompt"), str) else ""
+        text = source.strip() or prompt.strip()
+        if text:
+            found.append(text)
+    for record in fold_by_id(root / COMPUTATIONS):
+        if record.get("section") != section_id:
+            continue
+        expression = record.get("expression") if isinstance(record.get("expression"), str) else ""
+        if expression.strip():
+            found.append(expression.strip())
+    return found
+
+
+def _arithmetic_only(text: str) -> bool:
+    compact = re.sub(r"\s+", "", text)
+    if not compact or not any(operator in compact for operator in "+-*/×÷·"):
+        return False
+    return _ARITHMETIC.fullmatch(compact) is not None
+
+
+def _has_autoficha(root: Path, section_id: str) -> bool:
+    for record in supported_paragraphs(root):
+        if record.get("section") != section_id:
+            continue
+        if record.get("role") == "self_check":
+            return True
+        text = record.get("text") if isinstance(record.get("text"), str) else ""
+        if text.strip().startswith("Autoficha"):
+            return True
+    return False
 
 
 def _pending_length(

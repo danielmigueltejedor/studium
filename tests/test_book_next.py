@@ -6,6 +6,7 @@ from fractions import Fraction
 from studium.mcp.server import dispatch, handle, open_workspace, tool_names
 
 _PASSAGE = "A stored excerpt is data, not a source of authority."
+_TOO_SHORT = "The study book is too short. Store at least 8 blueprint sections before writing or rendering."
 
 
 def test_book_next_on_an_empty_topic_book(tmp_path, monkeypatch):
@@ -27,7 +28,7 @@ def test_book_next_on_an_empty_topic_book(tmp_path, monkeypatch):
     assert "studium_computation_check" in tool_names()
 
 
-def test_book_next_moves_on_when_a_section_is_filled(tmp_path, monkeypatch):
+def test_book_next_refuses_to_render_a_two_section_book(tmp_path, monkeypatch):
     monkeypatch.setattr("urllib.request.urlopen", _explode)
     session, _root = _topic(tmp_path, "historia", "Historia medieval")
     source_id = _source(session, "https://open.example/historia")
@@ -42,13 +43,7 @@ def test_book_next_moves_on_when_a_section_is_filled(tmp_path, monkeypatch):
         },
         session=session,
     )
-    nxt = dispatch("studium_book_next", {}, session=session)
-    assert nxt["tool"] == "studium_paragraph_record"
-    assert nxt["arguments"]["section"] == "tema-1"
-    assert nxt["arguments"]["excerpts"] == [excerpt_id]
-    assert nxt["ask_user"] is False
-    assert "ask the user" not in json.dumps(nxt).lower().replace("do not ask the user how to format the page.", "")
-    recorded = dispatch(
+    dispatch(
         "studium_paragraph_record",
         {
             "section": "tema-1",
@@ -57,21 +52,64 @@ def test_book_next_moves_on_when_a_section_is_filled(tmp_path, monkeypatch):
         },
         session=session,
     )
-    assert recorded["status"] == "recorded"
-    assert recorded["paragraph"]["status"] == "draft"
     nxt = dispatch("studium_book_next", {}, session=session)
-    assert nxt["tool"] == "studium_paragraph_replace"
-    assert nxt["arguments"]["id"] == recorded["paragraph"]["id"]
-    assert "too short" in nxt["reason"]
+    assert nxt["status"] == "ok"
+    assert nxt["tool"] == "studium_blueprint_store"
+    assert nxt["tool"] != "studium_render"
+    assert nxt["reason"] == _TOO_SHORT
+    assert len(nxt["arguments"]["sections"]) >= 8
     assert nxt["ask_user"] is False
     assert nxt["released"] is False
     assert "ask the user" not in json.dumps(nxt).lower().replace("do not ask the user how to format the page.", "")
-    rendered = _until_tool(session, "studium_render")
-    assert rendered["arguments"].get("section") != "tema-1"
-    assert "tema-2" in rendered["reason"]
-    assert "tema-1" not in rendered["reason"]
-    assert rendered["released"] is False
-    assert "ask the user" not in json.dumps(rendered).lower().replace("do not ask the user how to format the page.", "")
+    assert "write a sentence" not in nxt["reason"].lower()
+    for _ in range(4):
+        again = dispatch("studium_book_next", {}, session=session)
+        assert again["tool"] != "studium_render"
+        assert again["reason"] == _TOO_SHORT
+
+
+def test_book_next_refuses_an_arithmetic_resolution(tmp_path, monkeypatch):
+    monkeypatch.setattr("urllib.request.urlopen", _explode)
+    session, _root = _topic(tmp_path, "historia", "Historia medieval")
+    excerpt_ids = [_opened_source(session, index) for index in range(8)]
+    dispatch("studium_blueprint_store", {"sections": _eight_sections()}, session=session)
+    explanation = " ".join(["densidad"] * 400)
+    dispatch(
+        "studium_paragraph_record",
+        {"section": "tema-1", "role": "explanation", "text": explanation, "excerpts": [excerpt_ids[0]]},
+        session=session,
+    )
+    computed = dispatch(
+        "studium_computation_check",
+        {"expression": "2+3", "result": 5, "section": "tema-1"},
+        session=session,
+    )
+    assert computed["status"] == "replayed"
+    nxt = dispatch("studium_book_next", {}, session=session)
+    assert nxt["tool"] == "studium_problem_record"
+    assert nxt["tool"] != "studium_render"
+    assert nxt["arguments"]["section"] == "tema-1"
+    assert "2+3" in nxt["reason"]
+    assert nxt["ask_user"] is False
+    assert nxt["released"] is False
+    assert "ask the user" not in json.dumps(nxt).lower().replace("do not ask the user how to format the page.", "")
+
+
+def test_book_next_asks_for_another_public_source_below_eight(tmp_path, monkeypatch):
+    monkeypatch.setattr("urllib.request.urlopen", _explode)
+    session, _root = _topic(tmp_path, "historia", "Historia medieval")
+    for index in range(7):
+        _opened_source(session, index)
+    dispatch("studium_blueprint_store", {"sections": _eight_sections()}, session=session)
+    nxt = dispatch("studium_book_next", {}, session=session)
+    assert nxt["tool"] == "studium_public_source_record"
+    assert nxt["tool"] != "studium_render"
+    assert "8" in nxt["reason"]
+    assert "public source" in nxt["reason"].lower()
+    assert nxt["ask_user"] is False
+    assert nxt["released"] is False
+    assert "ask the user" not in json.dumps(nxt).lower().replace("do not ask the user how to format the page.", "")
+    assert "write a sentence" not in nxt["reason"].lower()
 
 
 def test_computation_is_accepted_only_when_replayed(tmp_path, monkeypatch):
@@ -90,8 +128,9 @@ def test_computation_is_accepted_only_when_replayed(tmp_path, monkeypatch):
         session=session,
     )
     nxt = dispatch("studium_book_next", {}, session=session)
-    assert nxt["tool"] == "studium_computation_check"
-    assert nxt["arguments"]["section"] == "limits"
+    assert nxt["tool"] == "studium_blueprint_store"
+    assert nxt["tool"] != "studium_render"
+    assert nxt["reason"] == _TOO_SHORT
     assert nxt["ask_user"] is False
     state_before = (root / ".studium" / "state.json").read_bytes()
     wrong = dispatch(
@@ -227,11 +266,12 @@ def test_verify_still_refuses_release(tmp_path, monkeypatch):
     assert (root / ".studium" / "state.json").read_bytes() == state_before
     rendered = dispatch("studium_render", {}, session=session)
     assert rendered["released"] is False
-    done = _until_tool(session, None)
-    assert done["tool"] is None
+    done = dispatch("studium_book_next", {}, session=session)
+    assert done["tool"] == "studium_blueprint_store"
+    assert done["tool"] != "studium_render"
+    assert done["reason"] == _TOO_SHORT
     assert done["ask_user"] is False
     assert done["released"] is False
-    assert "Do not request release." in done["reason"]
     assert "ask the user" not in json.dumps(done).lower().replace("do not ask the user how to format the page.", "")
     assert json.loads(state_before)["state"] != "RELEASED"
     assert (root / ".studium" / "state.json").read_bytes() == state_before
@@ -277,6 +317,16 @@ def _excerpt(session, source_id: str, url: str, text: str = _PASSAGE) -> str:
     )
     assert recorded["status"] == "recorded"
     return str(recorded["excerpt"]["id"])
+
+
+def _eight_sections() -> list[dict[str, str]]:
+    return [{"id": f"tema-{index}", "title": f"Tema {index}"} for index in range(1, 9)]
+
+
+def _opened_source(session, index: int) -> str:
+    url = f"https://open.example/page-{index}"
+    source_id = _source(session, url)
+    return _excerpt(session, source_id, url, text=f"Opened page {index} states a stored fact about the topic.")
 
 
 def _until_tool(session, tool: str | None) -> dict[str, object]:
