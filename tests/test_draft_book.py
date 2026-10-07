@@ -178,8 +178,10 @@ def test_spanish_draft_uses_boxes_without_internal_ids(tmp_path, monkeypatch):
     assert r"\chapter{Conservación}" in tex
     assert "Tema 1:" not in tex
     assert "Tema 2:" not in tex
-    assert r"\chapter{Energía}" in tex
-    assert "Esta sección está vacía." in tex
+    assert r"\chapter{Energía}" not in tex
+    assert "Esta sección está vacía." not in tex
+    assert "Energía: todavía no está escrito" in tex
+    assert tex.index("Plan de estudio") < tex.index("Energía: todavía no está escrito")
     for heading in (
         "Prefacio",
         "Cómo usar este libro",
@@ -363,7 +365,7 @@ def test_explanation_stays_outside_the_one_worked_problem_box(tmp_path, monkeypa
     assert "Respuesta" in tex
     outside = _outside_boxes(tex)
     assert explanation in outside
-    assert r"\section{Explicación}" in outside
+    assert r"\section{Explicación}" not in tex
     assert rendered["released"] is False
     assert rendered["project_state"] != "RELEASED"
 
@@ -459,7 +461,7 @@ def test_consejo_paragraph_becomes_a_tcolorbox_with_babel_spanish(tmp_path, monk
     assert "No mezcles las unidades en el mismo término." not in outside
     assert "Se llama densidad a la masa por unidad de volumen." not in outside
     assert "Escribe la relación con tus palabras." not in outside
-    assert r"\section{Explicación}" in outside
+    assert r"\section{Explicación}" not in tex
     assert rendered["released"] is False
     if find_engine() is not None:
         assert rendered["status"] == "rendered"
@@ -567,7 +569,10 @@ def test_book_next_does_not_render_a_short_blocked_book(tmp_path, monkeypatch):
         assert "ask the user" not in json.dumps(nxt).lower().replace("do not ask the user how to format the page.", "")
     rendered = dispatch("studium_render", {}, session=session)
     tex = (root / "latex" / "draft.tex").read_text(encoding="utf-8")
-    assert "Gap: this section has no paragraph tied to an opened excerpt." in tex
+    assert "Gap: this section has no paragraph tied to an opened excerpt." not in tex
+    assert r"\chapter{Origenes}" not in tex
+    assert "Origenes: not written yet" in tex
+    assert tex.index("Study plan") < tex.index("Origenes: not written yet")
     assert rendered["released"] is False
     assert json.loads((root / ".studium" / "state.json").read_text(encoding="utf-8"))["state"] != "RELEASED"
 
@@ -663,6 +668,83 @@ def test_wuolah_note_and_forbidden_license(tmp_path, monkeypatch):
         session=session,
     )
     assert video["status"] != "recorded"
+
+
+def test_explanation_paragraphs_empty_chapters_and_figure_space(tmp_path, monkeypatch):
+    monkeypatch.setattr("urllib.request.urlopen", _explode)
+    session = open_workspace(str(tmp_path))
+    created = dispatch(
+        "studium_project_create",
+        {"slug": "programacion", "topic": "Historia de la programación", "language": "es"},
+        session=session,
+    )
+    assert created["status"] == "created"
+    root = tmp_path / "programacion"
+    source_id = _source(session, "https://open.example/programacion")
+    excerpt_id = _excerpt(session, source_id, "https://open.example/programacion", "La página abierta describe el programa. 2")
+    dispatch(
+        "studium_blueprint_store",
+        {
+            "sections": [
+                {"id": "maquinas", "title": "Máquinas"},
+                {"id": "sql", "title": "SQL"},
+            ]
+        },
+        session=session,
+    )
+    first = "Primera explicación del capítulo sobre el control."
+    second = "Segunda explicación sigue en el mismo cuerpo."
+    third = "Tercera explicación cierra el cuerpo."
+    generic = "Explicación\nEsto no es un título de sección."
+    titled = "Cinemática\nEl movimiento tiene su propio apartado."
+    for text in (first, second, third, generic, titled):
+        dispatch(
+            "studium_paragraph_record",
+            {"section": "maquinas", "role": "explanation", "text": text, "excerpts": [excerpt_id]},
+            session=session,
+        )
+    recorded = dispatch(
+        "studium_figure_record",
+        {
+            "section": "maquinas",
+            "caption": "Un dibujo junto al texto.",
+            "kind": "tikz",
+            "source": r"\draw (0,0) -- (1,1);",
+            "excerpts": [excerpt_id],
+        },
+        session=session,
+    )
+    checked = dispatch("studium_figure_check", {"id": recorded["figure"]["id"]}, session=session)
+    assert checked["checked"] is True
+    assert checked["released"] is False
+    rendered = dispatch("studium_render", {}, session=session)
+    tex = (root / "latex" / "draft.tex").read_text(encoding="utf-8")
+    body, _appendix, _rest = tex.partition(r"\appendix")
+    assert r"\section{Explicación}" not in tex
+    assert r"\section{Explanation}" not in tex
+    assert body.count(r"\section{") == 1
+    assert r"\section{Cinemática}" in body
+    assert body.index(first) < body.index(second) < body.index(third)
+    assert body.index(third) < body.index("Esto no es un título de sección.")
+    assert body.index("Esto no es un título de sección.") < body.index(r"\section{Cinemática}")
+    assert r"\chapter{SQL}" not in tex
+    assert "SQL" not in body
+    assert "SQL: todavía no está escrito" in tex
+    assert tex.index("Plan de estudio") < tex.index("SQL: todavía no está escrito")
+    picture = tex.index(r"\begin{tikzpicture}")
+    caption = tex.index("Un dibujo junto al texto.")
+    opened = tex.rindex(r"\par\vspace{\baselineskip}", 0, picture)
+    closed = tex.index(r"\par\vspace{\baselineskip}", caption)
+    assert opened < picture < caption < closed
+    assert r"\begin{minipage}" in tex[opened:picture]
+    assert r"\end{minipage}" in tex[caption:closed]
+    assert r"\begin{figure}" not in tex
+    assert r"\textheight/100*38" in tex
+    nxt = dispatch("studium_book_next", {}, session=session)
+    assert nxt["tool"] != "studium_render"
+    assert nxt["released"] is False
+    assert rendered["released"] is False
+    assert rendered["project_state"] != "RELEASED"
 
 
 def _topic(tmp_path, slug: str, topic: str):

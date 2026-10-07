@@ -13,7 +13,6 @@ from studium.authoring.blueprint import current_sections
 from studium.authoring.excerpts import excerpts_by_id
 from studium.authoring.figures import figure_gap, figures_in_section
 from studium.authoring.paragraphs import GAP_LABEL, supported_paragraphs
-from studium.authoring.section_blocks import blocked_ids
 from studium.authoring.support import corroboration_for_excerpts, supported_drafts
 from studium.domain.profiles import BOOK_TOPIC
 from studium.research.public_sources import bibliography_counts
@@ -332,6 +331,7 @@ def _copy(language: str) -> dict[str, str]:
             "consejo": "Consejo",
             "definition": "Definición",
             "section": "Explicación",
+            "unwritten": "todavía no está escrito",
             "enunciado": "Enunciado",
             "resolucion": "Resolución",
             "respuesta": "Respuesta",
@@ -365,6 +365,7 @@ def _copy(language: str) -> dict[str, str]:
             "consejo": "Tip",
             "definition": "Definition",
             "section": "Explanation",
+            "unwritten": "not written yet",
             "enunciado": "Statement",
             "resolucion": "Solution",
             "respuesta": "Answer",
@@ -445,7 +446,6 @@ def _document(root: Path) -> str:
     excerpts = excerpts_by_id(root)
     counts = bibliography_counts(root)
     book = _book_name(root)
-    blocked = blocked_ids(root)
     by_section: dict[str, list[dict[str, object]]] = {}
     for paragraph in paragraphs:
         section = paragraph.get("section")
@@ -476,16 +476,14 @@ def _document(root: Path) -> str:
                 r"\noindent " + latex_escape(copy["empty"]),
             ]
         )
+    unwritten: list[str] = []
     for section in sections:
-        lines.extend(["", r"\chapter{" + latex_escape(_display_title(section["title"])) + "}"])
         section_paragraphs = by_section.get(section["id"], [])
         if not section_paragraphs:
-            lines.extend(["", r"\noindent " + latex_escape(copy["gap"])])
-            if section["id"] in blocked:
-                lines.extend(["", r"\noindent " + latex_escape(copy["blocked"])])
-            lines.extend(_figure_lines(root, section["id"], copy))
-        else:
-            lines.extend(_chapter_lines(root, section["id"], section_paragraphs, copy, language))
+            unwritten.append(_display_title(section["title"]))
+            continue
+        lines.extend(["", r"\chapter{" + latex_escape(_display_title(section["title"])) + "}"])
+        lines.extend(_chapter_lines(root, section["id"], section_paragraphs, copy, language))
     lines.extend(
         [
             r"\appendix",
@@ -502,7 +500,11 @@ def _document(root: Path) -> str:
     lines.extend(
         [
             r"\chapter{" + latex_escape(copy["study"]) + "}",
-            r"\noindent " + latex_escape(copy["empty"]),
+        ]
+    )
+    lines.extend(_unwritten_lines(unwritten, copy))
+    lines.extend(
+        [
             r"\backmatter",
             r"\begin{thebibliography}{99}",
         ]
@@ -545,20 +547,68 @@ def _chapter_lines(
             body.append(raw)
     lines: list[str] = []
     lines.extend(_italic(purpose))
-    if body:
-        lines.extend(["", r"\section{" + latex_escape(copy["section"]) + "}"])
-        lines.extend(_plain([body[0]]))
-        lines.extend(_figure_lines(root, section_id, copy))
-        for text in body[1:]:
-            lines.extend(["", r"\section{" + latex_escape(copy["section"]) + "}"])
-            lines.extend(_plain([text]))
-    else:
-        lines.extend(_figure_lines(root, section_id, copy))
+    lines.extend(_body_lines(root, section_id, body, copy))
     lines.extend(_box(copy["consejo"], _plain(consejo)))
     for text in definitions:
         lines.extend(_box(copy["definition"], _plain([text])))
     lines.extend(_worked_box(root, section_id, copy))
     lines.extend(_box(copy["self_check"], _plain(self_check)))
+    return lines
+
+
+def _body_lines(root: Path, section_id: str, body: list[str], copy: dict[str, str]) -> list[str]:
+    """Consecutive explanation paragraphs are one body. A new section uses the paragraph's own title."""
+
+    lines: list[str] = []
+    placed = False
+    for kind, value in _body_chunks(body):
+        if kind == "section":
+            lines.extend(["", r"\section{" + latex_escape(value) + "}"])
+            continue
+        lines.extend(_plain([value]))
+        if not placed:
+            lines.extend(_figure_lines(root, section_id, copy))
+            placed = True
+    if not placed:
+        lines.extend(_figure_lines(root, section_id, copy))
+    return lines
+
+
+def _body_chunks(body: list[str]) -> list[tuple[str, str]]:
+    chunks: list[tuple[str, str]] = []
+    for text in body:
+        title, rest = _heading_from_paragraph(text)
+        if title is not None:
+            chunks.append(("section", title))
+        if rest.strip():
+            chunks.append(("text", rest))
+    return chunks
+
+
+_GENERIC_SECTION = frozenset({"explicación", "explicacion", "explanation"})
+
+
+def _heading_from_paragraph(text: str) -> tuple[str | None, str]:
+    """A title is the paragraph's own first line. The word Explicación is not a title."""
+
+    if "\n" not in text:
+        return None, text
+    first, rest = text.split("\n", 1)
+    title = first.strip()
+    body = rest.strip()
+    if not title or not body or len(title) > 80 or title[-1] in ".!?":
+        return None, text
+    if title.casefold() in _GENERIC_SECTION:
+        return None, body
+    return title, body
+
+
+def _unwritten_lines(titles: list[str], copy: dict[str, str]) -> list[str]:
+    if not titles:
+        return ["", r"\noindent " + latex_escape(copy["empty"])]
+    lines: list[str] = []
+    for title in titles:
+        lines.extend(["", r"\noindent " + latex_escape(f"{title}: {copy['unwritten']}")])
     return lines
 
 
@@ -669,11 +719,25 @@ def _figure_lines(root: Path, section_id: str, copy: dict[str, str]) -> list[str
         else:
             fitted = _fit_block(r"\includegraphics{" + output + "}", consume_box=True)
         caption = record.get("caption") if isinstance(record.get("caption"), str) else ""
-        lines.extend(["", r"\noindent\begin{minipage}{\linewidth}", r"\centering"])
+        lines.extend(
+            [
+                "",
+                r"\par\vspace{\baselineskip}",
+                r"\noindent\begin{minipage}{\linewidth}",
+                r"\centering",
+            ]
+        )
         lines.extend(fitted)
         if caption.strip():
             lines.extend([r"\par\nopagebreak", r"{\small " + latex_escape(caption) + r"\par}"])
-        lines.extend([r"\end{minipage}", "", r"\noindent " + latex_escape(copy["science"])])
+        lines.extend(
+            [
+                r"\end{minipage}",
+                r"\par\vspace{\baselineskip}",
+                "",
+                r"\noindent " + latex_escape(copy["science"]),
+            ]
+        )
         if record.get("caption_corroboration") == "unchecked":
             lines.extend(["", r"\noindent " + latex_escape(copy["caption"])])
     return lines

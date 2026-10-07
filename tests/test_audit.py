@@ -202,7 +202,6 @@ def test_multiparagraph_chapter_renders_in_book_shape(tmp_path, monkeypatch):
     contents = tex.index(r"\tableofcontents")
     chapter = tex.index(r"\chapter{Conservation of mass}")
     purpose = tex.index(r"\textit{" + first.split(".", 1)[0])
-    section = tex.index(r"\section{Explanation}")
     explanation = tex.index(second)
     worked = tex.index(r"\begin{tcolorbox}[title={Worked problem}")
     self_check = tex.index(r"\begin{tcolorbox}[title={Self-check}")
@@ -212,7 +211,8 @@ def test_multiparagraph_chapter_renders_in_book_shape(tmp_path, monkeypatch):
     source_audit = tex.index("Source audit")
     study = tex.index("Study plan")
     bibliography = tex.index("thebibliography")
-    assert preface < how_to < contents < chapter < purpose < section < explanation < worked < self_check
+    assert r"\section{Explanation}" not in tex
+    assert preface < how_to < contents < chapter < purpose < explanation < worked < self_check
     assert self_check < notation < formula < solutions < source_audit < study < bibliography
     assert tex.count(r"\begin{tcolorbox}[title={Worked problem}") == 1
     outside = _outside_boxes(tex)
