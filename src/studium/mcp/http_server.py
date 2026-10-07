@@ -77,7 +77,15 @@ def local_mcp_url(port: int) -> str:
 
 
 def cloudflared_args(port: int) -> list[str]:
-    return ["tunnel", "--url", f"http://127.0.0.1:{port}", "--no-autoupdate"]
+    # HTTP/2 is Cloudflare's fallback when UDP/QUIC to port 7844 is blocked.
+    return [
+        "tunnel",
+        "--url",
+        f"http://127.0.0.1:{port}",
+        "--protocol",
+        "http2",
+        "--no-autoupdate",
+    ]
 
 
 def run_command(port: int) -> str:

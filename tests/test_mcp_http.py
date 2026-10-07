@@ -171,9 +171,16 @@ def test_public_without_cloudflared_exits_nonzero(tmp_path, monkeypatch, capsys)
     captured = capsys.readouterr()
     text = captured.out
     assert "http://127.0.0.1:8765/mcp" in text
-    assert "cloudflared tunnel --url http://127.0.0.1:8765 --no-autoupdate" in text
+    assert "cloudflared tunnel --url http://127.0.0.1:8765 --protocol http2 --no-autoupdate" in text
     assert "login" not in run_command(8765)
-    assert cloudflared_args(8765)[0] == "tunnel"
+    assert cloudflared_args(8765) == [
+        "tunnel",
+        "--url",
+        "http://127.0.0.1:8765",
+        "--protocol",
+        "http2",
+        "--no-autoupdate",
+    ]
 
 
 def test_public_url_is_parsed_from_the_quick_tunnel_log():
@@ -183,7 +190,7 @@ def test_public_url_is_parsed_from_the_quick_tunnel_log():
 """
     assert public_mcp_url(log) == "https://orange-apple-1234.trycloudflare.com/mcp"
     assert "http://127.0.0.1:9/mcp" in missing_cloudflared_text(9)
-    assert "cloudflared tunnel --url http://127.0.0.1:9 --no-autoupdate" in missing_cloudflared_text(9)
+    assert "cloudflared tunnel --url http://127.0.0.1:9 --protocol http2 --no-autoupdate" in missing_cloudflared_text(9)
 
 
 def test_public_prints_one_https_line(tmp_path, monkeypatch, capsys):
