@@ -1,6 +1,6 @@
 # Research model
 
-A project needs a course, a university, and a degree. Local sources are optional. With none, research still runs: course discovery, then external academic sources, then the corpus.
+A course book needs a course, a university, and a degree. A topic book names a subject and does not ask for a university course guide. Evidence rules are the same for both: the model is not a source, claims need corroborated public sources, and verification is not skipped. Local sources are optional. With none, a course book still continues: course discovery, then external academic sources, then the corpus. A topic book does not start that writing.
 
 User files improve course fit: syllabus emphasis, terminology, symbols, problem style, labs, and exam patterns. They do not replace the official guide or authoritative literature, and they are not rewritten as the book.
 

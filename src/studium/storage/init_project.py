@@ -10,22 +10,14 @@ import tomllib
 
 from studium.domain.enums import ProjectEvent, ProjectState
 from studium.domain.ids import IdAllocator
+from studium.domain.profiles import BOOK_COURSE, BOOK_TOPIC, PROFILES, resolve_topic_profile
 from studium.state.gates import PROJECT_TOML, Blocker, gate_for
 from studium.state.machine import HistoryEntry, apply
 from studium.storage.locking import ProjectLocked, project_lock
 from studium.storage.migrate import initial_local_sources, migrate_state, utc_now
 
 _SLUG = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
-_PROFILES = frozenset(
-    {
-        "GENERAL",
-        "STEM",
-        "HUMANITIES",
-        "SOCIAL_SCIENCES",
-        "COMPUTER_SCIENCE",
-        "LAW",
-    }
-)
+_PROFILES = frozenset(PROFILES)
 _TASK_STATUSES = frozenset({"open", "blocked_human"})
 
 
@@ -34,8 +26,9 @@ class CreateRequest:
     slug: str
     parent: Path
     name: str
-    university: str
-    degree: str
+    kind: str = BOOK_COURSE
+    university: str | None = None
+    degree: str | None = None
     academic_year: str | None = None
     course_code: str | None = None
     semester: str | None = None
@@ -66,9 +59,10 @@ def build_create_request(
     *,
     slug: str,
     parent: Path,
-    course: str,
-    university: str,
-    degree: str,
+    course: str | None = None,
+    university: str | None = None,
+    degree: str | None = None,
+    topic: str | None = None,
     academic_year: str | None = None,
     course_code: str | None = None,
     semester: str | None = None,
@@ -87,10 +81,23 @@ def build_create_request(
             sources_present = True
         else:
             sources_missing = True
+    if topic is not None:
+        request = CreateRequest(
+            slug=slug,
+            parent=parent,
+            kind=BOOK_TOPIC,
+            name=topic,
+            language=language,
+            domain_profile=resolve_topic_profile(topic, profile),
+            local_sources=label,
+            sources_present=sources_present,
+        )
+        return request, sources_missing
     request = CreateRequest(
         slug=slug,
         parent=parent,
-        name=course,
+        kind=BOOK_COURSE,
+        name=course or "",
         university=university,
         degree=degree,
         academic_year=academic_year,
@@ -107,14 +114,15 @@ def build_create_request(
 def create_project(request: CreateRequest) -> CreateResult:
     if _SLUG.fullmatch(request.slug) is None:
         return CreateResult(root=None, failure="invalid_slug")
+    if request.kind not in {BOOK_COURSE, BOOK_TOPIC}:
+        return CreateResult(root=None, failure="invalid_kind")
     if request.domain_profile not in _PROFILES:
         return CreateResult(root=None, failure="invalid_profile")
 
-    course = {
-        "name": request.name,
-        "university": request.university,
-        "degree": request.degree,
-    }
+    course: dict[str, object] = {"kind": request.kind, "name": request.name}
+    if request.kind == BOOK_COURSE:
+        course["university"] = request.university
+        course["degree"] = request.degree
     gates = {PROJECT_TOML: gate_for(PROJECT_TOML, course)}
     opened = apply(None, ProjectEvent.PROJECT_CREATED.value, gates)
     if not opened.applied or opened.entry is None or opened.state is None:
@@ -136,15 +144,23 @@ def create_project(request: CreateRequest) -> CreateResult:
         (opened.entry, discovered.entry),
         initial_local_sources(availability, now),
     )
+    if request.kind == BOOK_TOPIC:
+        task_type = "topic_book"
+        task_status = "not_available"
+        blocked_reason: str | None = "Writing is not available yet."
+    else:
+        task_type = "course_discovery"
+        task_status = "open"
+        blocked_reason = None
     task = {
         "schema_version": "1.0.0",
         "id": task_id,
-        "type": "course_discovery",
+        "type": task_type,
         "project_state": discovered.state.value,
         "entity_id": None,
-        "status": "open",
+        "status": task_status,
         "dependencies": [],
-        "blocked_reason": None,
+        "blocked_reason": blocked_reason,
         "created_at": now,
         "updated_at": now,
     }
@@ -165,10 +181,12 @@ def create_project(request: CreateRequest) -> CreateResult:
 
 def render_project_toml(request: CreateRequest) -> str:
     course_lines = [
+        f"kind = {_quote(request.kind)}",
         f"name = {_quote(request.name)}",
-        f"university = {_quote(request.university)}",
-        f"degree = {_quote(request.degree)}",
     ]
+    if request.kind == BOOK_COURSE:
+        course_lines.append(f"university = {_quote(request.university or '')}")
+        course_lines.append(f"degree = {_quote(request.degree or '')}")
     optional = (
         ("academic_year", request.academic_year),
         ("course_code", request.course_code),
@@ -253,6 +271,19 @@ def _sources_labeled(root: Path) -> bool:
 
 def load_project_toml(root: Path) -> dict[str, object]:
     return tomllib.loads((root / "project.toml").read_text(encoding="utf-8"))
+
+
+def book_kind(root: Path) -> str:
+    """``topic`` when the project says so. Missing kind stays a course book."""
+
+    try:
+        document = load_project_toml(root)
+    except (OSError, UnicodeError, tomllib.TOMLDecodeError):
+        return BOOK_COURSE
+    course = document.get("course")
+    if isinstance(course, dict) and course.get("kind") == BOOK_TOPIC:
+        return BOOK_TOPIC
+    return BOOK_COURSE
 
 
 def load_tasks(root: Path) -> list[dict[str, object]]:

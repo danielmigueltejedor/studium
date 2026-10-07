@@ -13,6 +13,7 @@ from studium.cli.sources import register as register_sources
 from studium.cli.sources import run as run_sources
 from studium.config.resolve import resolve_project
 from studium.domain.enums import ProjectState
+from studium.domain.profiles import BOOK_TOPIC, PROFILE_CHOICES, TOPIC_BOOK_STATUS
 from studium.mcp.http_server import serve_http
 from studium.mcp.server import build_parser as register_mcp
 from studium.mcp.server import serve as serve_mcp
@@ -29,12 +30,15 @@ from studium.storage.init_project import (
     select_next_task,
 )
 
-_PROFILES = ("STEM", "HUMANITIES", "SOCIAL_SCIENCES", "COMPUTER_SCIENCE", "LAW")
+_PROFILES = PROFILE_CHOICES
 
 _WORKFLOW = """\
 Workflow:
   studium create <slug> --course STR --university STR --degree STR
           [--academic-year STR] [--course-code STR] [--semester STR]
+          [--language STR] [--profile PROFILE] [--sources PATH]
+          [--project-dir PATH]
+  studium create <slug> --topic STR
           [--language STR] [--profile PROFILE] [--sources PATH]
           [--project-dir PATH]
   studium status [--json] [--project PATH]
@@ -137,9 +141,10 @@ def _build_parser() -> StudiumParser:
 
     create = commands.add_parser("create", help=argparse.SUPPRESS)
     create.add_argument("slug")
-    create.add_argument("--course", required=True)
-    create.add_argument("--university", required=True)
-    create.add_argument("--degree", required=True)
+    create.add_argument("--course")
+    create.add_argument("--topic")
+    create.add_argument("--university")
+    create.add_argument("--degree")
     create.add_argument("--academic-year")
     create.add_argument("--course-code")
     create.add_argument("--semester")
@@ -194,19 +199,35 @@ def _create(args: argparse.Namespace) -> int:
         print("project directory not found", file=sys.stderr)
         return 3
 
-    request, sources_missing = build_create_request(
-        slug=args.slug,
-        parent=parent,
-        course=args.course,
-        university=args.university,
-        degree=args.degree,
-        academic_year=args.academic_year,
-        course_code=args.course_code,
-        semester=args.semester,
-        language=args.language,
-        profile=args.profile,
-        sources=args.sources,
-    )
+    if args.topic is not None:
+        if any((args.course, args.university, args.degree, args.academic_year, args.course_code, args.semester)):
+            print("a topic book does not take a university, degree, or course guide", file=sys.stderr)
+            return 3
+        request, sources_missing = build_create_request(
+            slug=args.slug,
+            parent=parent,
+            topic=args.topic,
+            language=args.language,
+            profile=args.profile,
+            sources=args.sources,
+        )
+    else:
+        if not isinstance(args.course, str) or not isinstance(args.university, str) or not isinstance(args.degree, str):
+            print("course, university, and degree are required", file=sys.stderr)
+            return 3
+        request, sources_missing = build_create_request(
+            slug=args.slug,
+            parent=parent,
+            course=args.course,
+            university=args.university,
+            degree=args.degree,
+            academic_year=args.academic_year,
+            course_code=args.course_code,
+            semester=args.semester,
+            language=args.language,
+            profile=args.profile,
+            sources=args.sources,
+        )
     result = create_project(request)
     if result.failure == "invalid_slug":
         print("invalid slug", file=sys.stderr)
@@ -227,6 +248,9 @@ def _create(args: argparse.Namespace) -> int:
 
     if sources_missing:
         print(SOURCES_MISSING_WARNING, file=sys.stderr)
+    if request.kind == BOOK_TOPIC:
+        print(TOPIC_BOOK_STATUS)
+        return 0
     print("Studium project created.")
     print("Next: COURSE_DISCOVERY")
     print("Run: studium agent-pack")
@@ -256,6 +280,12 @@ def _status(args: argparse.Namespace) -> int:
     print(f"local_sources.prompted: {str(fields_local.get('prompted', False)).lower()}")
     print(f"local_sources.source_count: {fields_local.get('source_count', 0)}")
     print(f"course.name: {fields.get('name', '')}")
+    if payload.get("book_kind") == BOOK_TOPIC:
+        print(f"course.domain_profile: {fields.get('domain_profile', '')}")
+        message = payload.get("message")
+        if isinstance(message, str):
+            print(message)
+        return 0
     print(f"course.university: {fields.get('university', '')}")
     print(f"course.degree: {fields.get('degree', '')}")
     return 0
@@ -292,6 +322,9 @@ def _agent_pack_text(payload: dict[str, object]) -> str:
         f"accept_files: {_yes_no(payload.get('accept_files'))}",
         "scan_home: no",
     ]
+    if payload.get("writing_available") is False and isinstance(payload.get("message"), str):
+        lines.append(str(payload["message"]))
+        lines.append("course_guide: no")
     status = payload.get("status")
     if payload.get("should_ask") and isinstance(payload.get("question"), str):
         lines.append(f"question: {payload['question']}")

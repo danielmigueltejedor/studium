@@ -15,13 +15,20 @@ from studium.domain.enums import (
     SOURCE_ORIGINS,
     SOURCE_ROLES,
 )
+from studium.domain.profiles import BOOK_TOPIC, EVIDENCE_RULE, TOPIC_BOOK_STATUS
 from studium.policy.authority import authority_assignment_error, source_class_error
 from studium.policy.trust import contains_directive, directive_changes_policy
 from studium.research.attachments import attachment_to_intake
 from studium.research.formats import ACCEPTED_FORMATS, sniff
 from studium.research.guidance import local_source_guidance
 from studium.research.impact import apply_impact, impact_report, record_support
-from studium.storage.init_project import load_project_toml, load_state, load_state_holding_lock, write_state
+from studium.storage.init_project import (
+    book_kind,
+    load_project_toml,
+    load_state,
+    load_state_holding_lock,
+    write_state,
+)
 from studium.storage.locking import ProjectLocked, project_lock
 from studium.storage.migrate import utc_now
 from studium.storage.records import allocate_id, append_jsonl, fold_by_id
@@ -74,11 +81,14 @@ def project_status(root: Path) -> dict[str, object]:
     local = _local(state)
     sources = _live(root)
     language = course_fields.get("language")
-    return {
+    kind = book_kind(root)
+    payload: dict[str, object] = {
         "schema_version": state.get("schema_version"),
         "state": state.get("state"),
         "edition": document.get("edition"),
         "edition_cycle": state.get("edition_cycle"),
+        "book_kind": kind,
+        "evidence": EVIDENCE_RULE,
         "local_sources": local,
         "history": state.get("history"),
         "course": course_fields,
@@ -88,6 +98,11 @@ def project_status(root: Path) -> dict[str, object]:
             language if isinstance(language, str) else None,
         ),
     }
+    if kind == BOOK_TOPIC:
+        payload["message"] = TOPIC_BOOK_STATUS
+        payload["writing_available"] = False
+        payload["course_guide_required"] = False
+    return payload
 
 
 def source_capabilities(root: Path) -> dict[str, object]:
@@ -122,7 +137,7 @@ def agent_pack(root: Path, task: str | None = None) -> dict[str, object]:
     sources = status.get("sources")
     visible = sources if isinstance(sources, list) else []
     local_status = status.get("status")
-    return {
+    payload: dict[str, object] = {
         "kind": "local_sources",
         "scope": "local_sources_only",
         "course_discovery": False,
@@ -136,8 +151,14 @@ def agent_pack(root: Path, task: str | None = None) -> dict[str, object]:
         "question": status.get("question"),
         "accept_files": local_status == "AVAILABLE",
         "scan_home": False,
+        "evidence": EVIDENCE_RULE,
         "sources": visible,
     }
+    if book_kind(root) == BOOK_TOPIC:
+        payload["message"] = TOPIC_BOOK_STATUS
+        payload["writing_available"] = False
+        payload["course_guide_required"] = False
+    return payload
 
 
 def source_list(root: Path) -> dict[str, object]:

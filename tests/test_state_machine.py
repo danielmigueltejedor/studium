@@ -65,6 +65,18 @@ def test_project_toml_gate_requires_three_non_empty_fields():
     assert opened.blockers == ()
 
 
+def test_topic_book_gate_requires_a_name_and_not_a_university():
+    opened = project_toml_gate({"kind": "topic", "name": "Rust"})
+    assert opened.ok is True
+    assert opened.blockers == ()
+
+    blocked = project_toml_gate({"kind": "topic", "name": " "})
+    assert blocked.ok is False
+    assert blocked.blockers[0].code == "state.project_fields_missing"
+    assert "course.name" in blocked.blockers[0].message
+    assert "university" not in blocked.blockers[0].message
+
+
 def test_regress_stops_at_the_latest_green_earlier_state():
     gates = {PROJECT_TOML: project_toml_gate(_COURSE)}
     result = apply(ProjectState.COURSE_DISCOVERY, "regress", gates)

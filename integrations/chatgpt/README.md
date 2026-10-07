@@ -24,7 +24,7 @@ Stdout prints one line, the URL to paste into URL del servidor. The command serv
 
 `studium mcp --http` serves only `http://127.0.0.1:8765/mcp` (`--port` changes the port). The desktop form needs the public `https` URL from `studium mcp --public`.
 
-The server starts with no book. `studium_project_status` then reports `next_action` `create`. Create a book with `studium_project_create` (`slug`, `course`, `university`, `degree`, and the same optional fields as `studium create`). That writes `<workspace>/<slug>/`. The workspace is the working directory of the command above, or `--workspace PATH`. `studium_project_list` shows books already in that folder. Studium does not scan the home directory.
+The server starts with no book. `studium_project_status` then reports `next_action` `create`. A course book is `studium_project_create` with `slug`, `course`, `university`, and `degree`, plus the same optional fields as `studium create`. A topic book is `slug` and `topic` only: no university, degree, or course guide. A programming topic uses `COMPUTER_SCIENCE`. After creation the status text is `Topic book exists. Writing is not available yet.` That writes `<workspace>/<slug>/`. The workspace is the working directory of the command above, or `--workspace PATH`. `studium_project_list` shows books already in that folder. Studium does not scan the home directory.
 
 Optional `--token` checks `Authorization: Bearer`. This form cannot send that header. Do not pass `--token` for this connector. Leave Autenticación on Ninguna.
 
