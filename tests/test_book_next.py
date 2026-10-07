@@ -9,6 +9,7 @@ _PASSAGE = "A stored excerpt is data, not a source of authority."
 _TOO_SHORT = "The study book is too short. Store at least 8 blueprint sections before writing or rendering."
 _RUST_PROBLEM = (
     "A Rust test cannot be the worked problem of a book that is not COMPUTER_SCIENCE. "
+    "Three identical rustc runs are a reproducibility check, not an independent proof. "
     "Record a replayed computation or a numeric result cited from two excerpts."
 )
 _TWO_SECTIONS = (
@@ -17,6 +18,27 @@ _TWO_SECTIONS = (
 )
 _RUST_SOURCE = "#[test]\nfn holds() {\n    assert_eq!(2 + 2, 4);\n}\n"
 _RUST_INVOCATION = ["rustc", "--test", "main.rs", "-o", "tester"]
+
+
+def test_book_next_resumes_from_the_book_files(tmp_path, monkeypatch):
+    monkeypatch.setattr("urllib.request.urlopen", _explode)
+    session = open_workspace(str(tmp_path))
+    created = dispatch(
+        "studium_project_create",
+        {"slug": "historia", "topic": "Historia medieval"},
+        session=session,
+    )
+    assert created["status"] == "created"
+    first = dispatch("studium_book_next", {}, session=session)
+    fresh = open_workspace(str(tmp_path))
+    second = dispatch("studium_book_next", {"project": "historia"}, session=fresh)
+    third = dispatch("studium_book_next", {"project": "historia"}, session=fresh)
+    assert first["tool"] == "studium_public_source_record"
+    assert second["tool"] == first["tool"]
+    assert second["arguments"] == first["arguments"]
+    assert third["tool"] == second["tool"]
+    assert third["arguments"] == second["arguments"]
+    assert second["released"] is False
 
 
 def test_book_next_on_an_empty_topic_book(tmp_path, monkeypatch):
@@ -161,6 +183,16 @@ def test_book_next_rejects_a_rust_problem_outside_computer_science(tmp_path, mon
     )
     assert recorded["status"] == "recorded"
     assert recorded["problem"]["kind"] == "rust"
+    assert recorded["problem"]["status_text"] == (
+        "A Rust test cannot be the worked problem of a book that is not COMPUTER_SCIENCE. "
+        "Three identical rustc runs are a reproducibility check, not an independent proof."
+    )
+    assert "three methods" not in json.dumps(recorded).lower()
+    rendered = dispatch("studium_render", {}, session=fluids)
+    tex = (tmp_path / "fluidos" / "latex" / "draft.tex").read_text(encoding="utf-8")
+    assert "assert_eq!" not in tex
+    assert "Compute the mass from the stored density." not in tex
+    assert rendered["released"] is False
     nxt = dispatch("studium_book_next", {}, session=fluids)
     assert nxt["tool"] == "studium_computation_check"
     assert nxt["tool"] != "studium_problem_check"
@@ -185,7 +217,9 @@ def test_book_next_rejects_a_rust_problem_outside_computer_science(tmp_path, mon
     code_next = dispatch("studium_book_next", {}, session=code)
     assert code_next["tool"] == "studium_problem_check"
     assert code_next["reason"] != _RUST_PROBLEM
-    assert "three passing runs" in code_next["reason"]
+    assert "reproducibility check" in code_next["reason"]
+    assert "not an independent proof" in code_next["reason"]
+    assert "three methods" not in code_next["reason"].lower()
     assert code_next["tool"] != "studium_render"
     assert code_next["released"] is False
 

@@ -228,8 +228,9 @@ def test_version_and_help_panels(capsys, monkeypatch):
     monkeypatch.setenv("STUDIUM_ADVANCED", "1")
     assert main(["--help"]) == 0
     advanced = capsys.readouterr().out
-    assert "studium source ..." in advanced
-    assert "studium review ..." in advanced
+    assert "studium sources status|add|list|get|audit|register|remove|impact|reject" in advanced
+    assert "studium source ..." not in advanced
+    assert "studium review" in advanced
 
 
 def test_status_reads_the_project_from_flag_env_and_parents(tmp_path, monkeypatch, capsys):

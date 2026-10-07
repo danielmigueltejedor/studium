@@ -19,9 +19,11 @@
 
 Studium stores sources, excerpts, chapters, checks, and a draft PDF. It does not treat model prose as evidence, and it does not publish a book.
 
-`audit_passed` means this edition's audit recorded a passed tool result. It is not publication. `studium_verify` still refuses release. There is no release gate that publishes a book.
+A draft is `latex/draft.tex` and, when a compiler is on `PATH`, `latex/draft.pdf`. Publication is not implemented. The CLI does not provide `studium run`, `studium build`, or `studium release`. `studium render` writes the draft. `studium verify` returns blockers and does not move the book to `RELEASED`.
 
-The tool to follow is **`studium_book_next`**. Call it and perform the tool it names. Do not ask the user what to do next when that step can be done from open sources or from files already given.
+`audit_passed` means this edition's audits still match the current paragraph and excerpt text and each one cites a tool result the server already stored. It does not mean the prose was mathematically verified, academically reviewed, or published. A changed paragraph or excerpt makes that audit stale. `studium_verify` still refuses release.
+
+The tool to follow is **`studium_book_next`**. It reads the book files and returns the next concrete tool call. A new session can resume from those files. It does not resume from chat memory, and it does not loop. Call it and perform the tool it names. Do not ask the user what to do next when that step can be done from open sources or from files already given.
 
 ## The 1.0 path
 
@@ -36,7 +38,7 @@ opened excerpts
         ↓
 long chapters
         ↓
-checks (replayed computation, two excerpts, or a 3-pass rustc test for code)
+checks (COMPUTATION_REPRODUCED, two excerpts, or a rustc reproducibility check for code)
         ↓
 audit
         ↓
@@ -75,7 +77,9 @@ Every chapter uses the same shape:
 
 Boxes are only Consejo, Definición, Problema resuelto, and Autoficha. Explanation stays body text.
 
-A worked problem in a STEM or general book is a replayed computation or a numeric result cited from two excerpts. A programming book may keep a Rust test, which is checked only after three passing `rustc` runs. Two excerpts that agree are `two_witnesses`, not verified and not absolute truth.
+A worked problem in a STEM or general book is a replayed computation or a numeric result cited from two excerpts. A book whose profile is not `COMPUTER_SCIENCE` must not use a Rust test as that worked problem. A programming book may keep a Rust test. Three identical `rustc` runs are a reproducibility check, not an independent proof, and not three methods. A computation replayed by the same expression is `COMPUTATION_REPRODUCED` in the audit record. That is not mathematically verified and not academically reviewed. Two excerpts that agree are `two_witnesses`, not verified and not absolute truth.
+
+Unchecked figures stay out of the chapter. `studium_figure_remove` deletes one figure by id. A checked figure stays inline, capped, with the caption under the image. When the book language is Spanish, the draft uses Índice, Consejo, Definición, Problema resuelto, and Autoficha. Explanation is body text. Boxes are only those four.
 
 Without a course guide, the blueprint is a study book: roadmap, foundations, the topic chapters, worked problems, self-check, a formula or concept sheet, and the source audit. With a guide, chapters follow the guide and the same chapter contract applies.
 

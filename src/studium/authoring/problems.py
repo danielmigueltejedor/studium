@@ -16,7 +16,7 @@ from studium.authoring.blueprint import current_sections
 from studium.authoring.excerpts import excerpts_by_id
 from studium.authoring.support import corroboration_for_excerpts, paragraph_citation_blockers
 from studium.policy.trust import contains_directive, directive_changes_policy
-from studium.storage.init_project import load_state_holding_lock
+from studium.storage.init_project import load_project_toml, load_state_holding_lock
 from studium.storage.locking import ProjectLocked, project_lock
 from studium.storage.migrate import utc_now
 from studium.storage.records import PROBLEMS, allocate_id, append_jsonl, fold_by_id
@@ -28,6 +28,12 @@ _TIMEOUT = 20
 _RUNS = 3
 _FORBIDDEN_CHARS = set(";|&$`\n\r")
 _FORBIDDEN_FLAGS = frozenset({"-L", "--extern", "--sysroot", "--config", "-Z"})
+REPRODUCIBILITY_TEXT = (
+    "Three identical rustc runs are a reproducibility check, not an independent proof."
+)
+RUST_NOT_WORKED_PROBLEM = (
+    "A Rust test cannot be the worked problem of a book that is not COMPUTER_SCIENCE."
+)
 
 
 def record_problem(
@@ -90,6 +96,7 @@ def record_problem(
                 record["source_path"] = relative
                 record["invocation"] = command
                 record["runs"] = []
+                record["status_text"] = _rust_status_text(root)
                 _write_source(root, relative, rust["source_text"])
             else:
                 assert numeric is not None
@@ -199,6 +206,8 @@ def _check_rust(root: Path, record: dict[str, object]) -> dict[str, object]:
     updated["correct"] = checked
     updated["classification"] = "PENDING"
     updated["checked_at"] = utc_now()
+    updated["status_text"] = _rust_status_text(root)
+    updated["check_kind"] = "reproducibility" if checked else None
     try:
         with project_lock(root):
             append_jsonl(root / PROBLEMS, updated)
@@ -209,6 +218,7 @@ def _check_rust(root: Path, record: dict[str, object]) -> dict[str, object]:
     body = _body(fresh, updated, status="checked" if checked else "unchecked")
     body["checked"] = checked
     body["runs"] = runs
+    body["message"] = str(updated["status_text"])
     return body
 
 
@@ -396,6 +406,22 @@ def _two_excerpts(value: object) -> tuple[list[str] | None, dict[str, object] | 
     return identifiers, None
 
 
+def _domain_profile(root: Path) -> str:
+    document = load_project_toml(root)
+    course = document.get("course")
+    if isinstance(course, dict) and isinstance(course.get("domain_profile"), str):
+        return str(course["domain_profile"])
+    return "GENERAL"
+
+
+def _rust_status_text(root: Path) -> str:
+    """Three identical runs are one reproducibility check, not three methods."""
+
+    if _domain_profile(root) == "COMPUTER_SCIENCE":
+        return REPRODUCIBILITY_TEXT
+    return f"{RUST_NOT_WORKED_PROBLEM} {REPRODUCIBILITY_TEXT}"
+
+
 def _public(record: dict[str, object]) -> dict[str, object]:
     visible = {
         "id": record.get("id"),
@@ -410,6 +436,10 @@ def _public(record: dict[str, object]) -> dict[str, object]:
         visible["source_path"] = record.get("source_path")
         visible["invocation"] = record.get("invocation")
         visible["runs"] = record.get("runs") if isinstance(record.get("runs"), list) else []
+        if isinstance(record.get("status_text"), str):
+            visible["status_text"] = record["status_text"]
+        if record.get("check_kind") == "reproducibility":
+            visible["check_kind"] = "reproducibility"
     if record.get("kind") == "numeric":
         visible["expected"] = record.get("expected")
         visible["excerpts"] = record.get("excerpts")
