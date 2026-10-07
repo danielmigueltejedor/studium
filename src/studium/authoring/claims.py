@@ -4,7 +4,7 @@ import hashlib
 from pathlib import Path
 
 from studium.authoring.blueprint import current_sections
-from studium.authoring.support import support_blockers
+from studium.authoring.support import citation_blockers
 from studium.policy.trust import contains_directive, directive_changes_policy
 from studium.storage.init_project import load_state_holding_lock
 from studium.storage.locking import ProjectLocked, project_lock
@@ -20,25 +20,32 @@ def record_claim(
     root: Path,
     *,
     text: object,
-    sources: object,
+    sources: object = None,
+    excerpts: object = None,
     section: object = None,
     actor: dict[str, object] | None = None,
 ) -> dict[str, object]:
-    """Store one draft when every cited public source passes the support check."""
+    """Store one draft when every cited source and excerpt passes the support check."""
 
     cleaned_text, text_error = _text(text)
     if text_error is not None:
         return text_error
-    source_ids, source_error = _sources(sources)
+    source_ids, source_error = _id_list(sources, field="sources")
     if source_error is not None:
         return source_error
+    excerpt_ids, excerpt_error = _id_list(excerpts, field="excerpts")
+    if excerpt_error is not None:
+        return excerpt_error
+    assert source_ids is not None and excerpt_ids is not None
+    if not source_ids and not excerpt_ids:
+        return _error("mcp.invalid_input", "a claim needs a public source id or a stored excerpt id")
     section_id, section_error = _section(root, section)
     if section_error is not None:
         return section_error
-    assert cleaned_text is not None and source_ids is not None
+    assert cleaned_text is not None
     if directive_changes_policy(cleaned_text):
         return _error("policy.overridden", "claim text changed policy")
-    blockers = support_blockers(root, source_ids)
+    blockers = citation_blockers(root, source_ids, excerpt_ids)
     if blockers:
         state = _read_state(root)
         return {
@@ -52,7 +59,7 @@ def record_claim(
     try:
         with project_lock(root):
             state = load_state_holding_lock(root)
-            fresh_blockers = support_blockers(root, source_ids)
+            fresh_blockers = citation_blockers(root, source_ids, excerpt_ids)
             if fresh_blockers:
                 return {
                     "status": "rejected",
@@ -67,12 +74,15 @@ def record_claim(
                 "schema_version": "1.0.0",
                 "id": identifier,
                 "text": cleaned_text,
-                "sources": source_ids,
                 "status": "draft",
                 "classification": "PENDING",
                 "content_directives_ignored": contains_directive(cleaned_text.encode("utf-8")),
                 "recorded_at": utc_now(),
             }
+            if source_ids:
+                record["sources"] = source_ids
+            if excerpt_ids:
+                record["excerpts"] = excerpt_ids
             if section_id is not None:
                 record["section"] = section_id
             append_jsonl(root / CLAIMS, record)
@@ -99,10 +109,13 @@ def _public(record: dict[str, object]) -> dict[str, object]:
     visible = {
         "id": record.get("id"),
         "text": record.get("text"),
-        "sources": record.get("sources"),
         "status": "draft",
         "classification": "PENDING",
     }
+    if isinstance(record.get("sources"), list):
+        visible["sources"] = record.get("sources")
+    if isinstance(record.get("excerpts"), list):
+        visible["excerpts"] = record.get("excerpts")
     if isinstance(record.get("section"), str):
         visible["section"] = record["section"]
     if record.get("content_directives_ignored") is True:
@@ -119,20 +132,22 @@ def _text(value: object) -> tuple[str | None, dict[str, object] | None]:
     return cleaned, None
 
 
-def _sources(value: object) -> tuple[list[str] | None, dict[str, object] | None]:
-    if not isinstance(value, list) or not value:
-        return None, _error("mcp.invalid_input", "sources must list one or more public source ids")
+def _id_list(value: object, *, field: str) -> tuple[list[str] | None, dict[str, object] | None]:
+    if value is None:
+        return [], None
+    if not isinstance(value, list):
+        return None, _error("mcp.invalid_input", f"{field} must be a list of ids")
     if len(value) > _MAX_SOURCES:
-        return None, _error("mcp.invalid_input", "too many sources to store")
+        return None, _error("mcp.invalid_input", f"too many {field} to store")
     identifiers: list[str] = []
     for item in value:
         if not isinstance(item, str):
-            return None, _error("mcp.invalid_input", "sources must list one or more public source ids")
+            return None, _error("mcp.invalid_input", f"{field} must be a list of ids")
         cleaned = item.strip()
         if not cleaned or len(cleaned) > 128:
-            return None, _error("mcp.invalid_input", "sources must list one or more public source ids")
+            return None, _error("mcp.invalid_input", f"{field} must be a list of ids")
         if cleaned in identifiers:
-            return None, _error("mcp.invalid_input", "sources lists the same public source more than once")
+            return None, _error("mcp.invalid_input", f"{field} lists the same id more than once")
         identifiers.append(cleaned)
     return identifiers, None
 

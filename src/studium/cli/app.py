@@ -47,7 +47,8 @@ Workflow:
   studium next [--json] [--project PATH]
   studium run [--project PATH]
   studium blueprint set --section ID TITLE [--section ID TITLE ...] [--json] [--project PATH]
-  studium claim add --text STR --source ID [--source ID ...] [--json] [--project PATH]
+  studium excerpt add --source ID --url URL --text STR [--json] [--project PATH]
+  studium claim add --text STR [--source ID ...] [--excerpt ID ...] [--json] [--project PATH]
   studium verify (--fast | --full) [--entity ID] [--json] [--project PATH]
   studium render [--json] [--project PATH]
   studium build [--project PATH]
@@ -129,7 +130,7 @@ def main(argv: list[str] | None = None) -> int:
         return _next(args)
     if args.command == "sources":
         return _sources(args)
-    if args.command in {"blueprint", "claim", "verify", "render"}:
+    if args.command in {"blueprint", "claim", "verify", "render", "excerpt"}:
         return _authoring(args)
     if args.command == "mcp":
         return _mcp(args)

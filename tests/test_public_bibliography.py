@@ -10,7 +10,7 @@ from studium.domain.profiles import (
     WRITING_STILL_UNAVAILABLE,
 )
 from studium.mcp.server import dispatch, handle, open_workspace, tool_names
-from studium.research.public_sources import BIBLIOGRAPHIC_IDENTITY, YEAR_CONFLICT_STATUS
+from studium.research.public_sources import BIBLIOGRAPHIC_IDENTITY, EXCERPT_BEFORE_DRAFT, YEAR_CONFLICT_STATUS
 
 _COURSE = {
     "course": "Mecánica de Fluidos",
@@ -95,7 +95,8 @@ def test_topic_book_records_and_lists_without_course_json(tmp_path):
         "1 pending, 0 conflicting, 0 not cited by the stored course guide. "
         "Writing is still not available. "
         "Do not look for a university course guide. "
-        "Do not call studium_course_recorded."
+        "Do not call studium_course_recorded. "
+        + EXCERPT_BEFORE_DRAFT
     )
     assert status["writing_available"] is False
     assert status["writing_status"] == WRITING_STILL_UNAVAILABLE
@@ -250,7 +251,8 @@ def test_course_book_source_discovery_next_action_keeps_local_sources_none(tmp_p
     assert status["local_sources"]["status"] == "NONE"
     assert status["next_action"] == (
         "1 pending, 0 conflicting, 0 not cited by the stored course guide. "
-        "Writing is still not available."
+        "Writing is still not available. "
+        + EXCERPT_BEFORE_DRAFT
     )
     assert status["writing_available"] is False
     assert status["writing_status"] == "Writing is still not available."
@@ -436,7 +438,8 @@ def test_year_conflict_stays_pending(tmp_path, monkeypatch):
     ]
     assert checked["next_action"] == (
         "1 pending, 1 conflicting, 0 not cited by the stored course guide. "
-        "Writing is still not available."
+        "Writing is still not available. "
+        + EXCERPT_BEFORE_DRAFT
     )
     assert checked["writing_available"] is False
     assert checked["writing_status"] == WRITING_STILL_UNAVAILABLE
@@ -607,7 +610,8 @@ def test_course_guide_citation_is_client_set_and_not_cited_sources_remain(tmp_pa
     status = dispatch("studium_project_status", {}, session=session)
     assert status["next_action"] == (
         "5 pending, 0 conflicting, 4 not cited by the stored course guide. "
-        "Writing is still not available."
+        "Writing is still not available. "
+        + EXCERPT_BEFORE_DRAFT
     )
     assert status["writing_available"] is False
     assert status["writing_status"] == WRITING_STILL_UNAVAILABLE

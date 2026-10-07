@@ -7,6 +7,7 @@ from studium.domain.ids import IdAllocator
 
 COURSE_CANDIDATES = "course/candidates.jsonl"
 PUBLIC_BIBLIOGRAPHY = "bibliography/public.jsonl"
+EXCERPTS = "bibliography/excerpts.jsonl"
 BLUEPRINT = "blueprint/outline.jsonl"
 CLAIMS = "claims/claims.jsonl"
 

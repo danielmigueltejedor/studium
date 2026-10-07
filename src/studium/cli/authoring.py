@@ -7,6 +7,7 @@ from pathlib import Path
 
 from studium.authoring.blueprint import get_blueprint, store_blueprint
 from studium.authoring.claims import list_claims, record_claim
+from studium.authoring.excerpts import get_excerpt, list_excerpts, record_excerpt
 from studium.authoring.render import render_draft
 from studium.authoring.verify import verify_book
 
@@ -28,7 +29,8 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     claim_commands = claim.add_subparsers(dest="claim_command")
     add = claim_commands.add_parser("add")
     add.add_argument("--text", required=True)
-    add.add_argument("--source", action="append", required=True)
+    add.add_argument("--source", action="append")
+    add.add_argument("--excerpt", action="append")
     add.add_argument("--section")
     _project(add)
     listing = claim_commands.add_parser("list")
@@ -43,6 +45,19 @@ def register(subparsers: argparse._SubParsersAction) -> None:
 
     render = subparsers.add_parser("render", help=argparse.SUPPRESS)
     _project(render)
+
+    excerpt = subparsers.add_parser("excerpt", help=argparse.SUPPRESS)
+    excerpt_commands = excerpt.add_subparsers(dest="excerpt_command")
+    store = excerpt_commands.add_parser("add")
+    store.add_argument("--source", required=True)
+    store.add_argument("--url", required=True)
+    store.add_argument("--text", required=True)
+    _project(store)
+    excerpt_list = excerpt_commands.add_parser("list")
+    _project(excerpt_list)
+    excerpt_get = excerpt_commands.add_parser("get")
+    excerpt_get.add_argument("excerpt_id")
+    _project(excerpt_get)
 
 
 def run(args: argparse.Namespace, root: Path) -> int:
@@ -61,7 +76,8 @@ def run(args: argparse.Namespace, root: Path) -> int:
                 record_claim(
                     root,
                     text=args.text,
-                    sources=list(args.source),
+                    sources=list(args.source) if args.source else None,
+                    excerpts=list(args.excerpt) if args.excerpt else None,
                     section=args.section,
                     actor={"kind": "cli"},
                 ),
@@ -76,6 +92,24 @@ def run(args: argparse.Namespace, root: Path) -> int:
         return _emit(verify_book(root, mode=mode_name, entity=args.entity), args.json)
     if command == "render":
         return _emit(render_draft(root), args.json)
+    if command == "excerpt":
+        if args.excerpt_command == "add":
+            return _emit(
+                record_excerpt(
+                    root,
+                    source_id=args.source,
+                    url=args.url,
+                    text=args.text,
+                    actor={"kind": "cli"},
+                ),
+                args.json,
+            )
+        if args.excerpt_command == "list":
+            return _emit(list_excerpts(root), args.json)
+        if args.excerpt_command == "get":
+            return _emit(get_excerpt(root, args.excerpt_id), args.json)
+        print("unknown command: excerpt", file=sys.stderr)
+        return 3
     print("unknown command", file=sys.stderr)
     return 3
 
@@ -159,6 +193,16 @@ def _text(payload: dict[str, object]) -> str:
     claim = payload.get("claim")
     if status == "recorded" and isinstance(claim, dict):
         return f"{claim.get('id')} status: draft"
+    excerpt = payload.get("excerpt")
+    if status in {"recorded", "already_recorded", "ok"} and isinstance(excerpt, dict):
+        return f"{excerpt.get('id')} source: {excerpt.get('source_id')} classification: PENDING"
+    excerpts = payload.get("excerpts")
+    if status == "ok" and isinstance(excerpts, list):
+        if not excerpts:
+            return "excerpts: none"
+        return "\n".join(
+            f"{item.get('id')} source: {item.get('source_id')}" for item in excerpts if isinstance(item, dict)
+        )
     blockers = payload.get("blockers")
     if isinstance(blockers, list) and blockers:
         return "\n".join(

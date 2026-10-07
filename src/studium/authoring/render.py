@@ -9,6 +9,7 @@ import subprocess
 from pathlib import Path
 
 from studium.authoring.blueprint import current_sections
+from studium.authoring.excerpts import excerpts_by_id
 from studium.authoring.support import supported_drafts
 from studium.domain.profiles import BOOK_TOPIC
 from studium.research.public_sources import bibliography_counts
@@ -110,6 +111,7 @@ def _document(root: Path) -> str:
     sections = current_sections(root)
     claims = supported_drafts(root)
     titles = _source_titles(root)
+    excerpts = excerpts_by_id(root)
     counts = bibliography_counts(root)
     book = _book_name(root)
     placed: dict[str, list[dict[str, object]]] = {}
@@ -146,12 +148,12 @@ def _document(root: Path) -> str:
     for section in sections:
         lines.extend(["", r"\section{" + latex_escape(section["title"]) + "}"])
         for claim in placed.get(section["id"], []):
-            lines.extend(_claim_lines(claim, titles))
+            lines.extend(_claim_lines(claim, titles, excerpts))
     lines.extend(["", r"\section*{Draft claims}"])
     if not loose and not placed:
         lines.append("No supported draft claims.")
     for claim in loose:
-        lines.extend(_claim_lines(claim, titles))
+        lines.extend(_claim_lines(claim, titles, excerpts))
     lines.extend(["", r"\end{document}", ""])
     return "\n".join(lines)
 
@@ -173,24 +175,39 @@ def _status_line(kind: str, counts: dict[str, int]) -> str:
     )
 
 
-def _claim_lines(claim: dict[str, object], titles: dict[str, str]) -> list[str]:
+def _claim_lines(
+    claim: dict[str, object],
+    titles: dict[str, str],
+    excerpts: dict[str, dict[str, object]],
+) -> list[str]:
     text = claim.get("text") if isinstance(claim.get("text"), str) else ""
     sources = claim.get("sources") if isinstance(claim.get("sources"), list) else []
+    excerpt_ids = claim.get("excerpts") if isinstance(claim.get("excerpts"), list) else []
     labels: list[str] = []
     for source_id in sources:
         if not isinstance(source_id, str):
             continue
         labels.append(f"{titles.get(source_id, source_id)} (PENDING)")
-    cited = ", ".join(labels) if labels else "none"
+    excerpt_labels: list[str] = []
+    for excerpt_id in excerpt_ids:
+        if not isinstance(excerpt_id, str):
+            continue
+        excerpt = excerpts.get(excerpt_id)
+        source_id = excerpt.get("source_id") if isinstance(excerpt, dict) else None
+        title = titles.get(source_id, source_id) if isinstance(source_id, str) else excerpt_id
+        excerpt_labels.append(f"{excerpt_id} {title} (PENDING)")
     identifier = claim.get("id") if isinstance(claim.get("id"), str) else "draft"
-    return [
+    lines = [
         "",
         r"\noindent\textbf{" + latex_escape(identifier) + "}",
         "",
         latex_escape(text),
-        "",
-        r"\noindent Sources: " + latex_escape(cited) + ".",
     ]
+    if labels:
+        lines.extend(["", r"\noindent Sources: " + latex_escape(", ".join(labels)) + "."])
+    if excerpt_labels:
+        lines.extend(["", r"\noindent Excerpts: " + latex_escape(", ".join(excerpt_labels)) + "."])
+    return lines
 
 
 def _source_titles(root: Path) -> dict[str, str]:
