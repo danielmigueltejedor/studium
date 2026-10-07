@@ -100,11 +100,13 @@ Clone the repository and install the development package:
 git clone https://github.com/danielmigueltejedor/studium.git
 cd studium
 
-python -m venv .venv
-source .venv/bin/activate
+python -m venv venv
+source venv/bin/activate
 
 pip install -e .
 ```
+
+Name that environment `venv`. On macOS, iCloud Drive (Desktop and Documents included) sets the hidden flag on everything inside a dot-directory such as `.venv`. Python skips hidden `.pth` files, so the editable install never adds `src` to `sys.path`. The `studium` command then fails with `ModuleNotFoundError: No module named 'studium'`. The first run can succeed, and the next one fails after iCloud flags the new path file. A regular `pip install .` copies the package into `site-packages` and does not use that file.
 
 Check the environment:
 
@@ -644,8 +646,8 @@ Development setup:
 git clone https://github.com/danielmigueltejedor/studium.git
 cd studium
 
-python -m venv .venv
-source .venv/bin/activate
+python -m venv venv
+source venv/bin/activate
 pip install -e ".[dev]"
 
 pytest
