@@ -2,11 +2,12 @@
 
 from pathlib import Path
 
+from studium.authoring.paragraphs import corpus_started_blockers
 from studium.authoring.support import evidence_blockers, excluded_drafts, supported_drafts
 from studium.domain.enums import STATE_ORDER, ProjectState
 from studium.domain.profiles import BOOK_COURSE, BOOK_TOPIC
 from studium.research.course_documents import list_course_documents
-from studium.state.gates import COURSE_JSON, gate_for
+from studium.state.gates import CORPUS_STARTED, COURSE_JSON, gate_for
 from studium.state.machine import ENTRY_GATE
 from studium.storage.init_project import book_kind, load_project_toml, load_state
 from studium.storage.records import COURSE_CANDIDATES, fold_by_id
@@ -73,6 +74,9 @@ def _forward_gates(root: Path, current: ProjectState, kind: str) -> list[dict[st
     for later in STATE_ORDER[index + 1 :]:
         gate_name = ENTRY_GATE[later]
         if kind == BOOK_TOPIC and gate_name == COURSE_JSON:
+            continue
+        if gate_name == CORPUS_STARTED:
+            blockers.extend(corpus_started_blockers(root))
             continue
         if gate_name == COURSE_JSON:
             result = gate_for(gate_name, course, documents)

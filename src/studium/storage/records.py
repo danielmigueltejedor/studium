@@ -10,6 +10,7 @@ PUBLIC_BIBLIOGRAPHY = "bibliography/public.jsonl"
 EXCERPTS = "bibliography/excerpts.jsonl"
 BLUEPRINT = "blueprint/outline.jsonl"
 CLAIMS = "claims/claims.jsonl"
+PARAGRAPHS = "draft/paragraphs.jsonl"
 
 
 def read_jsonl(path: Path) -> list[dict[str, object]]:

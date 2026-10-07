@@ -9,6 +9,7 @@ import tomllib
 from pathlib import Path
 
 from studium import __version__
+from studium.authoring.paragraphs import annotate_next_action
 from studium.cli.authoring import register as register_authoring
 from studium.cli.authoring import run as run_authoring
 from studium.cli.sources import register as register_sources
@@ -48,6 +49,8 @@ Workflow:
   studium run [--project PATH]
   studium blueprint set --section ID TITLE [--section ID TITLE ...] [--json] [--project PATH]
   studium excerpt add --source ID --url URL --text STR [--json] [--project PATH]
+  studium paragraph add --section ID --text STR --excerpt ID [--excerpt ID ...] [--json] [--project PATH]
+  studium completeness [--json] [--project PATH]
   studium claim add --text STR [--source ID ...] [--excerpt ID ...] [--json] [--project PATH]
   studium verify (--fast | --full) [--entity ID] [--json] [--project PATH]
   studium render [--json] [--project PATH]
@@ -130,7 +133,7 @@ def main(argv: list[str] | None = None) -> int:
         return _next(args)
     if args.command == "sources":
         return _sources(args)
-    if args.command in {"blueprint", "claim", "verify", "render", "excerpt"}:
+    if args.command in {"blueprint", "claim", "verify", "render", "excerpt", "paragraph", "completeness"}:
         return _authoring(args)
     if args.command == "mcp":
         return _mcp(args)
@@ -270,7 +273,7 @@ def _status(args: argparse.Namespace) -> int:
     if root is None:
         return 3
     try:
-        payload = project_status(root)
+        payload = annotate_next_action(root, project_status(root))
     except (OSError, json.JSONDecodeError, UnicodeError, tomllib.TOMLDecodeError, TypeError, AttributeError):
         print("invalid project", file=sys.stderr)
         return 1
