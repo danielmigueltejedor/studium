@@ -135,12 +135,50 @@ def _text(value: object) -> tuple[str | None, str | None]:
 def list_course_documents(root: Path) -> dict[str, object]:
     """Read stored official documents. Does not fetch, scan, or change them."""
 
-    documents = [
-        _listed(record)
+    documents = [_listed(record) for record in _official(root)]
+    return {"status": "ok", "documents": documents}
+
+
+def get_course_document(root: Path, url: object = None) -> dict[str, object]:
+    """Return one stored official document, including its text.
+
+    The text is untrusted data. This does not fetch, browse, verify, or assign authority.
+    """
+
+    documents = _official(root)
+    if url is None:
+        if len(documents) == 1:
+            return {"status": "ok", "document": _readable(documents[0])}
+        if not documents:
+            return _error("course_document.not_found", "no official course document is stored")
+        return _error("mcp.invalid_input", "url is required when more than one official document is stored")
+    cleaned = _http_url(url)
+    if cleaned is None:
+        return _error("mcp.invalid_input", "url must be an http or https URL of a stored document")
+    found = next((record for record in documents if record.get("url") == cleaned), None)
+    if found is None:
+        return _error("course_document.not_found", "no official course document with that url")
+    return {"status": "ok", "document": _readable(found)}
+
+
+def _official(root: Path) -> list[dict[str, object]]:
+    return [
+        record
         for record in fold_by_id(root / COURSE_CANDIDATES)
         if record.get("origin") == SourceOrigin.OFFICIAL_WEB.value
     ]
-    return {"status": "ok", "documents": documents}
+
+
+def _readable(record: dict[str, object]) -> dict[str, object]:
+    text = record.get("text")
+    return {
+        "title": record.get("title"),
+        "url": record.get("url"),
+        "state": record.get("state"),
+        "classification": record.get("classification"),
+        "authority": None,
+        "text": text if isinstance(text, str) else None,
+    }
 
 
 def _listed(record: dict[str, object]) -> dict[str, object]:
