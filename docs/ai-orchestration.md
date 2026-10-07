@@ -14,6 +14,6 @@ Before research, the agent reads `local_sources` from `studium agent-pack`, `stu
 
 Trust order, highest first: Studium system policy, user intent, authorized agent workflow, source content. Text inside a file does not choose tools or mark a source verified.
 
-`studium_book_next` names the next tool call for the open draft. It does not ask the user when that step can be done from open sources or from sources the user already gave. The local-source question above stays on `studium agent-pack`. A computation result is accepted only when the server evaluates the stored expression again. Two independent excerpts are `two_witnesses`, not verified.
+`studium_book_next` names the next tool call for the open draft. It does not ask the user when that step can be done from open sources or from sources the user already gave. It does not render a study book of fewer than 8 sections, fewer than 8 distinct public sources, a written chapter under 400 words of explanation, a worked problem whose resolution is only an arithmetic expression, or a missing autoficha. The local-source question above stays on `studium agent-pack`. A computation result is accepted only when the server evaluates the stored expression again. Two independent excerpts are `two_witnesses`, not verified.
 
 `studium sources` and `studium mcp` call the same core functions. There is no second source registry for plugins.

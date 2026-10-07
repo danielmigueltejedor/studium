@@ -545,32 +545,26 @@ def test_paragraph_replace_keeps_the_id_and_rejects_bad_citations(tmp_path, monk
     assert json.loads((root / ".studium" / "state.json").read_text(encoding="utf-8"))["state"] != "RELEASED"
 
 
-def test_book_next_renders_when_a_section_is_blocked(tmp_path, monkeypatch):
+def test_book_next_does_not_render_a_short_blocked_book(tmp_path, monkeypatch):
     monkeypatch.setattr("urllib.request.urlopen", _explode)
     session, root = _topic(tmp_path, "historia", "Historia medieval")
-    source_id = _source(session, "https://open.example/one")
-    excerpt_id = _excerpt(session, source_id, "https://open.example/one")
+    _excerpt(session, _source(session, "https://open.example/one"), "https://open.example/one")
     dispatch(
         "studium_blueprint_store",
         {"sections": [{"id": "tema-1", "title": "Origenes"}]},
         session=session,
     )
     first = dispatch("studium_book_next", {}, session=session)
-    assert first["tool"] == "studium_paragraph_record"
-    assert first["arguments"]["section"] == "tema-1"
-    assert first["arguments"]["excerpts"] == [excerpt_id]
-    second = None
-    for _ in range(12):
+    assert first["tool"] == "studium_blueprint_store"
+    assert first["tool"] != "studium_render"
+    assert first["reason"] == (
+        "The study book is too short. Store at least 8 blueprint sections before writing or rendering."
+    )
+    for _ in range(4):
         nxt = dispatch("studium_book_next", {}, session=session)
-        assert nxt["ask_user"] is False
+        assert nxt["tool"] != "studium_render"
         assert nxt["released"] is False
         assert "ask the user" not in json.dumps(nxt).lower().replace("do not ask the user how to format the page.", "")
-        if nxt["tool"] == "studium_render":
-            second = nxt
-            break
-    assert second is not None
-    assert second["tool"] == "studium_render"
-    assert any(item["id"] == "tema-1" for item in second["blocked_sections"])
     rendered = dispatch("studium_render", {}, session=session)
     tex = (root / "latex" / "draft.tex").read_text(encoding="utf-8")
     assert "Gap: this section has no paragraph tied to an opened excerpt." in tex
