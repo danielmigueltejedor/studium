@@ -6,4 +6,4 @@ Tools: `studium_project_create`, `studium_project_list`, `studium_project_status
 
 There is no `arbitrary_shell`, no `arbitrary_file_read`, and no home-directory scan. Source ids use the existing `SRC-` prefix.
 
-`studium_source_intake` accepts either `path` (an explicit file) or `attachment` (`handle`, `filename`, `content_base64`). The handle is not opened as a path.
+`studium_source_intake` accepts either `path` (an explicit file) or `attachment` (`handle`, `filename`, `content_base64`). The handle is not opened as a path. A formula is accepted only when it is quoted in a cited excerpt or replayed. The draft preamble uses T1 and UTF-8, and Spanish books use tcolorbox headings.

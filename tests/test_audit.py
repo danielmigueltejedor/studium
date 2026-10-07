@@ -187,34 +187,130 @@ def test_multiparagraph_chapter_renders_in_book_shape(tmp_path, monkeypatch):
     rendered = dispatch("studium_render", {}, session=session)
     tex = (root / "latex" / "draft.tex").read_text(encoding="utf-8")
     assert r"\documentclass{book}" in tex
+    assert r"\usepackage[T1]{fontenc}" in tex
+    assert r"\usepackage[utf8]{inputenc}" in tex
+    assert "tcolorbox" in tex
+    assert "PAR-" not in tex
     preface = tex.index("Preface")
     how_to = tex.index("How to use this book")
     contents = tex.index(r"\tableofcontents")
     chapter = tex.index(r"\chapter{Conservation of mass}")
-    purpose = tex.index(r"\section{What this section is for}")
-    explanation = tex.index(r"\section{Explanation}")
-    worked = tex.index(r"\section{Worked problem}")
-    self_check = tex.index(r"\section{Self-check}")
-    audited_line = tex.index("What was audited:")
-    problems = tex.index("Worked problems")
+    purpose = tex.index(r"\begin{tcolorbox}[title={Tip}")
+    explanation = tex.index(r"\begin{tcolorbox}[title={Definition}")
+    worked = tex.index(r"\begin{tcolorbox}[title={Worked problem}")
+    self_check = tex.index(r"\begin{tcolorbox}[title={Self-check}")
     notation = tex.index("Notation")
     formula = tex.index("Formula sheet")
     solutions = tex.index("Solutions")
     source_audit = tex.index("Source audit")
     study = tex.index("Study plan")
     bibliography = tex.index("thebibliography")
-    assert preface < how_to < contents < chapter < purpose < explanation < worked < self_check < audited_line
-    assert audited_line < problems < notation < formula < solutions < source_audit < study < bibliography
+    assert preface < how_to < contents < chapter < purpose < explanation < worked < self_check
+    assert self_check < notation < formula < solutions < source_audit < study < bibliography
     assert explanation < tex.index(second) < worked
     assert purpose < tex.index(first) < explanation
     assert "What is the stored density?" in tex
     assert "Restate the stored density" in tex
     assert audited["audit"]["id"] in tex
     assert "The density is 2." in tex
-    assert r"\part{Problems}" in tex
+    assert r"\part{Problems}" not in tex
+    assert "Problem solving" not in tex
+    assert tex.index("Source status:") > source_audit
     assert rendered["released"] is False
     assert rendered["project_state"] != "RELEASED"
     assert (root / ".studium" / "state.json").read_bytes() == state_before
+
+
+def test_formula_missing_from_the_excerpt_and_not_replayed_is_rejected(tmp_path, monkeypatch):
+    monkeypatch.setattr("urllib.request.urlopen", _explode)
+    session, root = _topic(tmp_path, "fluidos", "Mecánica de fluidos")
+    _section(session, section_id="tema-1", title="Temperatura")
+    source_id = _source(session, "https://open.example/density")
+    excerpt_id = _excerpt(session, source_id, "https://open.example/density", text="The density is 2.")
+    text = "The conversion is F = C × 9/5 + 32. Continuity reduces to du/dx + dv/dy + dw/dz = 0."
+    paragraph = _paragraph(session, "tema-1", text, [excerpt_id])
+    computed = dispatch(
+        "studium_computation_check",
+        {"expression": "2 + 2", "result": 4, "section": "tema-1"},
+        session=session,
+    )
+    assert computed["status"] == "replayed"
+    state_before = (root / ".studium" / "state.json").read_bytes()
+    refused = dispatch(
+        "studium_audit_record",
+        {"target": paragraph, "kind": "formula", "computation": computed["computation"]["id"]},
+        session=session,
+    )
+    assert refused["status"] == "audit.rejected"
+    assert refused["message"].startswith("the formula is not in the cited excerpts and was not replayed: ")
+    assert "F = C × 9/5 + 32" in refused["message"]
+    assert "du/dx + dv/dy + dw/dz = 0" in refused["message"]
+    assert refused["prose_added"] is False
+    assert refused["released"] is False
+    assert "verified" not in json.dumps(refused)
+    assert not (root / "draft" / "audits.jsonl").exists()
+    assert text in (root / "draft" / "paragraphs.jsonl").read_text(encoding="utf-8")
+    assert (root / ".studium" / "state.json").read_bytes() == state_before
+    assert json.loads(state_before)["state"] != "RELEASED"
+
+
+def test_quoted_formula_can_be_audited(tmp_path, monkeypatch):
+    monkeypatch.setattr("urllib.request.urlopen", _explode)
+    session, root = _topic(tmp_path, "fluidos", "Mecánica de fluidos")
+    _section(session, section_id="tema-1", title="Temperatura")
+    quoted = "The conversion is F = C × 9/5 + 32. Continuity reduces to du/dx + dv/dy + dw/dz = 0."
+    source_id = _source(session, "https://open.example/quoted")
+    excerpt_id = _excerpt(session, source_id, "https://open.example/quoted", text=quoted)
+    paragraph = _paragraph(session, "tema-1", quoted, [excerpt_id])
+    computed = dispatch(
+        "studium_computation_check",
+        {"expression": "2 + 2", "result": 4, "section": "tema-1"},
+        session=session,
+    )
+    state_before = (root / ".studium" / "state.json").read_bytes()
+    recorded = dispatch(
+        "studium_audit_record",
+        {"target": paragraph, "kind": "formula", "computation": computed["computation"]["id"]},
+        session=session,
+    )
+    assert recorded["status"] == "recorded"
+    assert recorded["prose_added"] is False
+    assert recorded["released"] is False
+    assert recorded["applied"] is False
+    assert (root / "draft" / "audits.jsonl").is_file()
+    assert (root / ".studium" / "state.json").read_bytes() == state_before
+    assert json.loads(state_before)["state"] != "RELEASED"
+
+
+def test_claim_lines_stay_out_of_the_chapter_body(tmp_path, monkeypatch):
+    monkeypatch.setattr("urllib.request.urlopen", _explode)
+    session, root = _topic(tmp_path, "historia", "Historia medieval")
+    _section(session, title="Conservation of mass")
+    source_id = _source(session, "https://open.example/one")
+    excerpt_id = _excerpt(session, source_id, "https://open.example/one", text="The opened page carries the chapter sentence.")
+    chapter_text = "The opened page carries the chapter sentence for this section."
+    _paragraph(session, "tema-1", chapter_text, [excerpt_id])
+    claim_text = "Old draft line about ownership at compile time."
+    claim = dispatch(
+        "studium_claim_record",
+        {"text": claim_text, "sources": [source_id], "section": "tema-1"},
+        session=session,
+    )
+    assert claim["status"] == "recorded"
+    state_before = (root / ".studium" / "state.json").read_bytes()
+    rendered = dispatch("studium_render", {}, session=session)
+    tex = (root / "latex" / "draft.tex").read_text(encoding="utf-8")
+    chapter, _separator, appendix = tex.partition(r"\chapter{Source audit}")
+    assert claim_text not in chapter
+    assert claim_text in appendix
+    assert "Leftover draft." in appendix
+    assert chapter_text in chapter
+    assert "PAR-" not in tex
+    listed = dispatch("studium_claim_list", {}, session=session)
+    assert any(item["id"] == claim["claim"]["id"] and item["text"] == claim_text for item in listed["claims"])
+    assert rendered["released"] is False
+    assert (root / ".studium" / "state.json").read_bytes() == state_before
+    assert json.loads(state_before)["state"] != "RELEASED"
 
 
 def test_topic_book_without_a_guide_builds_a_study_outline(tmp_path, monkeypatch):
