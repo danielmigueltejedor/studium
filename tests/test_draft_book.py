@@ -368,6 +368,111 @@ def test_explanation_stays_outside_the_one_worked_problem_box(tmp_path, monkeypa
     assert rendered["project_state"] != "RELEASED"
 
 
+def test_consejo_paragraph_becomes_a_tcolorbox_with_babel_spanish(tmp_path, monkeypatch):
+    monkeypatch.setattr("urllib.request.urlopen", _explode)
+    session = open_workspace(str(tmp_path))
+    created = dispatch(
+        "studium_project_create",
+        {"slug": "fluidos", "topic": "Mecánica de fluidos", "language": "es"},
+        session=session,
+    )
+    assert created["status"] == "created"
+    root = tmp_path / "fluidos"
+    source_id = _source(session, "https://open.example/fluidos")
+    excerpt_id = _excerpt(session, source_id, "https://open.example/fluidos", "La página abierta describe el balance.")
+    dispatch(
+        "studium_blueprint_store",
+        {"sections": [{"id": "tema-1", "title": "Continuidad"}]},
+        session=session,
+    )
+    explanation = "La explicación desarrolla el balance en el cuerpo del capítulo."
+    dispatch(
+        "studium_paragraph_record",
+        {"section": "tema-1", "role": "explanation", "text": explanation, "excerpts": [excerpt_id]},
+        session=session,
+    )
+    dispatch(
+        "studium_paragraph_record",
+        {
+            "section": "tema-1",
+            "role": "consejo",
+            "text": "Comprueba las unidades antes de sustituir los datos.",
+            "excerpts": [excerpt_id],
+        },
+        session=session,
+    )
+    dispatch(
+        "studium_paragraph_record",
+        {
+            "section": "tema-1",
+            "text": "Consejo: No mezcles las unidades en el mismo término.",
+            "excerpts": [excerpt_id],
+        },
+        session=session,
+    )
+    dispatch(
+        "studium_paragraph_record",
+        {
+            "section": "tema-1",
+            "text": "Definición: Se llama densidad a la masa por unidad de volumen.",
+            "excerpts": [excerpt_id],
+        },
+        session=session,
+    )
+    dispatch(
+        "studium_paragraph_record",
+        {
+            "section": "tema-1",
+            "text": "Autoficha: Escribe la relación con tus palabras.",
+            "excerpts": [excerpt_id],
+        },
+        session=session,
+    )
+    computed = dispatch(
+        "studium_computation_check",
+        {"expression": "2 + 2", "result": 4, "section": "tema-1"},
+        session=session,
+    )
+    assert computed["status"] == "replayed"
+    rendered = dispatch("studium_render", {}, session=session)
+    tex = (root / "latex" / "draft.tex").read_text(encoding="utf-8")
+    assert r"\usepackage[spanish]{babel}" in tex
+    assert r"\usepackage[a4paper,margin=2.5cm]{geometry}" in tex
+    assert r"\usepackage{titlesec}" in tex
+    assert r"\let\cleardoublepage\clearpage" in tex
+    assert r"\renewcommand{\contentsname}{Índice}" in tex
+    assert "Contents" not in tex
+    assert "Cada párrafo sustantivo cita un extracto almacenado." not in tex
+    assert "Borrador" in tex
+    assert tex.count(r"\begin{tcolorbox}[title={Consejo}") == 1
+    assert tex.count(r"\begin{tcolorbox}[title={Definición}") == 1
+    assert tex.count(r"\begin{tcolorbox}[title={Problema resuelto}") == 1
+    assert tex.count(r"\begin{tcolorbox}[title={Autoficha}") == 1
+    assert "Enunciado" in tex
+    assert "Resolución" in tex
+    assert "Respuesta" in tex
+    assert "Consejo:" not in tex
+    assert "Definición:" not in tex
+    assert "Autoficha:" not in tex
+    outside = _outside_boxes(tex)
+    assert explanation in outside
+    assert "No mezcles las unidades en el mismo término." not in outside
+    assert "Se llama densidad a la masa por unidad de volumen." not in outside
+    assert "Escribe la relación con tus palabras." not in outside
+    assert r"\section{Explicación}" in outside
+    assert rendered["released"] is False
+    if find_engine() is not None:
+        assert rendered["status"] == "rendered"
+        visible = subprocess.check_output(["pdftotext", "-layout", str(root / "latex" / "draft.pdf"), "-"], text=True)
+        pages = visible.split("\f")
+        if pages and not pages[-1].strip():
+            pages = pages[:-1]
+        assert pages
+        assert all(page.strip() not in {"", "Borrador"} for page in pages)
+        assert "Índice" in visible
+        assert "Contents" not in visible
+
+
 def _outside_boxes(tex: str) -> str:
     return re.sub(r"\\begin\{tcolorbox\}.*?\\end\{tcolorbox\}", "", tex, flags=re.S)
 

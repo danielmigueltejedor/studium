@@ -241,6 +241,13 @@ def latex_escape(value: str) -> str:
 
 
 _TEMA_PREFIX = re.compile(r"(?i)^(?:tema\s+\d+\s*:\s*)+")
+_BOX_LEAD = re.compile(r"^(Consejo|Definición|Definicion|Autoficha)\s*[:.\-—–]?\s*")
+_LEAD_KIND = {
+    "Consejo": "consejo",
+    "Definición": "definition",
+    "Definicion": "definition",
+    "Autoficha": "self_check",
+}
 _SPANISH_MARK = re.compile(
     r"[ÁÉÍÓÚÜÑáéíóúüñ¿¡]"
     r"|\b(?:el|la|los|las|del|una|unos|unas|para|como|esta|este|estos|estas|que|también|más|sección|capítulo|fluidos|ecuación|presión|cuando|donde|porque|desde|hasta)\b",
@@ -312,8 +319,15 @@ def _copy(language: str) -> dict[str, str]:
             "science": "Una figura no demuestra la ciencia.",
             "caption": "La cifra del pie sigue sin comprobar.",
             "leftover": "Borrador antiguo.",
-            "note": "Este archivo es un borrador. No está publicado.",
-            "how_a": "Una sección puede contener varios párrafos. Cada párrafo sustantivo cita un extracto almacenado.",
+            "note": (
+                "Este libro presenta el tema con el lenguaje del curso. "
+                "Cada capítulo abre con una entrada breve, sigue con la explicación "
+                "y cierra con un problema resuelto y una autoficha."
+            ),
+            "how_a": (
+                "Lee el capítulo seguido. El consejo, la definición, el problema resuelto "
+                "y la autoficha van en recuadros. La explicación es el cuerpo del texto."
+            ),
             "how_b": "Un capítulo lleva una entrada en cursiva, la explicación en el cuerpo, como mucho un consejo, definiciones solo al introducir un término, un problema resuelto y una autoficha.",
             "consejo": "Consejo",
             "definition": "Definición",
@@ -366,28 +380,56 @@ def _display_title(title: str) -> str:
     return stripped or title.strip()
 
 
-def _preamble(footer: str) -> list[str]:
+def _preamble(footer: str, language: str) -> list[str]:
     mark = latex_escape(footer)
-    return [
+    lines = [
         r"\documentclass{book}",
         r"\usepackage[utf8]{inputenc}",
         r"\usepackage[T1]{fontenc}",
         r"\usepackage{lmodern}",
-        r"\usepackage{graphicx}",
-        r"\usepackage[breakable]{tcolorbox}",
-        r"\usepackage{fancyhdr}",
-        r"\pagestyle{fancy}",
-        r"\fancyhf{}",
-        r"\fancyfoot[C]{\small " + mark + "}",
-        r"\renewcommand{\headrulewidth}{0pt}",
-        r"\renewcommand{\footrulewidth}{0pt}",
-        r"\fancypagestyle{plain}{%",
-        r"  \fancyhf{}",
-        r"  \fancyfoot[C]{\small " + mark + "}",
-        r"  \renewcommand{\headrulewidth}{0pt}",
-        r"  \renewcommand{\footrulewidth}{0pt}",
-        r"}",
     ]
+    if language == "es":
+        lines.extend(
+            [
+                r"\usepackage[spanish]{babel}",
+                r"\addto\captionsspanish{\renewcommand{\contentsname}{Índice}}",
+                r"\usepackage[a4paper,margin=2.5cm]{geometry}",
+                r"\usepackage{titlesec}",
+                r"\titleformat{\chapter}[display]",
+                r"  {\normalfont\filright}{\large\scshape\chaptertitlename\ \thechapter}{1ex}{\huge\bfseries}",
+                r"\titlespacing*{\chapter}{0pt}{2.5ex plus 1ex minus .2ex}{2.3ex}",
+                r"\titleformat{name=\chapter,numberless}[display]",
+                r"  {\normalfont\filright}{}{0pt}{\huge\bfseries}",
+            ]
+        )
+    lines.extend(
+        [
+            r"\usepackage{graphicx}",
+            r"\usepackage[breakable]{tcolorbox}",
+            r"\usepackage{fancyhdr}",
+            r"\pagestyle{fancy}",
+            r"\fancyhf{}",
+            r"\fancyfoot[C]{\small " + mark + "}",
+            r"\renewcommand{\headrulewidth}{0pt}",
+            r"\renewcommand{\footrulewidth}{0pt}",
+            r"\fancypagestyle{plain}{%",
+            r"  \fancyhf{}",
+            r"  \fancyfoot[C]{\small " + mark + "}",
+            r"  \renewcommand{\headrulewidth}{0pt}",
+            r"  \renewcommand{\footrulewidth}{0pt}",
+            r"}",
+        ]
+    )
+    if language == "es":
+        lines.extend(
+            [
+                r"\makeatletter",
+                r"\@openrightfalse",
+                r"\let\cleardoublepage\clearpage",
+                r"\makeatother",
+            ]
+        )
+    return lines
 
 
 def _document(root: Path) -> str:
@@ -409,7 +451,7 @@ def _document(root: Path) -> str:
         if isinstance(section, str):
             by_section.setdefault(section, []).append(paragraph)
     lines = [
-        *_preamble(copy["footer"]),
+        *_preamble(copy["footer"], language),
         r"\begin{document}",
         r"\frontmatter",
         r"\title{" + latex_escape(book) + "}",
@@ -441,7 +483,7 @@ def _document(root: Path) -> str:
             if section["id"] in blocked:
                 lines.extend(["", r"\noindent " + latex_escape(copy["blocked"])])
         else:
-            lines.extend(_chapter_lines(root, section["id"], section_paragraphs, copy))
+            lines.extend(_chapter_lines(root, section["id"], section_paragraphs, copy, language))
         lines.extend(_figure_lines(root, section["id"], copy))
     lines.extend(
         [
@@ -474,29 +516,67 @@ def _chapter_lines(
     section_id: str,
     paragraphs: list[dict[str, object]],
     copy: dict[str, str],
+    language: str,
 ) -> list[str]:
     """Lead and explanation stay in the body. Only four kinds are boxes."""
 
-    purpose = [record for record in paragraphs if record.get("role") == "purpose"]
-    consejo = [record for record in paragraphs if record.get("role") == "consejo"]
-    definitions = [record for record in paragraphs if record.get("role") == "definition"]
-    self_check = [record for record in paragraphs if record.get("role") == "self_check"]
-    body = [
-        record
-        for record in paragraphs
-        if record.get("role") not in {"purpose", "consejo", "definition", "self_check"}
-    ]
+    purpose: list[str] = []
+    consejo: list[str] = []
+    definitions: list[str] = []
+    self_check: list[str] = []
+    body: list[str] = []
+    for record in paragraphs:
+        role = record.get("role")
+        raw = record.get("text") if isinstance(record.get("text"), str) else ""
+        if not raw.strip():
+            continue
+        label, rest = _split_box_lead(raw) if language == "es" else (None, raw)
+        kind = _box_kind(role, label, language)
+        if kind == "consejo":
+            consejo.append(_box_body(raw, label, rest, kind, language))
+        elif kind == "definition":
+            definitions.append(_box_body(raw, label, rest, kind, language))
+        elif kind == "self_check":
+            self_check.append(_box_body(raw, label, rest, kind, language))
+        elif role == "purpose":
+            purpose.append(raw)
+        else:
+            body.append(raw)
     lines: list[str] = []
-    lines.extend(_italic(_prose_text(purpose)))
-    if _prose_text(body):
+    lines.extend(_italic(purpose))
+    if body:
         lines.extend(["", r"\section{" + latex_escape(copy["section"]) + "}"])
-        lines.extend(_plain(_prose_text(body)))
-    lines.extend(_box(copy["consejo"], _plain(_prose_text(consejo))))
-    for record in definitions:
-        lines.extend(_box(copy["definition"], _plain(_prose_text([record]))))
+        lines.extend(_plain(body))
+    lines.extend(_box(copy["consejo"], _plain(consejo)))
+    for text in definitions:
+        lines.extend(_box(copy["definition"], _plain([text])))
     lines.extend(_worked_box(root, section_id, copy))
-    lines.extend(_box(copy["self_check"], _plain(_prose_text(self_check))))
+    lines.extend(_box(copy["self_check"], _plain(self_check)))
     return lines
+
+
+def _split_box_lead(text: str) -> tuple[str | None, str]:
+    stripped = text.strip()
+    match = _BOX_LEAD.match(stripped)
+    if match is None:
+        return None, text
+    return match.group(1), stripped[match.end() :].strip()
+
+
+def _box_kind(role: object, label: str | None, language: str) -> str | None:
+    if role in {"consejo", "definition", "self_check"}:
+        return str(role)
+    if language == "es" and role != "purpose":
+        return _LEAD_KIND.get(label or "")
+    return None
+
+
+def _box_body(raw: str, label: str | None, rest: str, kind: str | None, language: str) -> str:
+    if language != "es" or not rest.strip():
+        return raw
+    if _LEAD_KIND.get(label or "") == kind:
+        return rest
+    return raw
 
 
 def _italic(chunks: list[str]) -> list[str]:
@@ -511,15 +591,6 @@ def _plain(chunks: list[str]) -> list[str]:
     for text in chunks:
         lines.extend(["", latex_escape(text)])
     return lines
-
-
-def _prose_text(paragraphs: list[dict[str, object]]) -> list[str]:
-    found: list[str] = []
-    for paragraph in paragraphs:
-        text = paragraph.get("text") if isinstance(paragraph.get("text"), str) else ""
-        if text.strip():
-            found.append(text)
-    return found
 
 
 def _box(title: str, body: list[str]) -> list[str]:
