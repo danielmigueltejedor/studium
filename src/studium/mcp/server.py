@@ -30,7 +30,7 @@ from studium.authoring.book_next import book_next
 from studium.authoring.claims import list_claims, record_claim
 from studium.authoring.computation import check_computation
 from studium.authoring.excerpts import get_excerpt, list_excerpts, record_excerpt
-from studium.authoring.figures import check_figure, record_figure
+from studium.authoring.figures import check_figure, record_figure, remove_figure
 from studium.authoring.paragraphs import (
     annotate_next_action,
     draft_completeness,
@@ -393,6 +393,15 @@ _TOOLS: tuple[dict[str, object], ...] = (
         ),
     },
     {
+        "name": "studium_figure_remove",
+        "class": "WRITE",
+        "description": (
+            "Delete one stored figure by id. Later renders omit it. "
+            "Does not delete sources, paragraphs, or excerpts. "
+            "A missing id is an error. Does not move the book to RELEASED."
+        ),
+    },
+    {
         "name": "studium_audit_record",
         "class": "WRITE",
         "description": (
@@ -662,7 +671,9 @@ _INSTRUCTIONS = (
             "and writes only inside the book. "
             "The figure is checked only when that rerun succeeds and the output file exists. "
             "A failed or missing engine does not mark it checked. "
-            "Render includes a checked figure in the DRAFT and leaves an unchecked figure as a labeled gap. "
+            "Render includes a checked figure in the DRAFT. "
+            "An unchecked figure is omitted from the chapter and listed with its id in the source audit. "
+            "studium_figure_remove deletes one figure by id. A missing id is an error. "
             "A figure does not prove the science. "
             "A numeric claim in the caption still needs two excerpts or a replayed computation. "
             "Do not fetch URLs. "
@@ -1130,6 +1141,12 @@ def _dispatch(session: McpSession, name: str, arguments: Mapping[str, object]) -
         )
     if name == "studium_figure_check":
         return check_figure(root, arguments.get("id") if "id" in arguments else None)
+    if name == "studium_figure_remove":
+        return remove_figure(
+            root,
+            arguments.get("id") if "id" in arguments else None,
+            actor=actor if isinstance(actor, dict) else None,
+        )
     if name == "studium_audit_record":
         return record_audit(
             root,
@@ -1917,6 +1934,19 @@ def _schema(tool: Mapping[str, object]) -> dict[str, object]:
             "required": ["id"],
             "additionalProperties": True,
         }
+    elif name == "studium_figure_remove":
+        input_schema = {
+            "type": "object",
+            "properties": {
+                "project": _project_property(),
+                "id": {
+                    "type": "string",
+                    "description": "Figure id to delete. Sources, paragraphs, and excerpts are not deleted.",
+                },
+            },
+            "required": ["id"],
+            "additionalProperties": True,
+        }
     elif name == "studium_audit_record":
         input_schema = {
             "type": "object",
@@ -2157,6 +2187,7 @@ def _failed(payload: Mapping[str, object]) -> bool:
         "replayed",
         "replaced",
         "checked",
+        "removed",
         "audit_passed",
         "bibliographic_conflict",
         "bibliographic_identity",

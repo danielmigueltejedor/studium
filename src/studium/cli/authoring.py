@@ -11,7 +11,7 @@ from studium.authoring.book_next import book_next
 from studium.authoring.claims import list_claims, record_claim
 from studium.authoring.computation import check_computation
 from studium.authoring.excerpts import get_excerpt, list_excerpts, record_excerpt
-from studium.authoring.figures import check_figure, record_figure
+from studium.authoring.figures import check_figure, record_figure, remove_figure
 from studium.authoring.paragraphs import draft_completeness, list_paragraphs, record_paragraph, replace_paragraph
 from studium.research.media import record_media
 from studium.research.student_notes import record_student_notes
@@ -21,7 +21,7 @@ from studium.authoring.verify import verify_book
 
 EXIT_GATE = 2
 EXIT_COMPILER = 4
-_OK = frozenset({"ok", "recorded", "rendered", "replayed", "replaced", "checked", "audit_passed"})
+_OK = frozenset({"ok", "recorded", "rendered", "replayed", "replaced", "checked", "removed", "audit_passed"})
 
 
 def register(subparsers: argparse._SubParsersAction) -> None:
@@ -131,6 +131,9 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     figure_check = figure_commands.add_parser("check")
     figure_check.add_argument("figure_id")
     _project(figure_check)
+    figure_remove = figure_commands.add_parser("remove")
+    figure_remove.add_argument("figure_id")
+    _project(figure_remove)
 
     audit = subparsers.add_parser("audit", help=argparse.SUPPRESS)
     audit_commands = audit.add_subparsers(dest="audit_command")
@@ -303,6 +306,8 @@ def run(args: argparse.Namespace, root: Path) -> int:
             )
         if args.figure_command == "check":
             return _emit(check_figure(root, args.figure_id), args.json)
+        if args.figure_command == "remove":
+            return _emit(remove_figure(root, args.figure_id, actor={"kind": "cli"}), args.json)
         print("unknown command: figure", file=sys.stderr)
         return 3
     if command == "book-next":
