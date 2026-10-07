@@ -24,6 +24,7 @@ from studium.domain.profiles import (
     WRITING_STILL_UNAVAILABLE,
 )
 from studium.mcp import MCP_API_VERSION
+from studium.authoring.audit import book_review, contradiction_scan, record_audit
 from studium.authoring.blueprint import get_blueprint, store_blueprint
 from studium.authoring.book_next import book_next
 from studium.authoring.claims import list_claims, record_claim
@@ -121,11 +122,12 @@ _TOOLS: tuple[dict[str, object], ...] = (
         "name": "studium_book_next",
         "class": "WRITE",
         "description": (
-            "Return the next concrete tool call for this book: create or record sources, "
-            "store an opened excerpt, write the missing section paragraph, record a problem, "
-            "run studium_problem_check or studium_computation_check, then render. "
-            "A section that cannot get a second independent open excerpt or a replayed check is marked blocked, "
-            "and the next action is render. Empty sections stay visible gaps. "
+            "Return the next concrete tool call for this book. "
+            "The order is write, then audit, then contradiction scan, then review, then render. "
+            "Write teaching prose for each chapter: what the section is for, the explanation, "
+            "one worked problem, and a short self-check. A sentence that repeats an excerpt is not a chapter. "
+            "A section of one short paragraph does not count as written. "
+            "Empty sections stay visible gaps and do not block render once they are marked blocked. "
             "Does not ask the user when that step can be done from open sources or from sources already given. "
             "Does not fetch URLs and does not move the book to RELEASED."
         ),
@@ -386,6 +388,40 @@ _TOOLS: tuple[dict[str, object], ...] = (
         ),
     },
     {
+        "name": "studium_audit_record",
+        "class": "WRITE",
+        "description": (
+            "Record an audit of a paragraph, problem, or chapter. "
+            "Accepts it for this edition only when every factual claim maps to a passed tool result already stored: "
+            "two excerpts from different sources, a replayed computation, a Rust test that passed 3 times, "
+            "or a figure the server reran. "
+            "A note that the auditor agrees is not a source. "
+            "If the chapter contradicts those sources, or states a number they do not support, the audit rejects it. "
+            "The audit adds no new prose and does not move the book to RELEASED."
+        ),
+    },
+    {
+        "name": "studium_contradiction_scan",
+        "class": "WRITE",
+        "description": (
+            "Compare stored numeric results and claims in one book. "
+            "If two accepted passages assign different values to the same named quantity, record a contradiction. "
+            "An open contradiction blocks review. "
+            "Does not add prose and does not move the book to RELEASED."
+        ),
+    },
+    {
+        "name": "studium_book_review",
+        "class": "WRITE",
+        "description": (
+            "Review this edition. It passes only when every blueprint section that is not an explicit gap "
+            "has several explanatory paragraphs, every substantive paragraph has an audit record, "
+            "no contradiction is open, and every included figure is checked. "
+            "A one-paragraph or one-sentence section is too short. "
+            "Records audit_passed for this edition only. Does not set RELEASED."
+        ),
+    },
+    {
         "name": "studium_computation_check",
         "class": "WRITE",
         "description": (
@@ -633,8 +669,29 @@ _INSTRUCTIONS = (
             "Every substantive paragraph still cites at least one stored excerpt. "
             "studium_paragraph_replace rewrites one paragraph in place. The new text cites a stored excerpt. Status stays draft. "
             "When a section cannot get a second independent open excerpt or a replayed check, "
-            "studium_book_next marks that section blocked and the next action is render. "
-            "Empty sections stay visible gaps. "
+            "studium_book_next marks that section blocked. "
+            "Empty sections stay visible gaps and do not block render once they are marked blocked. "
+            "A chapter is teaching prose, not a sentence that repeats an excerpt. "
+            "The writer may rewrite it with studium_paragraph_replace. "
+            "Use the model's knowledge only by attaching the sources used. "
+            "Each chapter uses one format: what this section is for, the explanation, one worked problem, "
+            "a short self-check, and a line saying what was audited. "
+            "A section of one short paragraph does not count as written. "
+            "Status and studium_book_next lead the client through write, then audit, then contradiction scan, "
+            "then review, then render. "
+            "studium_audit_record accepts a paragraph, problem, or chapter only when it cites a passed tool result already stored: "
+            "two excerpts from different sources, a replayed computation, a Rust test that passed 3 times, "
+            "or a figure the server reran. "
+            "A note that the auditor agrees is rejected. a second model opinion is not a source of truth. "
+            "If the chapter contradicts those sources, or states a number they do not support, the audit rejects it. "
+            "The audit adds no new prose. "
+            "studium_contradiction_scan records a contradiction when two accepted passages assign different values "
+            "to the same named quantity. An open contradiction blocks review. "
+            "studium_book_review records audit_passed for this edition only and does not set RELEASED. "
+            "Without a course guide, build a study book: roadmap, foundations, the topic sections, "
+            "worked problems, self-check, a formula or concept sheet, and the source audit. "
+            "With a guide, chapters follow the stored guide. "
+            "Explanations must teach from the excerpts. Short restatements do not satisfy the length rule. "
             "studium_render uses the book class in this order: front matter (title, preface, how to use, table of contents), "
             "parts and chapters from the blueprint, a problem part (problem solving, worked problems, exam preparation), "
             "appendices (notation, formula sheet, solutions, source audit, study plan), then the bibliography. "
@@ -1023,6 +1080,22 @@ def _dispatch(session: McpSession, name: str, arguments: Mapping[str, object]) -
         )
     if name == "studium_figure_check":
         return check_figure(root, arguments.get("id") if "id" in arguments else None)
+    if name == "studium_audit_record":
+        return record_audit(
+            root,
+            target=arguments.get("target"),
+            kind=arguments.get("kind"),
+            excerpts=arguments.get("excerpts") if "excerpts" in arguments else None,
+            computation=arguments.get("computation") if "computation" in arguments else None,
+            problem=arguments.get("problem") if "problem" in arguments else None,
+            figure=arguments.get("figure") if "figure" in arguments else None,
+            note=arguments.get("note") if "note" in arguments else None,
+            actor=actor if isinstance(actor, dict) else None,
+        )
+    if name == "studium_contradiction_scan":
+        return contradiction_scan(root)
+    if name == "studium_book_review":
+        return book_review(root)
     if name == "studium_computation_check":
         return check_computation(
             root,
@@ -1040,6 +1113,7 @@ def _dispatch(session: McpSession, name: str, arguments: Mapping[str, object]) -
             section=arguments.get("section"),
             text=arguments.get("text"),
             excerpts=arguments.get("excerpts") if "excerpts" in arguments else None,
+            role=arguments.get("role") if "role" in arguments else None,
             actor=actor,
         )
     if name == "studium_paragraph_replace":
@@ -1048,6 +1122,7 @@ def _dispatch(session: McpSession, name: str, arguments: Mapping[str, object]) -
             paragraph_id=arguments.get("id") if "id" in arguments else None,
             text=arguments.get("text"),
             excerpts=arguments.get("excerpts") if "excerpts" in arguments else None,
+            role=arguments.get("role") if "role" in arguments else None,
             actor=actor,
         )
     if name == "studium_media_record":
@@ -1792,6 +1867,48 @@ def _schema(tool: Mapping[str, object]) -> dict[str, object]:
             "required": ["id"],
             "additionalProperties": True,
         }
+    elif name == "studium_audit_record":
+        input_schema = {
+            "type": "object",
+            "properties": {
+                "project": _project_property(),
+                "target": {
+                    "type": "string",
+                    "description": "Paragraph id, problem id, or blueprint section id. The audit adds no prose.",
+                },
+                "kind": {
+                    "type": "string",
+                    "enum": ["formula", "comparison", "historical", "literary", "scientific", "code"],
+                    "description": "Which check this audit records.",
+                },
+                "excerpts": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Two stored excerpt ids from different sources.",
+                },
+                "computation": {"type": "string", "description": "Computation id the server replayed."},
+                "problem": {"type": "string", "description": "Rust problem id that passed 3 times."},
+                "figure": {"type": "string", "description": "Figure id whose program the server reran."},
+                "note": {
+                    "type": "string",
+                    "description": "Ignored as evidence. A second model opinion is not a source of truth.",
+                },
+            },
+            "required": ["target", "kind"],
+            "additionalProperties": True,
+        }
+    elif name == "studium_contradiction_scan":
+        input_schema = {
+            "type": "object",
+            "properties": {"project": _project_property()},
+            "additionalProperties": True,
+        }
+    elif name == "studium_book_review":
+        input_schema = {
+            "type": "object",
+            "properties": {"project": _project_property()},
+            "additionalProperties": True,
+        }
     elif name == "studium_problem_check":
         input_schema = {
             "type": "object",
@@ -1823,6 +1940,11 @@ def _schema(tool: Mapping[str, object]) -> dict[str, object]:
                     "items": {"type": "string"},
                     "description": "Stored excerpt ids. A paragraph with no excerpt is rejected.",
                 },
+                "role": {
+                    "type": "string",
+                    "enum": ["purpose", "explanation", "self_check"],
+                    "description": "purpose, explanation, or self_check. Teaching prose, not a restatement.",
+                },
             },
             "required": ["section", "text", "excerpts"],
             "additionalProperties": True,
@@ -1841,6 +1963,11 @@ def _schema(tool: Mapping[str, object]) -> dict[str, object]:
                     "type": "array",
                     "items": {"type": "string"},
                     "description": "Stored excerpt ids. A paragraph with no excerpt is rejected.",
+                },
+                "role": {
+                    "type": "string",
+                    "enum": ["purpose", "explanation", "self_check"],
+                    "description": "purpose, explanation, or self_check.",
                 },
             },
             "required": ["id", "text", "excerpts"],
@@ -1980,6 +2107,7 @@ def _failed(payload: Mapping[str, object]) -> bool:
         "replayed",
         "replaced",
         "checked",
+        "audit_passed",
         "bibliographic_conflict",
         "bibliographic_identity",
     }:

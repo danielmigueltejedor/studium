@@ -7,6 +7,16 @@ given, and it does not release the book.
 
 from pathlib import Path
 
+from studium.authoring.audit import (
+    audited_paragraph_ids,
+    explicit_gap_ids,
+    review_edition,
+    review_is_current,
+    scan_is_current,
+    section_needs_more_prose,
+    short_paragraph_id,
+    writer_edition,
+)
 from studium.authoring.blueprint import current_sections
 from studium.authoring.computation import list_computations
 from studium.authoring.excerpts import excerpts_by_id
@@ -21,8 +31,11 @@ from studium.storage.records import (
     CLAIMS,
     COMPUTATIONS,
     EXCERPTS,
+    AUDITS,
+    CONTRADICTIONS,
     FIGURES,
     PARAGRAPHS,
+    REVIEWS,
     PROBLEMS,
     PUBLIC_BIBLIOGRAPHY,
     SECTION_BLOCKS,
@@ -37,6 +50,9 @@ _DRAFT_INPUTS = (
     PROBLEMS,
     COMPUTATIONS,
     FIGURES,
+    AUDITS,
+    CONTRADICTIONS,
+    REVIEWS,
     BLUEPRINT,
     CLAIMS,
     EXCERPTS,
@@ -87,11 +103,22 @@ def book_next(root: Path) -> dict[str, object]:
         )
     sections = current_sections(root)
     if not sections:
+        if book_kind(root) == BOOK_TOPIC:
+            return _step(
+                state,
+                "studium_blueprint_store",
+                {"sections": _study_sections(root)},
+                (
+                    "No course guide is stored. Build the study book: roadmap, foundations, "
+                    "the topic sections, worked problems, self-check, a formula or concept sheet, "
+                    "and the source audit. Do not invent a citation."
+                ),
+            )
         return _step(
             state,
             "studium_blueprint_store",
             {},
-            "Store the section ids and titles. Do not invent a citation.",
+            "Store the section ids and titles from the stored course guide. Do not invent a citation.",
         )
     pending = _pending_paragraph(root, sections)
     if pending is not None:
@@ -99,18 +126,89 @@ def book_next(root: Path) -> dict[str, object]:
         return _step(
             state,
             "studium_paragraph_record",
-            {"section": section["id"], "excerpts": [excerpt_id]},
+            {"section": section["id"], "excerpts": [excerpt_id], "role": "purpose"},
             (
-                f"Write the missing section paragraph for {section['id']} ({section['title']}) "
-                "from the stored excerpt."
+                f"Write what this section is for in {section['id']} ({section['title']}) "
+                "from the stored excerpt. Teach from the excerpt. A sentence that repeats it is not a chapter. "
+                "Attach the sources you used. A one-sentence restatement is too short."
             ),
         )
     problem = _pending_problem(root, sections)
     if problem is not None:
         return _step(state, str(problem["tool"]), _arguments(problem.get("arguments")), str(problem["reason"]))
+    longer = _pending_length(root, sections)
+    if longer is not None:
+        kind, section, excerpt_id, paragraph_id = longer
+        if kind == "replace" and paragraph_id is not None:
+            return _step(
+                state,
+                "studium_paragraph_replace",
+                {"id": paragraph_id, "excerpts": [excerpt_id]},
+                (
+                    f"Rewrite {paragraph_id} in {section['id']} ({section['title']}) into teaching prose. "
+                    "A section of one short paragraph does not count as written. "
+                    "A one-sentence section is too short to teach. Attach the sources you used."
+                ),
+                blocked=blocked_sections(root),
+            )
+        return _step(
+            state,
+            "studium_paragraph_record",
+            {"section": section["id"], "excerpts": [excerpt_id], "role": "explanation"},
+            (
+                f"Write another explanatory paragraph for {section['id']} ({section['title']}). "
+                "A section of one short paragraph does not count as written. "
+                "A one-sentence section is too short to teach."
+            ),
+            blocked=blocked_sections(root),
+        )
+    self_check = _pending_self_check(root, sections)
+    if self_check is not None:
+        section, excerpt_id = self_check
+        return _step(
+            state,
+            "studium_paragraph_record",
+            {"section": section["id"], "excerpts": [excerpt_id], "role": "self_check"},
+            (
+                f"Add a short self-check for {section['id']} ({section['title']}). "
+                "The explanation above must still teach from the excerpts."
+            ),
+            blocked=blocked_sections(root),
+        )
+    audit = _pending_audit(root)
+    if audit is not None:
+        return _step(
+            state,
+            "studium_audit_record",
+            {"target": audit},
+            (
+                f"Audit {audit}. Cite a passed tool result: two excerpts from different sources, "
+                "a replayed computation, a Rust test that passed 3 times, or a checked figure. "
+                "The audit adds no new prose."
+            ),
+            blocked=blocked_sections(root),
+        )
+    if not scan_is_current(root) and not offers_for(root, writer_edition(root), "contradiction_scan"):
+        remember_offer(root, section_id=writer_edition(root), kind="contradiction_scan")
+        return _step(
+            state,
+            "studium_contradiction_scan",
+            {},
+            "Compare stored numeric results and claims. An open contradiction blocks review.",
+            blocked=blocked_sections(root),
+        )
+    if not review_is_current(root) and not offers_for(root, review_edition(root), "book_review"):
+        remember_offer(root, section_id=review_edition(root), kind="book_review")
+        return _step(
+            state,
+            "studium_book_review",
+            {},
+            "Review this edition. audit_passed does not release the book.",
+            blocked=blocked_sections(root),
+        )
     if not _draft_is_current(root):
         return _render_step(state, root, sections)
-    return _step(state, None, {}, "The DRAFT is rendered. Do not request release.")
+    return _step(state, None, {}, "The DRAFT is rendered. Do not request release.", blocked=blocked_sections(root))
 
 
 def _render_step(
@@ -348,6 +446,98 @@ def _arguments(value: object) -> dict[str, object]:
     if isinstance(value, dict):
         return dict(value)
     return {}
+
+
+def _study_sections(root: Path) -> list[dict[str, str]]:
+    name = "Topic"
+    document = load_project_toml(root)
+    course = document.get("course")
+    if isinstance(course, dict) and isinstance(course.get("name"), str) and course["name"].strip():
+        name = course["name"].strip()
+    return [
+        {"id": "roadmap", "title": "Roadmap"},
+        {"id": "foundations", "title": "Foundations"},
+        {"id": "topic", "title": name},
+        {"id": "worked-problems", "title": "Worked problems"},
+        {"id": "self-check", "title": "Self-check"},
+        {"id": "formula-sheet", "title": "Formula or concept sheet"},
+    ]
+
+
+def _pending_length(
+    root: Path,
+    sections: list[dict[str, str]],
+) -> tuple[str, dict[str, str], str, str | None] | None:
+    blocked = blocked_ids(root)
+    for section in sections:
+        if section["id"] in blocked:
+            continue
+        paragraphs = [
+            record
+            for record in supported_paragraphs(root)
+            if record.get("section") == section["id"] and record.get("role") != "self_check"
+        ]
+        if not paragraphs:
+            continue
+        excerpt_id = _excerpt_on(paragraphs[0])
+        if excerpt_id is None:
+            continue
+        short_id = short_paragraph_id(root, section["id"])
+        if short_id is not None and not offers_for(root, short_id, "rewrite"):
+            remember_offer(root, section_id=short_id, kind="rewrite")
+            return "replace", section, excerpt_id, short_id
+        if section_needs_more_prose(root, section["id"]) and not offers_for(root, section["id"], "paragraph_more"):
+            remember_offer(root, section_id=section["id"], kind="paragraph_more")
+            return "more", section, excerpt_id, None
+    return None
+
+
+def _pending_self_check(
+    root: Path,
+    sections: list[dict[str, str]],
+) -> tuple[dict[str, str], str] | None:
+    blocked = blocked_ids(root)
+    for section in sections:
+        if section["id"] in blocked:
+            continue
+        paragraphs = [record for record in supported_paragraphs(root) if record.get("section") == section["id"]]
+        if not paragraphs or any(record.get("role") == "self_check" for record in paragraphs):
+            continue
+        if offers_for(root, section["id"], "self_check"):
+            continue
+        excerpt_id = _excerpt_on(paragraphs[0])
+        if excerpt_id is None:
+            continue
+        remember_offer(root, section_id=section["id"], kind="self_check")
+        return section, excerpt_id
+    return None
+
+
+def _pending_audit(root: Path) -> str | None:
+    covered = audited_paragraph_ids(root)
+    gaps = explicit_gap_ids(root)
+    for section in current_sections(root):
+        if section["id"] in gaps:
+            continue
+        paragraphs = [record for record in supported_paragraphs(root) if record.get("section") == section["id"]]
+        identifiers = [record.get("id") for record in paragraphs if isinstance(record.get("id"), str)]
+        if not identifiers or all(identifier in covered for identifier in identifiers):
+            continue
+        if offers_for(root, section["id"], "audit"):
+            continue
+        remember_offer(root, section_id=section["id"], kind="audit")
+        return section["id"]
+    return None
+
+
+def _excerpt_on(paragraph: dict[str, object]) -> str | None:
+    excerpts = paragraph.get("excerpts")
+    if not isinstance(excerpts, list):
+        return None
+    for excerpt_id in excerpts:
+        if isinstance(excerpt_id, str) and excerpt_id.strip():
+            return excerpt_id
+    return None
 
 
 def _step(
