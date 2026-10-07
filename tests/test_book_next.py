@@ -60,12 +60,18 @@ def test_book_next_moves_on_when_a_section_is_filled(tmp_path, monkeypatch):
     assert recorded["status"] == "recorded"
     assert recorded["paragraph"]["status"] == "draft"
     nxt = dispatch("studium_book_next", {}, session=session)
-    assert nxt["tool"] == "studium_render"
-    assert nxt["arguments"].get("section") != "tema-1"
-    assert "tema-2" in nxt["reason"]
-    assert "tema-1" not in nxt["reason"]
+    assert nxt["tool"] == "studium_paragraph_replace"
+    assert nxt["arguments"]["id"] == recorded["paragraph"]["id"]
+    assert "too short" in nxt["reason"]
+    assert nxt["ask_user"] is False
     assert nxt["released"] is False
     assert "ask the user" not in json.dumps(nxt).lower()
+    rendered = _until_tool(session, "studium_render")
+    assert rendered["arguments"].get("section") != "tema-1"
+    assert "tema-2" in rendered["reason"]
+    assert "tema-1" not in rendered["reason"]
+    assert rendered["released"] is False
+    assert "ask the user" not in json.dumps(rendered).lower()
 
 
 def test_computation_is_accepted_only_when_replayed(tmp_path, monkeypatch):
@@ -221,13 +227,14 @@ def test_verify_still_refuses_release(tmp_path, monkeypatch):
     assert (root / ".studium" / "state.json").read_bytes() == state_before
     rendered = dispatch("studium_render", {}, session=session)
     assert rendered["released"] is False
-    done = dispatch("studium_book_next", {}, session=session)
+    done = _until_tool(session, None)
     assert done["tool"] is None
     assert done["ask_user"] is False
     assert done["released"] is False
     assert "Do not request release." in done["reason"]
     assert "ask the user" not in json.dumps(done).lower()
     assert json.loads(state_before)["state"] != "RELEASED"
+    assert (root / ".studium" / "state.json").read_bytes() == state_before
 
 
 def test_client_instructions_draft_without_asking_or_releasing():
@@ -270,6 +277,22 @@ def _excerpt(session, source_id: str, url: str, text: str = _PASSAGE) -> str:
     )
     assert recorded["status"] == "recorded"
     return str(recorded["excerpt"]["id"])
+
+
+def _until_tool(session, tool: str | None) -> dict[str, object]:
+    last: dict[str, object] = {}
+    for _ in range(12):
+        nxt = dispatch("studium_book_next", {}, session=session)
+        assert nxt["ask_user"] is False
+        assert nxt["released"] is False
+        assert "ask the user" not in json.dumps(nxt).lower()
+        last = nxt
+        if nxt["tool"] == "studium_render" and tool != "studium_render":
+            assert dispatch("studium_render", {}, session=session)["released"] is False
+            continue
+        if nxt["tool"] == tool:
+            return nxt
+    raise AssertionError(f"book_next did not reach {tool}: {last.get('tool')}")
 
 
 def _explode(*_args, **_kwargs):

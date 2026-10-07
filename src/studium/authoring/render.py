@@ -18,7 +18,7 @@ from studium.domain.profiles import BOOK_TOPIC
 from studium.research.public_sources import bibliography_counts
 from studium.storage.init_project import book_kind, load_project_toml, load_state_holding_lock
 from studium.storage.locking import ProjectLocked, project_lock
-from studium.storage.records import COMPUTATIONS, PROBLEMS, PUBLIC_BIBLIOGRAPHY, fold_by_id
+from studium.storage.records import AUDITS, COMPUTATIONS, PROBLEMS, PUBLIC_BIBLIOGRAPHY, fold_by_id
 
 _TEX_NAME = "draft.tex"
 _PDF_NAME = "draft.pdf"
@@ -279,6 +279,8 @@ def _document(root: Path) -> str:
         r"\noindent " + latex_escape(_EMPTY_PIECE),
         "",
         r"\noindent A section may hold several paragraphs. Each substantive paragraph cites a stored excerpt.",
+        "",
+        r"\noindent A chapter states what the section is for, the explanation, one worked problem, a short self-check, and what was audited.",
         r"\tableofcontents",
         r"\mainmatter",
         r"\part{" + latex_escape(book) + "}",
@@ -304,9 +306,9 @@ def _document(root: Path) -> str:
                     ]
                 )
         else:
-            for paragraph in section_paragraphs:
-                lines.extend(_claim_lines(paragraph, titles, excerpts, sources))
-                lines.extend(["", r"\noindent " + latex_escape(_audit_label(root, paragraph)) + "."])
+            lines.extend(
+                _chapter_lines(root, section["id"], section_paragraphs, titles, excerpts, sources)
+            )
         lines.extend(_figure_lines(root, section["id"]))
     lines.extend(
         [
@@ -344,6 +346,92 @@ def _document(root: Path) -> str:
     lines.extend(_bibliography_lines(root))
     lines.extend([r"\end{thebibliography}", r"\end{document}", ""])
     return "\n".join(lines)
+
+
+def _chapter_lines(
+    root: Path,
+    section_id: str,
+    paragraphs: list[dict[str, object]],
+    titles: dict[str, str],
+    excerpts: dict[str, dict[str, object]],
+    sources: dict[str, dict[str, object]],
+) -> list[str]:
+    """One chapter shape. Missing pieces stay gaps. The audit line is a label, not new prose."""
+
+    purpose = [record for record in paragraphs if record.get("role") == "purpose"]
+    self_check = [record for record in paragraphs if record.get("role") == "self_check"]
+    explanation = [record for record in paragraphs if record.get("role") not in {"purpose", "self_check"}]
+    lines = ["", r"\section{What this section is for}"]
+    lines.extend(_prose_blocks(root, purpose, titles, excerpts, sources))
+    lines.extend(["", r"\section{Explanation}"])
+    lines.extend(_prose_blocks(root, explanation, titles, excerpts, sources))
+    lines.extend(["", r"\section{Worked problem}"])
+    lines.extend(_section_worked(root, section_id))
+    lines.extend(["", r"\section{Self-check}"])
+    lines.extend(_prose_blocks(root, self_check, titles, excerpts, sources))
+    lines.extend(["", r"\noindent " + latex_escape(_audited_line(root, section_id, paragraphs))])
+    return lines
+
+
+def _prose_blocks(
+    root: Path,
+    paragraphs: list[dict[str, object]],
+    titles: dict[str, str],
+    excerpts: dict[str, dict[str, object]],
+    sources: dict[str, dict[str, object]],
+) -> list[str]:
+    if not paragraphs:
+        return ["", r"\noindent " + latex_escape(_EMPTY_PIECE)]
+    lines: list[str] = []
+    for paragraph in paragraphs:
+        lines.extend(_claim_lines(paragraph, titles, excerpts, sources))
+        lines.extend(["", r"\noindent " + latex_escape(_audit_label(root, paragraph)) + "."])
+    return lines
+
+
+def _section_worked(root: Path, section_id: str) -> list[str]:
+    lines: list[str] = []
+    for record in fold_by_id(root / PROBLEMS):
+        if record.get("section") == section_id:
+            lines.extend(_problem_entry(record))
+    for record in fold_by_id(root / COMPUTATIONS):
+        if record.get("section") != section_id:
+            continue
+        if record.get("status") == "replayed" and record.get("correct") is True:
+            identifier = record.get("id") if isinstance(record.get("id"), str) else "computation"
+            expression = record.get("expression") if isinstance(record.get("expression"), str) else ""
+            lines.extend(
+                [
+                    "",
+                    r"\noindent\textbf{" + latex_escape(identifier) + "}",
+                    "",
+                    latex_escape(expression),
+                    "",
+                    r"\noindent replayed check.",
+                ]
+            )
+    if not lines:
+        return ["", r"\noindent " + latex_escape(_EMPTY_PIECE)]
+    return lines
+
+
+def _audited_line(root: Path, section_id: str, paragraphs: list[dict[str, object]]) -> str:
+    targets = {section_id}
+    for paragraph in paragraphs:
+        identifier = paragraph.get("id")
+        if isinstance(identifier, str):
+            targets.add(identifier)
+    parts: list[str] = []
+    for record in fold_by_id(root / AUDITS):
+        if record.get("status") != "recorded" or record.get("target") not in targets:
+            continue
+        identifier = record.get("id") if isinstance(record.get("id"), str) else "audit"
+        kind = record.get("kind") if isinstance(record.get("kind"), str) else ""
+        target = record.get("target") if isinstance(record.get("target"), str) else ""
+        parts.append(f"{identifier} {kind} {target}".strip())
+    if not parts:
+        return "What was audited: unchecked."
+    return "What was audited: " + "; ".join(parts) + "."
 
 
 def _figure_lines(root: Path, section_id: str) -> list[str]:
@@ -503,9 +591,6 @@ def _audit_lines(
     sources: dict[str, dict[str, object]],
 ) -> list[str]:
     lines: list[str] = []
-    if not paragraphs and not claims:
-        lines.extend(["", r"\noindent " + latex_escape(_EMPTY_PIECE)])
-        return lines
     for paragraph in paragraphs:
         identifier = paragraph.get("id") if isinstance(paragraph.get("id"), str) else "paragraph"
         label = _audit_label(root, paragraph)
@@ -521,6 +606,15 @@ def _audit_lines(
         label = _audit_label(root, claim)
         lines.extend(["", r"\noindent " + latex_escape(f"{identifier}: {label}")])
         lines.extend(_claim_lines(claim, titles, excerpts, sources))
+    for record in fold_by_id(root / AUDITS):
+        if record.get("status") != "recorded":
+            continue
+        identifier = record.get("id") if isinstance(record.get("id"), str) else "audit"
+        target = record.get("target") if isinstance(record.get("target"), str) else ""
+        kind = record.get("kind") if isinstance(record.get("kind"), str) else ""
+        lines.extend(["", r"\noindent " + latex_escape(f"{identifier}: {target} {kind}".strip())])
+    if not lines:
+        lines.extend(["", r"\noindent " + latex_escape(_EMPTY_PIECE)])
     return lines
 
 

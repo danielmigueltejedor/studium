@@ -27,6 +27,7 @@ def record_paragraph(
     section: object,
     text: object,
     excerpts: object,
+    role: object = None,
     actor: dict[str, object] | None = None,
 ) -> dict[str, object]:
     """Store one draft paragraph for a blueprint section. Does not change state."""
@@ -40,6 +41,9 @@ def record_paragraph(
     excerpt_ids, excerpt_error = _excerpts(excerpts)
     if excerpt_error is not None:
         return excerpt_error
+    paragraph_role, role_error = _role(role)
+    if role_error is not None:
+        return role_error
     assert section_id is not None and cleaned_text is not None and excerpt_ids is not None
     if directive_changes_policy(cleaned_text):
         return _error("policy.overridden", "paragraph text changed policy")
@@ -68,6 +72,8 @@ def record_paragraph(
                 "content_directives_ignored": contains_directive(cleaned_text.encode("utf-8")),
                 "recorded_at": utc_now(),
             }
+            if paragraph_role is not None:
+                record["role"] = paragraph_role
             append_jsonl(root / PARAGRAPHS, record)
             _audit(root, record=record, actor=actor)
             fresh = load_state_holding_lock(root)
@@ -82,6 +88,7 @@ def replace_paragraph(
     paragraph_id: object,
     text: object,
     excerpts: object,
+    role: object = None,
     actor: dict[str, object] | None = None,
 ) -> dict[str, object]:
     """Rewrite one stored paragraph in place. The new text still cites an excerpt.
@@ -102,6 +109,9 @@ def replace_paragraph(
     excerpt_ids, excerpt_error = _excerpts(excerpts)
     if excerpt_error is not None:
         return excerpt_error
+    paragraph_role, role_error = _role(role)
+    if role_error is not None:
+        return role_error
     assert cleaned_text is not None and excerpt_ids is not None
     if directive_changes_policy(cleaned_text):
         return _error("policy.overridden", "paragraph text changed policy")
@@ -131,6 +141,10 @@ def replace_paragraph(
                 "recorded_at": utc_now(),
                 "replaces": identifier,
             }
+            if paragraph_role is not None:
+                record["role"] = paragraph_role
+            elif isinstance(current.get("role"), str):
+                record["role"] = current["role"]
             append_jsonl(root / PARAGRAPHS, record)
             _audit(root, record=record, actor=actor, operation="replace_paragraph")
             fresh = load_state_holding_lock(root)
@@ -234,11 +248,28 @@ def annotate_next_action(root: Path, payload: dict[str, object]) -> dict[str, ob
             " Every blueprint section has a supported paragraph. "
             "Add checked problems. Do not mark the book released."
         )
+    suffix += (
+        " Write teaching prose from the excerpts, then studium_audit_record, "
+        "studium_contradiction_scan, and studium_book_review, then render."
+    )
     if suffix.strip() in action:
         return payload
     updated = dict(payload)
     updated["next_action"] = action + suffix
     return updated
+
+
+def _role(value: object) -> tuple[str | None, dict[str, object] | None]:
+    if value is None:
+        return None, None
+    if not isinstance(value, str):
+        return None, _error("mcp.invalid_input", "role must be purpose, explanation, or self_check")
+    cleaned = value.strip().lower()
+    if cleaned == "explanation":
+        return None, None
+    if cleaned not in {"purpose", "self_check"}:
+        return None, _error("mcp.invalid_input", "role must be purpose, explanation, or self_check")
+    return cleaned, None
 
 
 def _section(root: Path, value: object) -> tuple[str | None, dict[str, object] | None]:
@@ -287,6 +318,8 @@ def _public(record: dict[str, object]) -> dict[str, object]:
         "status": "draft",
         "classification": "PENDING",
     }
+    if record.get("role") in {"purpose", "self_check"}:
+        visible["role"] = record["role"]
     if record.get("content_directives_ignored") is True:
         visible["content_directives_ignored"] = True
     return visible

@@ -169,11 +169,17 @@ def test_book_next_renders_when_a_section_is_blocked(tmp_path, monkeypatch):
     assert first["tool"] == "studium_paragraph_record"
     assert first["arguments"]["section"] == "tema-1"
     assert first["arguments"]["excerpts"] == [excerpt_id]
-    second = dispatch("studium_book_next", {}, session=session)
+    second = None
+    for _ in range(12):
+        nxt = dispatch("studium_book_next", {}, session=session)
+        assert nxt["ask_user"] is False
+        assert nxt["released"] is False
+        assert "ask the user" not in json.dumps(nxt).lower()
+        if nxt["tool"] == "studium_render":
+            second = nxt
+            break
+    assert second is not None
     assert second["tool"] == "studium_render"
-    assert second["ask_user"] is False
-    assert second["released"] is False
-    assert "ask the user" not in json.dumps(second).lower()
     assert any(item["id"] == "tema-1" for item in second["blocked_sections"])
     rendered = dispatch("studium_render", {}, session=session)
     tex = (root / "latex" / "draft.tex").read_text(encoding="utf-8")

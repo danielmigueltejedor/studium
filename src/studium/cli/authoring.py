@@ -5,6 +5,7 @@ import json
 import sys
 from pathlib import Path
 
+from studium.authoring.audit import book_review, contradiction_scan, record_audit
 from studium.authoring.blueprint import get_blueprint, store_blueprint
 from studium.authoring.book_next import book_next
 from studium.authoring.claims import list_claims, record_claim
@@ -20,7 +21,7 @@ from studium.authoring.verify import verify_book
 
 EXIT_GATE = 2
 EXIT_COMPILER = 4
-_OK = frozenset({"ok", "recorded", "rendered", "replayed", "replaced", "checked"})
+_OK = frozenset({"ok", "recorded", "rendered", "replayed", "replaced", "checked", "audit_passed"})
 
 
 def register(subparsers: argparse._SubParsersAction) -> None:
@@ -72,6 +73,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     paragraph_add.add_argument("--section", required=True)
     paragraph_add.add_argument("--text", required=True)
     paragraph_add.add_argument("--excerpt", action="append", required=True)
+    paragraph_add.add_argument("--role", choices=["purpose", "explanation", "self_check"])
     _project(paragraph_add)
     paragraph_list = paragraph_commands.add_parser("list")
     _project(paragraph_list)
@@ -79,6 +81,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     paragraph_replace.add_argument("paragraph_id")
     paragraph_replace.add_argument("--text", required=True)
     paragraph_replace.add_argument("--excerpt", action="append", required=True)
+    paragraph_replace.add_argument("--role", choices=["purpose", "explanation", "self_check"])
     _project(paragraph_replace)
 
     media = subparsers.add_parser("media", help=argparse.SUPPRESS)
@@ -128,6 +131,28 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     figure_check = figure_commands.add_parser("check")
     figure_check.add_argument("figure_id")
     _project(figure_check)
+
+    audit = subparsers.add_parser("audit", help=argparse.SUPPRESS)
+    audit_commands = audit.add_subparsers(dest="audit_command")
+    audit_add = audit_commands.add_parser("add")
+    audit_add.add_argument("--target", required=True)
+    audit_add.add_argument(
+        "--kind",
+        required=True,
+        choices=["formula", "comparison", "historical", "literary", "scientific", "code"],
+    )
+    audit_add.add_argument("--excerpt", action="append")
+    audit_add.add_argument("--computation")
+    audit_add.add_argument("--problem")
+    audit_add.add_argument("--figure")
+    audit_add.add_argument("--note")
+    _project(audit_add)
+
+    contradiction = subparsers.add_parser("contradiction", help=argparse.SUPPRESS)
+    _project(contradiction)
+
+    review = subparsers.add_parser("review", help=argparse.SUPPRESS)
+    _project(review)
 
     computation = subparsers.add_parser("computation", help=argparse.SUPPRESS)
     computation.add_argument("--expression")
@@ -195,6 +220,7 @@ def run(args: argparse.Namespace, root: Path) -> int:
                     section=args.section,
                     text=args.text,
                     excerpts=list(args.excerpt),
+                    role=args.role,
                     actor={"kind": "cli"},
                 ),
                 args.json,
@@ -208,6 +234,7 @@ def run(args: argparse.Namespace, root: Path) -> int:
                     paragraph_id=args.paragraph_id,
                     text=args.text,
                     excerpts=list(args.excerpt),
+                    role=args.role,
                     actor={"kind": "cli"},
                 ),
                 args.json,
@@ -280,6 +307,28 @@ def run(args: argparse.Namespace, root: Path) -> int:
         return 3
     if command == "book-next":
         return _emit(book_next(root), args.json)
+    if command == "audit":
+        if args.audit_command == "add":
+            return _emit(
+                record_audit(
+                    root,
+                    target=args.target,
+                    kind=args.kind,
+                    excerpts=list(args.excerpt) if args.excerpt else None,
+                    computation=args.computation,
+                    problem=args.problem,
+                    figure=args.figure,
+                    note=args.note,
+                    actor={"kind": "cli"},
+                ),
+                args.json,
+            )
+        print("unknown command: audit", file=sys.stderr)
+        return 3
+    if command == "contradiction":
+        return _emit(contradiction_scan(root), args.json)
+    if command == "review":
+        return _emit(book_review(root), args.json)
     if command == "computation":
         return _emit(
             check_computation(
