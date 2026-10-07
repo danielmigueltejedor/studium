@@ -132,6 +132,28 @@ def _text(value: object) -> tuple[str | None, str | None]:
     return value, None
 
 
+def list_course_documents(root: Path) -> dict[str, object]:
+    """Read stored official documents. Does not fetch, scan, or change them."""
+
+    documents = [
+        _listed(record)
+        for record in fold_by_id(root / COURSE_CANDIDATES)
+        if record.get("origin") == SourceOrigin.OFFICIAL_WEB.value
+    ]
+    return {"status": "ok", "documents": documents}
+
+
+def _listed(record: dict[str, object]) -> dict[str, object]:
+    return {
+        "title": record.get("title"),
+        "url": record.get("url"),
+        "state": record.get("state"),
+        "classification": record.get("classification"),
+        "source_class": record.get("source_class"),
+        "authority_status": record.get("authority_status"),
+    }
+
+
 def _public(record: dict[str, object]) -> dict[str, object]:
     return {key: value for key, value in record.items() if key != "text"}
 
