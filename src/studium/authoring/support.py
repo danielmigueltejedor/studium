@@ -47,6 +47,71 @@ def support_blockers(root: Path, source_ids: list[str]) -> list[dict[str, object
     return blockers
 
 
+def paragraph_citation_blockers(root: Path, excerpt_ids: list[str]) -> list[dict[str, object]]:
+    """Support check for a paragraph that cites stored excerpts.
+
+    A course book may cite a source the guide does not cite when that source is
+    flagged ``open_supplement``. A year, title, or ISBN conflict stays unusable.
+    """
+
+    if not excerpt_ids:
+        return [
+            {
+                "code": "claim.excerpt_missing",
+                "entity_id": None,
+                "message": "a paragraph needs a stored excerpt id",
+            }
+        ]
+    blockers: list[dict[str, object]] = []
+    excerpts = excerpts_by_id(root)
+    records = _public_by_id(root)
+    course_book = book_kind(root) != BOOK_TOPIC
+    for excerpt_id in excerpt_ids:
+        excerpt = excerpts.get(excerpt_id)
+        if excerpt is None:
+            blockers.append(
+                {
+                    "code": "claim.excerpt_missing",
+                    "entity_id": excerpt_id,
+                    "message": "no stored excerpt with that id",
+                }
+            )
+            continue
+        source_id = excerpt.get("source_id")
+        record = records.get(source_id) if isinstance(source_id, str) else None
+        if record is None:
+            blockers.append(
+                {
+                    "code": "claim.source_missing",
+                    "entity_id": excerpt_id,
+                    "message": "excerpt has no public source id",
+                }
+            )
+            continue
+        conflict = _conflict_blocker(record)
+        if conflict is not None:
+            blockers.append(
+                {
+                    "code": conflict["code"],
+                    "entity_id": conflict.get("entity_id"),
+                    "message": f"excerpt {excerpt_id}: {conflict['message']}",
+                }
+            )
+            continue
+        if course_book and record.get("course_guide_cited") is not True and record.get("open_supplement") is not True:
+            blockers.append(
+                {
+                    "code": "claim.not_cited",
+                    "entity_id": source_id,
+                    "message": (
+                        f"excerpt {excerpt_id}: not marked as cited by the stored course guide "
+                        "and not flagged as an open supplement"
+                    ),
+                }
+            )
+    return blockers
+
+
 def citation_blockers(
     root: Path,
     source_ids: list[str],

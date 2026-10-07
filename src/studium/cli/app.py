@@ -133,7 +133,7 @@ def main(argv: list[str] | None = None) -> int:
         return _next(args)
     if args.command == "sources":
         return _sources(args)
-    if args.command in {"blueprint", "claim", "verify", "render", "excerpt", "paragraph", "completeness"}:
+    if args.command in {"blueprint", "claim", "verify", "render", "excerpt", "paragraph", "completeness", "problem"}:
         return _authoring(args)
     if args.command == "mcp":
         return _mcp(args)

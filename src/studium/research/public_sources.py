@@ -33,6 +33,19 @@ _IDENTITY_ONLY = "Bibliographic identity only. This is not proof of the book's c
 _STILL_PENDING = "The opened page does not conflict with the stored citation. Classification stays PENDING."
 
 
+_UNAUTHORIZED_KINDS = frozenset({"pirate", "pirated", "unauthorized", "unauthorised"})
+
+
+def unauthorized_copy(value: object) -> bool:
+    """True when the client marks a copy as pirate or unauthorized."""
+
+    if value is True:
+        return True
+    if isinstance(value, str) and value.strip().lower() in _UNAUTHORIZED_KINDS | {"true", "yes"}:
+        return True
+    return False
+
+
 def record_public_source(
     root: Path,
     *,
@@ -62,6 +75,8 @@ def record_public_source(
     source_kind, kind_error = _kind(kind)
     if kind_error is not None:
         return _error("mcp.invalid_input", kind_error)
+    if isinstance(source_kind, str) and source_kind.lower() in _UNAUTHORIZED_KINDS:
+        return _error("source.unauthorized", "pirate or unauthorized copies are not recorded")
     publication_isbn, isbn_error = _isbn(isbn)
     if isbn_error is not None:
         return _error("mcp.invalid_input", isbn_error)
@@ -294,6 +309,56 @@ def mark_course_guide_citation(
         return _error("storage.locked", "project is locked")
 
 
+def mark_open_supplement(
+    root: Path,
+    *,
+    source_id: object,
+    open_supplement: object,
+    open_licensed: object = None,
+    actor: dict[str, object] | None = None,
+) -> dict[str, object]:
+    """Flag a source the client opened as an open supplement.
+
+    This does not fetch the URL and does not make the source part of the guide
+    bibliography. A pirate or unauthorized copy is rejected.
+    """
+
+    identifier = _identifier(source_id)
+    if identifier is None:
+        return _error("mcp.invalid_input", "id is required")
+    if not isinstance(open_supplement, bool):
+        return _error("mcp.invalid_input", "open_supplement must be true or false")
+    if open_supplement and open_licensed is not True:
+        return _error(
+            "source.unauthorized",
+            "an open supplement must be open-licensed text you opened, not a pirate or unauthorized copy",
+        )
+    try:
+        with project_lock(root):
+            state = load_state_holding_lock(root)
+            prior = _find(root, identifier)
+            if prior is None:
+                return _error("public_source.not_found", "no public source with that id")
+            if prior.get("open_supplement") is open_supplement:
+                stored = prior
+            else:
+                stored = _with_open_supplement(prior, open_supplement)
+                append_jsonl(root / PUBLIC_BIBLIOGRAPHY, stored)
+                _audit_public(
+                    root,
+                    source_id=identifier,
+                    operation="mark_open_supplement",
+                    actor=actor,
+                    previous_hash=_text_hash(prior),
+                    new_hash=_text_hash(stored),
+                    result="open_supplement" if open_supplement else "not_open_supplement",
+                    tool="public_source_open_supplement",
+                )
+            return _supplement_result_body(root, state, stored, open_supplement)
+    except ProjectLocked:
+        return _error("storage.locked", "project is locked")
+
+
 def _listed(record: dict[str, object]) -> dict[str, object]:
     listed = {
         "id": record.get("id"),
@@ -307,6 +372,9 @@ def _listed(record: dict[str, object]) -> dict[str, object]:
         listed["conflicts"] = record.get("conflicts")
     if isinstance(record.get("course_guide_cited"), bool):
         listed["course_guide_cited"] = record.get("course_guide_cited")
+    if record.get("open_supplement") is True:
+        listed["open_supplement"] = True
+        listed["guide_bibliography"] = False
     if record.get("identity") == BIBLIOGRAPHIC_IDENTITY:
         listed["identity"] = BIBLIOGRAPHIC_IDENTITY
     return listed
@@ -683,6 +751,42 @@ def _check_result_body(
         "source_class": None,
         "authority_status": None,
         "identity": identity,
+        "candidate": _public(record),
+        "local_sources": _local(state),
+        "project_state": state.get("state"),
+        "next_action": public_bibliography_next_action(root),
+        "writing_available": False,
+        "writing_status": WRITING_STILL_UNAVAILABLE,
+    }
+
+
+def _with_open_supplement(prior: dict[str, object], open_supplement: bool) -> dict[str, object]:
+    updated = dict(prior)
+    updated["state"] = "DISCOVERED"
+    updated["classification"] = "PENDING"
+    updated["source_class"] = None
+    updated["authority_status"] = None
+    updated["authority"] = None
+    updated["open_supplement"] = open_supplement
+    updated["guide_bibliography"] = False
+    if updated.get("identity") != BIBLIOGRAPHIC_IDENTITY:
+        updated.pop("identity", None)
+    return updated
+
+
+def _supplement_result_body(
+    root: Path,
+    state: dict[str, object],
+    record: dict[str, object],
+    open_supplement: bool,
+) -> dict[str, object]:
+    return {
+        "status": "ok",
+        "open_supplement": open_supplement,
+        "guide_bibliography": False,
+        "classification": "PENDING",
+        "state": "DISCOVERED",
+        "authority": None,
         "candidate": _public(record),
         "local_sources": _local(state),
         "project_state": state.get("state"),

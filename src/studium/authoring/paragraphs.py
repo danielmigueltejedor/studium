@@ -8,7 +8,7 @@ import hashlib
 from pathlib import Path
 
 from studium.authoring.blueprint import current_sections
-from studium.authoring.support import citation_blockers
+from studium.authoring.support import paragraph_citation_blockers
 from studium.policy.trust import contains_directive, directive_changes_policy
 from studium.storage.init_project import load_state_holding_lock
 from studium.storage.locking import ProjectLocked, project_lock
@@ -43,13 +43,13 @@ def record_paragraph(
     assert section_id is not None and cleaned_text is not None and excerpt_ids is not None
     if directive_changes_policy(cleaned_text):
         return _error("policy.overridden", "paragraph text changed policy")
-    blockers = citation_blockers(root, [], excerpt_ids)
+    blockers = paragraph_citation_blockers(root, excerpt_ids)
     if blockers:
         return _rejected(root, blockers)
     try:
         with project_lock(root):
             state = load_state_holding_lock(root)
-            fresh_blockers = citation_blockers(root, [], excerpt_ids)
+            fresh_blockers = paragraph_citation_blockers(root, excerpt_ids)
             if fresh_blockers:
                 return _rejected_state(state, fresh_blockers)
             digest = _digest(section_id, cleaned_text, excerpt_ids)
@@ -112,7 +112,7 @@ def supported_paragraphs(root: Path) -> list[dict[str, object]]:
         excerpts = record.get("excerpts")
         if not isinstance(excerpts, list) or not excerpts or not all(isinstance(item, str) for item in excerpts):
             continue
-        if citation_blockers(root, [], list(excerpts)):
+        if paragraph_citation_blockers(root, list(excerpts)):
             continue
         kept.append(record)
     return kept
@@ -162,9 +162,15 @@ def annotate_next_action(root: Path, payload: dict[str, object]) -> dict[str, ob
     empty = [section for section in current_sections(root) if section["id"] not in supported_section_ids(root)]
     if empty:
         names = ", ".join(f"{section['id']} ({section['title']})" for section in empty)
-        suffix = f" Empty sections: {names}. Open source text before writing them."
+        suffix = (
+            f" Empty sections: {names}. "
+            "Fill them from opened open-licensed text and add checked problems."
+        )
     else:
-        suffix = " Every blueprint section has a supported paragraph. Do not mark the book released."
+        suffix = (
+            " Every blueprint section has a supported paragraph. "
+            "Add checked problems. Do not mark the book released."
+        )
     if suffix.strip() in action:
         return payload
     updated = dict(payload)
