@@ -8,6 +8,7 @@ university guide.
 
 from pathlib import Path
 
+from studium.authoring.excerpts import excerpts_by_id
 from studium.domain.profiles import BOOK_TOPIC
 from studium.storage.init_project import book_kind
 from studium.storage.records import CLAIMS, PUBLIC_BIBLIOGRAPHY, fold_by_id
@@ -46,17 +47,61 @@ def support_blockers(root: Path, source_ids: list[str]) -> list[dict[str, object
     return blockers
 
 
+def citation_blockers(
+    root: Path,
+    source_ids: list[str],
+    excerpt_ids: list[str] | None = None,
+) -> list[dict[str, object]]:
+    """Support blockers for public source ids and for stored excerpts."""
+
+    blockers = support_blockers(root, source_ids)
+    excerpts = excerpts_by_id(root)
+    for excerpt_id in excerpt_ids or []:
+        excerpt = excerpts.get(excerpt_id)
+        if excerpt is None:
+            blockers.append(
+                {
+                    "code": "claim.excerpt_missing",
+                    "entity_id": excerpt_id,
+                    "message": "no stored excerpt with that id",
+                }
+            )
+            continue
+        source_id = excerpt.get("source_id")
+        if not isinstance(source_id, str):
+            blockers.append(
+                {
+                    "code": "claim.source_missing",
+                    "entity_id": excerpt_id,
+                    "message": "excerpt has no public source id",
+                }
+            )
+            continue
+        for blocker in support_blockers(root, [source_id]):
+            blockers.append(
+                {
+                    "code": blocker["code"],
+                    "entity_id": blocker.get("entity_id"),
+                    "message": f"excerpt {excerpt_id}: {blocker['message']}",
+                }
+            )
+    return blockers
+
+
 def supported_drafts(root: Path) -> list[dict[str, object]]:
-    """Stored drafts whose sources still pass the support check."""
+    """Stored drafts whose sources and excerpts still pass the support check."""
 
     kept: list[dict[str, object]] = []
     for claim in fold_by_id(root / CLAIMS):
         if claim.get("status") != "draft":
             continue
-        sources = claim.get("sources")
-        if not isinstance(sources, list) or not all(isinstance(item, str) for item in sources):
+        sources = _string_list(claim.get("sources"))
+        excerpts = _string_list(claim.get("excerpts"))
+        if sources is None or excerpts is None:
             continue
-        if support_blockers(root, list(sources)):
+        if not sources and not excerpts:
+            continue
+        if citation_blockers(root, sources, excerpts):
             continue
         kept.append(claim)
     return kept
@@ -113,6 +158,14 @@ def evidence_blockers(root: Path) -> list[dict[str, object]]:
             }
         )
     return blockers
+
+
+def _string_list(value: object) -> list[str] | None:
+    if value is None:
+        return []
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        return None
+    return list(value)
 
 
 def _public_by_id(root: Path) -> dict[str, dict[str, object]]:

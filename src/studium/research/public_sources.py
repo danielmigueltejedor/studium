@@ -161,8 +161,16 @@ def bibliography_counts(root: Path) -> dict[str, int]:
     }
 
 
+EXCERPT_BEFORE_DRAFT = (
+    "Store an opened excerpt with studium_excerpt_record before writing a longer draft sentence."
+)
+
+
 def public_bibliography_next_action(root: Path) -> str:
-    """Status text once public sources exist. Writing stays unavailable."""
+    """Status text once public sources exist. A release stays unavailable.
+
+    The next draft step is an excerpt the client opened. This does not fetch a URL.
+    """
 
     counts = bibliography_counts(root)
     text = (
@@ -171,12 +179,8 @@ def public_bibliography_next_action(root: Path) -> str:
         "Writing is still not available."
     )
     if book_kind(root) == BOOK_TOPIC:
-        return (
-            text
-            + " Do not look for a university course guide."
-            + " Do not call studium_course_recorded."
-        )
-    return text
+        text += " Do not look for a university course guide. Do not call studium_course_recorded."
+    return text + " " + EXCERPT_BEFORE_DRAFT
 
 
 def check_public_source(
