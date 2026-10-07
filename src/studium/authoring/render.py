@@ -11,15 +11,17 @@ from pathlib import Path
 from studium.authoring.blueprint import current_sections
 from studium.authoring.excerpts import excerpts_by_id
 from studium.authoring.paragraphs import GAP_LABEL, supported_paragraphs
-from studium.authoring.support import supported_drafts
+from studium.authoring.section_blocks import blocked_ids
+from studium.authoring.support import corroboration_for_excerpts, supported_drafts
 from studium.domain.profiles import BOOK_TOPIC
 from studium.research.public_sources import bibliography_counts
 from studium.storage.init_project import book_kind, load_project_toml, load_state_holding_lock
 from studium.storage.locking import ProjectLocked, project_lock
-from studium.storage.records import PUBLIC_BIBLIOGRAPHY, fold_by_id
+from studium.storage.records import COMPUTATIONS, PROBLEMS, PUBLIC_BIBLIOGRAPHY, fold_by_id
 
 _TEX_NAME = "draft.tex"
 _PDF_NAME = "draft.pdf"
+_EMPTY_PIECE = "Gap: this part of the draft has no stored material yet."
 _LATEX = {
     "\\": r"\textbackslash{}",
     "{": r"\{",
@@ -32,6 +34,110 @@ _LATEX = {
     "~": r"\textasciitilde{}",
     "^": r"\textasciicircum{}",
 }
+_GREEK = {
+    "Α": r"\mathrm{A}",
+    "Β": r"\mathrm{B}",
+    "Γ": r"\Gamma",
+    "Δ": r"\Delta",
+    "Ε": r"\mathrm{E}",
+    "Ζ": r"\mathrm{Z}",
+    "Η": r"\mathrm{H}",
+    "Θ": r"\Theta",
+    "Ι": r"\mathrm{I}",
+    "Κ": r"\mathrm{K}",
+    "Λ": r"\Lambda",
+    "Μ": r"\mathrm{M}",
+    "Ν": r"\mathrm{N}",
+    "Ξ": r"\Xi",
+    "Ο": r"\mathrm{O}",
+    "Π": r"\Pi",
+    "Ρ": r"\mathrm{P}",
+    "Σ": r"\Sigma",
+    "Τ": r"\mathrm{T}",
+    "Υ": r"\Upsilon",
+    "Φ": r"\Phi",
+    "Χ": r"\mathrm{X}",
+    "Ψ": r"\Psi",
+    "Ω": r"\Omega",
+    "α": r"\alpha",
+    "β": r"\beta",
+    "γ": r"\gamma",
+    "δ": r"\delta",
+    "ε": r"\varepsilon",
+    "ζ": r"\zeta",
+    "η": r"\eta",
+    "θ": r"\theta",
+    "ι": r"\iota",
+    "κ": r"\kappa",
+    "λ": r"\lambda",
+    "μ": r"\mu",
+    "ν": r"\nu",
+    "ξ": r"\xi",
+    "ο": r"o",
+    "π": r"\pi",
+    "ρ": r"\rho",
+    "σ": r"\sigma",
+    "ς": r"\varsigma",
+    "τ": r"\tau",
+    "υ": r"\upsilon",
+    "φ": r"\varphi",
+    "χ": r"\chi",
+    "ψ": r"\psi",
+    "ω": r"\omega",
+    "ℓ": r"\ell",
+    "×": r"\times",
+    "·": r"\cdot",
+    "−": r"-",
+    "–": r"-",
+    "—": r"-",
+    "≤": r"\leq",
+    "≥": r"\geq",
+    "±": r"\pm",
+    "∞": r"\infty",
+    "∂": r"\partial",
+    "∇": r"\nabla",
+    "≈": r"\approx",
+    "≠": r"\neq",
+    "°": r"^{\circ}",
+    "′": r"'",
+}
+_SUBSCRIPTS = {chr(0x2080 + index): f"_{{{index}}}" for index in range(10)}
+_SUBSCRIPTS.update(
+    {
+        "₊": r"_{+}",
+        "₋": r"_{-}",
+        "₌": r"_{=}",
+        "ₐ": r"_{a}",
+        "ₑ": r"_{e}",
+        "ₒ": r"_{o}",
+        "ₓ": r"_{x}",
+        "ₕ": r"_{h}",
+        "ₖ": r"_{k}",
+        "ₗ": r"_{l}",
+        "ₘ": r"_{m}",
+        "ₙ": r"_{n}",
+        "ₚ": r"_{p}",
+        "ₛ": r"_{s}",
+        "ₜ": r"_{t}",
+    }
+)
+_SUPERSCRIPTS = {
+    "⁰": r"^{0}",
+    "¹": r"^{1}",
+    "²": r"^{2}",
+    "³": r"^{3}",
+    "⁴": r"^{4}",
+    "⁵": r"^{5}",
+    "⁶": r"^{6}",
+    "⁷": r"^{7}",
+    "⁸": r"^{8}",
+    "⁹": r"^{9}",
+    "⁺": r"^{+}",
+    "⁻": r"^{-}",
+    "ⁿ": r"^{n}",
+    "ⁱ": r"^{i}",
+}
+_MATH = {**_GREEK, **_SUBSCRIPTS, **_SUPERSCRIPTS}
 
 
 def render_draft(root: Path) -> dict[str, object]:
@@ -98,16 +204,37 @@ def find_engine() -> str | None:
 
 
 def latex_escape(value: str) -> str:
-    escaped: list[str] = []
+    """Turn draft text into LaTeX that pdflatex can parse.
+
+    Greek letters, subscripts, and operators such as Σ, ρ, ℓ, μ, and × become
+    math commands. Latin letters stay as text so inputenc can read them.
+    """
+
+    parts: list[str] = []
+    math: list[str] = []
+
+    def flush_math() -> None:
+        if math:
+            parts.append(r"\(" + "".join(math) + r"\)")
+            math.clear()
+
     for character in value:
+        token = _MATH.get(character)
+        if token is not None:
+            math.append(token)
+            continue
+        flush_math()
         replacement = _LATEX.get(character)
         if replacement is not None:
-            escaped.append(replacement)
+            parts.append(replacement)
         elif ord(character) < 32 and character not in "\n\t":
             continue
+        elif ord(character) > 255:
+            parts.append(f"{{U+{ord(character):04X}}}")
         else:
-            escaped.append(character)
-    return "".join(escaped)
+            parts.append(character)
+    flush_math()
+    return "".join(parts)
 
 
 def _document(root: Path) -> str:
@@ -120,13 +247,14 @@ def _document(root: Path) -> str:
     excerpts = excerpts_by_id(root)
     counts = bibliography_counts(root)
     book = _book_name(root)
+    blocked = blocked_ids(root)
     by_section: dict[str, list[dict[str, object]]] = {}
     for paragraph in paragraphs:
         section = paragraph.get("section")
         if isinstance(section, str):
             by_section.setdefault(section, []).append(paragraph)
     lines = [
-        r"\documentclass{article}",
+        r"\documentclass{book}",
         r"\makeatletter",
         r"\ifx\XeTeXrevision\undefined",
         r"  \ifx\directlua\undefined",
@@ -136,33 +264,231 @@ def _document(root: Path) -> str:
         r"\fi",
         r"\makeatother",
         r"\begin{document}",
-        r"\begin{center}",
-        r"{\Large\bfseries DRAFT}",
-        r"\end{center}",
-        "",
+        r"\frontmatter",
+        r"\title{DRAFT\\" + latex_escape(book) + "}",
+        r"\author{DRAFT}",
+        r"\date{}",
+        r"\maketitle",
+        r"\chapter{Preface}",
         r"\noindent " + latex_escape(_status_line(kind, counts)),
         "",
-        r"\noindent Book: " + latex_escape(book),
+        r"\noindent This file is a DRAFT. It is not RELEASED.",
+        r"\chapter{How to use this book}",
+        r"\noindent " + latex_escape(_EMPTY_PIECE),
         "",
-        r"\section*{Outline}",
+        r"\noindent A section may hold several paragraphs. Each substantive paragraph cites a stored excerpt.",
+        r"\tableofcontents",
+        r"\mainmatter",
+        r"\part{" + latex_escape(book) + "}",
     ]
     if not sections:
-        lines.append("No blueprint is stored.")
+        lines.extend(
+            [
+                r"\chapter{Blueprint}",
+                r"\noindent " + latex_escape(_EMPTY_PIECE),
+            ]
+        )
     for section in sections:
-        lines.extend(["", r"\section{" + latex_escape(section["title"]) + "}"])
+        lines.extend(["", r"\chapter{" + latex_escape(section["title"]) + "}"])
         section_paragraphs = by_section.get(section["id"], [])
         if not section_paragraphs:
             lines.extend(["", r"\noindent " + latex_escape(GAP_LABEL)])
+            if section["id"] in blocked:
+                lines.extend(
+                    [
+                        "",
+                        r"\noindent "
+                        + latex_escape("Blocked: no second independent open excerpt and no replayed check."),
+                    ]
+                )
             continue
         for paragraph in section_paragraphs:
             lines.extend(_claim_lines(paragraph, titles, excerpts, sources))
-    lines.extend(["", r"\section*{Draft claims}"])
-    if not claims:
-        lines.append("No supported draft claims.")
-    for claim in claims:
-        lines.extend(_claim_lines(claim, titles, excerpts, sources))
-    lines.extend(["", r"\end{document}", ""])
+            lines.extend(["", r"\noindent " + latex_escape(_audit_label(root, paragraph)) + "."])
+    lines.extend(
+        [
+            "",
+            r"\part{Problems}",
+            r"\chapter{Problem solving}",
+            r"\noindent " + latex_escape(_EMPTY_PIECE),
+            r"\chapter{Worked problems}",
+        ]
+    )
+    lines.extend(_worked_lines(root))
+    lines.extend(
+        [
+            r"\chapter{Exam preparation}",
+            r"\noindent " + latex_escape(_EMPTY_PIECE),
+            r"\appendix",
+            r"\chapter{Notation}",
+            r"\noindent " + latex_escape(_EMPTY_PIECE),
+            r"\chapter{Formula sheet}",
+            r"\noindent " + latex_escape(_EMPTY_PIECE),
+            r"\chapter{Solutions}",
+        ]
+    )
+    lines.extend(_solution_lines(root))
+    lines.extend([r"\chapter{Source audit}"])
+    lines.extend(_audit_lines(root, paragraphs, claims, titles, excerpts, sources))
+    lines.extend(
+        [
+            r"\chapter{Study plan}",
+            r"\noindent " + latex_escape(_EMPTY_PIECE),
+            r"\backmatter",
+            r"\begin{thebibliography}{99}",
+        ]
+    )
+    lines.extend(_bibliography_lines(root))
+    lines.extend([r"\end{thebibliography}", r"\end{document}", ""])
     return "\n".join(lines)
+
+
+def _audit_label(root: Path, record: dict[str, object]) -> str:
+    """One of two_witnesses, replayed check, single excerpt, or unchecked."""
+
+    raw = record.get("excerpts")
+    excerpt_ids = [item for item in raw if isinstance(item, str)] if isinstance(raw, list) else []
+    if corroboration_for_excerpts(root, excerpt_ids) == "two_witnesses":
+        return "two_witnesses"
+    section = record.get("section")
+    if isinstance(section, str) and _section_has_replay(root, section):
+        return "replayed check"
+    if excerpt_ids:
+        return "single excerpt"
+    return "unchecked"
+
+
+def _section_has_replay(root: Path, section_id: str) -> bool:
+    for record in fold_by_id(root / PROBLEMS):
+        if record.get("section") != section_id:
+            continue
+        if record.get("kind") == "rust" and record.get("status") == "checked" and record.get("correct") is True:
+            return True
+    for record in fold_by_id(root / COMPUTATIONS):
+        if record.get("section") == section_id and record.get("status") == "replayed" and record.get("correct") is True:
+            return True
+    return False
+
+
+def _worked_lines(root: Path) -> list[str]:
+    lines: list[str] = []
+    shown = False
+    for record in fold_by_id(root / PROBLEMS):
+        shown = True
+        lines.extend(_problem_entry(record))
+    for record in fold_by_id(root / COMPUTATIONS):
+        if record.get("status") == "replayed" and record.get("correct") is True:
+            shown = True
+            identifier = record.get("id") if isinstance(record.get("id"), str) else "computation"
+            expression = record.get("expression") if isinstance(record.get("expression"), str) else ""
+            lines.extend(
+                [
+                    "",
+                    r"\noindent\textbf{" + latex_escape(identifier) + "}",
+                    "",
+                    latex_escape(expression),
+                    "",
+                    r"\noindent replayed check.",
+                ]
+            )
+    if not shown:
+        lines.extend(["", r"\noindent " + latex_escape(_EMPTY_PIECE)])
+    return lines
+
+
+def _problem_entry(record: dict[str, object]) -> list[str]:
+    identifier = record.get("id") if isinstance(record.get("id"), str) else "problem"
+    prompt = record.get("prompt") if isinstance(record.get("prompt"), str) else ""
+    if record.get("kind") == "rust" and record.get("status") == "checked" and record.get("correct") is True:
+        label = "replayed check"
+    elif record.get("status") == "two_witnesses" or record.get("corroboration") == "two_witnesses":
+        label = "two_witnesses"
+    else:
+        label = "unchecked"
+    return [
+        "",
+        r"\noindent\textbf{" + latex_escape(identifier) + "}",
+        "",
+        latex_escape(prompt),
+        "",
+        r"\noindent " + latex_escape(label) + ".",
+    ]
+
+
+def _solution_lines(root: Path) -> list[str]:
+    lines: list[str] = []
+    for record in fold_by_id(root / PROBLEMS):
+        checked = record.get("kind") == "rust" and record.get("status") == "checked" and record.get("correct") is True
+        witnessed = record.get("status") == "two_witnesses" or record.get("corroboration") == "two_witnesses"
+        if not checked and not witnessed:
+            continue
+        identifier = record.get("id") if isinstance(record.get("id"), str) else "problem"
+        prompt = record.get("prompt") if isinstance(record.get("prompt"), str) else ""
+        lines.extend(["", r"\noindent\textbf{" + latex_escape(identifier) + "}", "", latex_escape(prompt)])
+    for record in fold_by_id(root / COMPUTATIONS):
+        if record.get("status") != "replayed" or record.get("correct") is not True:
+            continue
+        identifier = record.get("id") if isinstance(record.get("id"), str) else "computation"
+        expression = record.get("expression") if isinstance(record.get("expression"), str) else ""
+        result = record.get("server_result") if isinstance(record.get("server_result"), str) else ""
+        lines.extend(
+            [
+                "",
+                r"\noindent\textbf{" + latex_escape(identifier) + "}",
+                "",
+                latex_escape(f"{expression} = {result}"),
+            ]
+        )
+    if not lines:
+        lines.extend(["", r"\noindent " + latex_escape(_EMPTY_PIECE)])
+    return lines
+
+
+def _audit_lines(
+    root: Path,
+    paragraphs: list[dict[str, object]],
+    claims: list[dict[str, object]],
+    titles: dict[str, str],
+    excerpts: dict[str, dict[str, object]],
+    sources: dict[str, dict[str, object]],
+) -> list[str]:
+    lines: list[str] = []
+    if not paragraphs and not claims:
+        lines.extend(["", r"\noindent " + latex_escape(_EMPTY_PIECE)])
+        return lines
+    for paragraph in paragraphs:
+        identifier = paragraph.get("id") if isinstance(paragraph.get("id"), str) else "paragraph"
+        label = _audit_label(root, paragraph)
+        lines.extend(
+            [
+                "",
+                r"\noindent " + latex_escape(f"{identifier}: {label}"),
+            ]
+        )
+        lines.extend(_claim_lines(paragraph, titles, excerpts, sources))
+    for claim in claims:
+        identifier = claim.get("id") if isinstance(claim.get("id"), str) else "claim"
+        label = _audit_label(root, claim)
+        lines.extend(["", r"\noindent " + latex_escape(f"{identifier}: {label}")])
+        lines.extend(_claim_lines(claim, titles, excerpts, sources))
+    return lines
+
+
+def _bibliography_lines(root: Path) -> list[str]:
+    lines: list[str] = []
+    index = 0
+    for record in fold_by_id(root / PUBLIC_BIBLIOGRAPHY):
+        title = record.get("title") if isinstance(record.get("title"), str) else ""
+        url = record.get("url") if isinstance(record.get("url"), str) else ""
+        if not title and not url:
+            continue
+        index += 1
+        origin = record.get("origin") if isinstance(record.get("origin"), str) else ""
+        note = " student_notes." if origin == "student_notes" else ""
+        lines.append(r"\bibitem{src" + str(index) + "} " + latex_escape(f"{title}. {url}.{note}"))
+    if not lines:
+        lines.append(r"\bibitem{gap} " + latex_escape(_EMPTY_PIECE))
+    return lines
 
 
 def _status_line(kind: str, counts: dict[str, int]) -> str:

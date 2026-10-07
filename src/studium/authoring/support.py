@@ -9,6 +9,7 @@ university guide.
 from pathlib import Path
 
 from studium.authoring.excerpts import excerpts_by_id
+from studium.domain.enums import SourceOrigin
 from studium.domain.profiles import BOOK_TOPIC
 from studium.storage.init_project import book_kind
 from studium.storage.records import CLAIMS, PUBLIC_BIBLIOGRAPHY, fold_by_id
@@ -120,6 +121,8 @@ def draft_source_usable(root: Path, record: dict[str, object]) -> bool:
     """
 
     if _conflict_blocker(record) is not None:
+        return False
+    if record.get("origin") == SourceOrigin.STUDENT_NOTES.value:
         return False
     if book_kind(root) == BOOK_TOPIC:
         return True

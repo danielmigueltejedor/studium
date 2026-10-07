@@ -10,14 +10,16 @@ from studium.authoring.book_next import book_next
 from studium.authoring.claims import list_claims, record_claim
 from studium.authoring.computation import check_computation
 from studium.authoring.excerpts import get_excerpt, list_excerpts, record_excerpt
-from studium.authoring.paragraphs import draft_completeness, list_paragraphs, record_paragraph
+from studium.authoring.paragraphs import draft_completeness, list_paragraphs, record_paragraph, replace_paragraph
+from studium.research.media import record_media
+from studium.research.student_notes import record_student_notes
 from studium.authoring.problems import check_problem, list_problems, record_problem
 from studium.authoring.render import render_draft
 from studium.authoring.verify import verify_book
 
 EXIT_GATE = 2
 EXIT_COMPILER = 4
-_OK = frozenset({"ok", "recorded", "rendered", "replayed"})
+_OK = frozenset({"ok", "recorded", "rendered", "replayed", "replaced"})
 
 
 def register(subparsers: argparse._SubParsersAction) -> None:
@@ -72,6 +74,24 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     _project(paragraph_add)
     paragraph_list = paragraph_commands.add_parser("list")
     _project(paragraph_list)
+    paragraph_replace = paragraph_commands.add_parser("replace")
+    paragraph_replace.add_argument("paragraph_id")
+    paragraph_replace.add_argument("--text", required=True)
+    paragraph_replace.add_argument("--excerpt", action="append", required=True)
+    _project(paragraph_replace)
+
+    media = subparsers.add_parser("media", help=argparse.SUPPRESS)
+    media.add_argument("--url", required=True)
+    media.add_argument("--transcript")
+    media.add_argument("--title")
+    _project(media)
+
+    notes = subparsers.add_parser("student-notes", help=argparse.SUPPRESS)
+    notes.add_argument("--title", required=True)
+    notes.add_argument("--url")
+    notes.add_argument("--path")
+    notes.add_argument("--text")
+    _project(notes)
 
     completeness = subparsers.add_parser("completeness", help=argparse.SUPPRESS)
     _project(completeness)
@@ -167,8 +187,42 @@ def run(args: argparse.Namespace, root: Path) -> int:
             )
         if args.paragraph_command == "list":
             return _emit(list_paragraphs(root), args.json)
+        if args.paragraph_command == "replace":
+            return _emit(
+                replace_paragraph(
+                    root,
+                    paragraph_id=args.paragraph_id,
+                    text=args.text,
+                    excerpts=list(args.excerpt),
+                    actor={"kind": "cli"},
+                ),
+                args.json,
+            )
         print("unknown command: paragraph", file=sys.stderr)
         return 3
+    if command == "media":
+        return _emit(
+            record_media(
+                root,
+                url=args.url,
+                transcript=args.transcript,
+                title=args.title,
+                actor={"kind": "cli"},
+            ),
+            args.json,
+        )
+    if command == "student-notes":
+        return _emit(
+            record_student_notes(
+                root,
+                title=args.title,
+                url=args.url,
+                path=args.path,
+                text=args.text,
+                actor={"kind": "cli"},
+            ),
+            args.json,
+        )
     if command == "completeness":
         return _emit(draft_completeness(root), args.json)
     if command == "problem":

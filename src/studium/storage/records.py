@@ -11,8 +11,11 @@ EXCERPTS = "bibliography/excerpts.jsonl"
 BLUEPRINT = "blueprint/outline.jsonl"
 CLAIMS = "claims/claims.jsonl"
 PARAGRAPHS = "draft/paragraphs.jsonl"
+SECTION_OFFERS = "draft/section_offers.jsonl"
+SECTION_BLOCKS = "draft/section_blocks.jsonl"
 PROBLEMS = "problems/problems.jsonl"
 COMPUTATIONS = "problems/computations.jsonl"
+MEDIA = "media/media.jsonl"
 
 
 def read_jsonl(path: Path) -> list[dict[str, object]]:

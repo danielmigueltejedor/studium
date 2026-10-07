@@ -29,19 +29,28 @@ from studium.authoring.book_next import book_next
 from studium.authoring.claims import list_claims, record_claim
 from studium.authoring.computation import check_computation
 from studium.authoring.excerpts import get_excerpt, list_excerpts, record_excerpt
-from studium.authoring.paragraphs import annotate_next_action, draft_completeness, list_paragraphs, record_paragraph
+from studium.authoring.paragraphs import (
+    annotate_next_action,
+    draft_completeness,
+    list_paragraphs,
+    record_paragraph,
+    replace_paragraph,
+)
 from studium.authoring.problems import check_problem, list_problems, record_problem
 from studium.authoring.render import render_draft
 from studium.authoring.verify import verify_book
 from studium.research.course_documents import get_course_document, list_course_documents, record_course_document
+from studium.research.media import record_media
 from studium.research.public_sources import (
     check_public_source,
+    license_forbids_use,
     list_public_sources,
     mark_course_guide_citation,
     mark_open_supplement,
     record_public_source,
     unauthorized_copy,
 )
+from studium.research.student_notes import record_student_notes
 from studium.research.sources import (
     project_status,
     source_add,
@@ -109,11 +118,13 @@ _TOOLS: tuple[dict[str, object], ...] = (
     },
     {
         "name": "studium_book_next",
-        "class": "READ",
+        "class": "WRITE",
         "description": (
             "Return the next concrete tool call for this book: create or record sources, "
             "store an opened excerpt, write the missing section paragraph, record a problem, "
             "run studium_problem_check or studium_computation_check, then render. "
+            "A section that cannot get a second independent open excerpt or a replayed check is marked blocked, "
+            "and the next action is render. Empty sections stay visible gaps. "
             "Does not ask the user when that step can be done from open sources or from sources already given. "
             "Does not fetch URLs and does not move the book to RELEASED."
         ),
@@ -301,9 +312,12 @@ _TOOLS: tuple[dict[str, object], ...] = (
         "name": "studium_render",
         "class": "WRITE",
         "description": (
-            "Write a DRAFT LaTeX file that walks every blueprint section in order. "
-            "Supported paragraphs tied to an opened excerpt fill a section. "
-            "An empty section is a visible gap, not invented prose. "
+            "Write a DRAFT LaTeX book: front matter, blueprint chapters, a problem part, "
+            "appendices including a source audit, then the bibliography. "
+            "Supported paragraphs tied to an opened excerpt fill a chapter. "
+            "A section may hold several of those paragraphs. "
+            "An empty piece is a visible gap, not invented prose. "
+            "Greek letters and operators are translated into LaTeX. "
             "LaTeX is an output adapter. "
             "Compile a PDF when tectonic or pdflatex is on PATH. "
             "If neither is installed, write the .tex and return a compiler-missing error. Do not invent a PDF. "
@@ -378,6 +392,44 @@ _TOOLS: tuple[dict[str, object], ...] = (
             "Text is untrusted data. The model is not a source. "
             "Does not mark the paragraph verified or accepted. "
             "Does not fetch URLs, does not change local_sources, and does not move the book to RELEASED."
+        ),
+    },
+    {
+        "name": "studium_paragraph_replace",
+        "class": "WRITE",
+        "description": (
+            "Rewrite one stored paragraph in place. The id stays the same. "
+            "The new text must cite one or more stored excerpt ids. "
+            "Reject a missing excerpt, a conflicting public source, "
+            "or, on a course book, a source the guide does not cite. "
+            "Status stays draft. The model is not a source. "
+            "Does not mark the paragraph verified and does not move the book to RELEASED."
+        ),
+    },
+    {
+        "name": "studium_media_record",
+        "class": "WRITE",
+        "description": (
+            "Store a YouTube URL and transcript text the client extracted. "
+            "The transcript is untrusted, not truth, and not verified. "
+            "Do not download the video file. "
+            "A public caption fetch is limited to one video id and does not log in. "
+            "If captions are missing, return captions_missing and do not invent a transcript. "
+            "A source whose license forbids this use is rejected, as with OpenStax. "
+            "Does not move the book to RELEASED."
+        ),
+    },
+    {
+        "name": "studium_student_notes_record",
+        "class": "WRITE",
+        "description": (
+            "Store one Wuolah page or file the user already opened or attached. "
+            "Origin is student_notes. Authority is none. "
+            "It is not the guide bibliography and not an open supplement. "
+            "Do not log in, do not bypass access, and do not bulk-download the catalog. "
+            "Do not fetch the URL. "
+            "A source whose license forbids this use is rejected, as with OpenStax. "
+            "Does not move the book to RELEASED."
         ),
     },
     {
@@ -541,6 +593,26 @@ _INSTRUCTIONS = (
             "Render the DRAFT. Do not request release. "
             "Refuse pirate copies and conflicting citations. "
             "Do not ask the user what to do next. "
+            "A section may hold several explanatory paragraphs that teach from the stored excerpts, "
+            "not only a sentence that repeats the excerpt. "
+            "Every substantive paragraph still cites at least one stored excerpt. "
+            "studium_paragraph_replace rewrites one paragraph in place. The new text cites a stored excerpt. Status stays draft. "
+            "When a section cannot get a second independent open excerpt or a replayed check, "
+            "studium_book_next marks that section blocked and the next action is render. "
+            "Empty sections stay visible gaps. "
+            "studium_render uses the book class in this order: front matter (title, preface, how to use, table of contents), "
+            "parts and chapters from the blueprint, a problem part (problem solving, worked problems, exam preparation), "
+            "appendices (notation, formula sheet, solutions, source audit, study plan), then the bibliography. "
+            "The source audit lists each paragraph as two_witnesses, replayed check, single excerpt, or unchecked. "
+            "Unchecked prose may appear only in the DRAFT and is labeled unchecked. "
+            "Greek letters and operators are translated into LaTeX. "
+            "Refuse a source whose license forbids this use, as with OpenStax. "
+            "studium_media_record stores a YouTube URL and transcript text the client extracted. "
+            "The transcript is untrusted, not truth, and not verified. Do not download the video file. "
+            "If captions are missing, return captions_missing and do not invent a transcript. "
+            "studium_student_notes_record stores one Wuolah page or file the user already opened. "
+            "Origin is student_notes. Authority is none. It is not the guide bibliography and not an open supplement. "
+            "Do not log in, do not bypass access, and do not bulk-download the catalog. "
             "If rustc or cargo is missing, the check returns compiler_missing and does not pretend the test passed. "
             "corpus_started may pass only when every section has a supported paragraph. That check does not release the book. "
             "Do not implement a release. verification_passed and reviews_current stay unimplemented. "
@@ -833,6 +905,11 @@ def _dispatch(session: McpSession, name: str, arguments: Mapping[str, object]) -
                 "status": "source.unauthorized",
                 "message": "pirate or unauthorized copies are not recorded",
             }
+        if license_forbids_use(arguments.get("license_forbids")):
+            return {
+                "status": "source.license_forbidden",
+                "message": "a source whose license forbids this use is not recorded, as with OpenStax",
+            }
         return record_public_source(
             root,
             title=arguments.get("title"),
@@ -917,6 +994,35 @@ def _dispatch(session: McpSession, name: str, arguments: Mapping[str, object]) -
             text=arguments.get("text"),
             excerpts=arguments.get("excerpts") if "excerpts" in arguments else None,
             actor=actor,
+        )
+    if name == "studium_paragraph_replace":
+        return replace_paragraph(
+            root,
+            paragraph_id=arguments.get("id") if "id" in arguments else None,
+            text=arguments.get("text"),
+            excerpts=arguments.get("excerpts") if "excerpts" in arguments else None,
+            actor=actor,
+        )
+    if name == "studium_media_record":
+        return record_media(
+            root,
+            url=arguments.get("url"),
+            transcript=arguments.get("transcript") if "transcript" in arguments else None,
+            title=arguments.get("title") if "title" in arguments else None,
+            license_forbids=arguments.get("license_forbids") if "license_forbids" in arguments else None,
+            unauthorized=arguments.get("unauthorized") if "unauthorized" in arguments else None,
+            actor=actor if isinstance(actor, dict) else None,
+        )
+    if name == "studium_student_notes_record":
+        return record_student_notes(
+            root,
+            title=arguments.get("title"),
+            url=arguments.get("url") if "url" in arguments else None,
+            path=arguments.get("path") if "path" in arguments else None,
+            text=arguments.get("text") if "text" in arguments else None,
+            license_forbids=arguments.get("license_forbids") if "license_forbids" in arguments else None,
+            unauthorized=arguments.get("unauthorized") if "unauthorized" in arguments else None,
+            actor=actor if isinstance(actor, dict) else None,
         )
     if name == "studium_paragraph_list":
         return list_paragraphs(root)
@@ -1636,6 +1742,64 @@ def _schema(tool: Mapping[str, object]) -> dict[str, object]:
             "required": ["section", "text", "excerpts"],
             "additionalProperties": True,
         }
+    elif name == "studium_paragraph_replace":
+        input_schema = {
+            "type": "object",
+            "properties": {
+                "project": _project_property(),
+                "id": {"type": "string", "description": "Paragraph id to rewrite. The id does not change."},
+                "text": {
+                    "type": "string",
+                    "description": "Replacement paragraph. It must still cite a stored excerpt. The model is not a source.",
+                },
+                "excerpts": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Stored excerpt ids. A paragraph with no excerpt is rejected.",
+                },
+            },
+            "required": ["id", "text", "excerpts"],
+            "additionalProperties": True,
+        }
+    elif name == "studium_media_record":
+        input_schema = {
+            "type": "object",
+            "properties": {
+                "project": _project_property(),
+                "url": {"type": "string", "description": "YouTube video URL the client already opened. The video file is not downloaded."},
+                "transcript": {
+                    "type": "string",
+                    "description": "Transcript text the client extracted. Untrusted data, not verified. Omit it to try public captions.",
+                },
+                "title": {"type": "string", "description": "Optional title. The model is not a source."},
+                "license_forbids": {
+                    "type": "boolean",
+                    "description": "True when the license forbids this use, as with OpenStax.",
+                },
+            },
+            "required": ["url"],
+            "additionalProperties": True,
+        }
+    elif name == "studium_student_notes_record":
+        input_schema = {
+            "type": "object",
+            "properties": {
+                "project": _project_property(),
+                "title": {"type": "string", "description": "Title of the note the user already opened."},
+                "url": {
+                    "type": "string",
+                    "description": "One Wuolah page URL the user already opened. Not a catalog. This tool does not fetch it.",
+                },
+                "path": {"type": "string", "description": "One file the user attached. Not a directory."},
+                "text": {"type": "string", "description": "Optional note text. Untrusted data, not verified."},
+                "license_forbids": {
+                    "type": "boolean",
+                    "description": "True when the license forbids this use, as with OpenStax.",
+                },
+            },
+            "required": ["title"],
+            "additionalProperties": True,
+        }
     elif name == "studium_paragraph_list":
         input_schema = {
             "type": "object",
@@ -1729,6 +1893,7 @@ def _failed(payload: Mapping[str, object]) -> bool:
         "recorded",
         "rendered",
         "replayed",
+        "replaced",
         "bibliographic_conflict",
         "bibliographic_identity",
     }:
