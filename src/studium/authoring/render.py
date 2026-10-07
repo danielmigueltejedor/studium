@@ -380,7 +380,7 @@ def _display_title(title: str) -> str:
     return stripped or title.strip()
 
 
-def _preamble(footer: str, language: str) -> list[str]:
+def _preamble(footer: str, language: str, *, tikz: bool = False) -> list[str]:
     mark = latex_escape(footer)
     lines = [
         r"\documentclass{book}",
@@ -405,6 +405,7 @@ def _preamble(footer: str, language: str) -> list[str]:
     lines.extend(
         [
             r"\usepackage{graphicx}",
+            *( [r"\usepackage{tikz}"] if tikz else [] ),
             r"\usepackage[breakable]{tcolorbox}",
             r"\usepackage{fancyhdr}",
             r"\pagestyle{fancy}",
@@ -451,7 +452,7 @@ def _document(root: Path) -> str:
         if isinstance(section, str):
             by_section.setdefault(section, []).append(paragraph)
     lines = [
-        *_preamble(copy["footer"], language),
+        *_preamble(copy["footer"], language, tikz=_checked_tikz(root)),
         r"\begin{document}",
         r"\frontmatter",
         r"\title{" + latex_escape(book) + "}",
@@ -482,9 +483,9 @@ def _document(root: Path) -> str:
             lines.extend(["", r"\noindent " + latex_escape(copy["gap"])])
             if section["id"] in blocked:
                 lines.extend(["", r"\noindent " + latex_escape(copy["blocked"])])
+            lines.extend(_figure_lines(root, section["id"], copy))
         else:
             lines.extend(_chapter_lines(root, section["id"], section_paragraphs, copy, language))
-        lines.extend(_figure_lines(root, section["id"], copy))
     lines.extend(
         [
             r"\appendix",
@@ -544,9 +545,15 @@ def _chapter_lines(
             body.append(raw)
     lines: list[str] = []
     lines.extend(_italic(purpose))
-    for text in body:
+    if body:
         lines.extend(["", r"\section{" + latex_escape(copy["section"]) + "}"])
-        lines.extend(_plain([text]))
+        lines.extend(_plain([body[0]]))
+        lines.extend(_figure_lines(root, section_id, copy))
+        for text in body[1:]:
+            lines.extend(["", r"\section{" + latex_escape(copy["section"]) + "}"])
+            lines.extend(_plain([text]))
+    else:
+        lines.extend(_figure_lines(root, section_id, copy))
     lines.extend(_box(copy["consejo"], _plain(consejo)))
     for text in definitions:
         lines.extend(_box(copy["definition"], _plain([text])))
@@ -643,29 +650,96 @@ def _labeled(label: str, text: str) -> list[str]:
 
 
 def _figure_lines(root: Path, section_id: str, copy: dict[str, str]) -> list[str]:
-    """Checked drawings only. An unchecked figure is listed in the source audit."""
+    """Checked drawings inline. No float, so a short drawing does not take a page."""
 
     lines: list[str] = []
     for record in figures_in_section(root, section_id):
         output = _checked_output(root, record)
         if output is None:
             continue
+        if record.get("kind") == "tikz" and isinstance(record.get("source"), str):
+            body = "\n".join(
+                [
+                    r"\begin{tikzpicture}",
+                    str(record["source"]).strip(),
+                    r"\end{tikzpicture}",
+                ]
+            )
+            fitted = _fit_block(body, consume_box=False)
+        else:
+            fitted = _fit_block(r"\includegraphics{" + output + "}", consume_box=True)
         caption = record.get("caption") if isinstance(record.get("caption"), str) else ""
-        lines.extend(
-            [
-                "",
-                r"\begin{figure}",
-                r"\centering",
-                r"\includegraphics[width=0.8\textwidth]{" + output + "}",
-                r"\caption{" + latex_escape(caption) + "}",
-                r"\end{figure}",
-                "",
-                r"\noindent " + latex_escape(copy["science"]),
-            ]
-        )
+        lines.extend(["", r"\noindent\begin{minipage}{\linewidth}", r"\centering"])
+        lines.extend(fitted)
+        if caption.strip():
+            lines.extend([r"\par\nopagebreak", r"{\small " + latex_escape(caption) + r"\par}"])
+        lines.extend([r"\end{minipage}", "", r"\noindent " + latex_escape(copy["science"])])
         if record.get("caption_corroboration") == "unchecked":
             lines.extend(["", r"\noindent " + latex_escape(copy["caption"])])
     return lines
+
+
+def _checked_tikz(root: Path) -> bool:
+    for record in fold_by_id(root / FIGURES):
+        if record.get("kind") == "tikz" and _checked_output(root, record) is not None:
+            return True
+    return False
+
+
+def _fit_block(body: str, *, consume_box: bool) -> list[str]:
+    """Scale down to the line width and 0.38 of the text height. Do not enlarge.
+
+    ``38\\textheight`` overflows a dimension register, so the cap is
+    ``\\textheight/100*38``. The comparison divides by 4096 first so the
+    product of the two sides fits in a count.
+    """
+
+    shipped = r"\box0" if consume_box else body
+    return [
+        r"\begingroup",
+        r"\setbox0=\hbox{" + body + r"}%",
+        r"\count0=\ht0",
+        r"\advance\count0 by \dp0",
+        r"\count2=\wd0",
+        r"\count4=\dimexpr\textheight/100*38\relax",
+        r"\count6=\linewidth",
+        r"\ifnum\count0<1",
+        r"\count0=1",
+        r"\fi",
+        r"\ifnum\count2<1",
+        r"\count2=1",
+        r"\fi",
+        r"\divide\count0 by 4096",
+        r"\divide\count2 by 4096",
+        r"\divide\count4 by 4096",
+        r"\divide\count6 by 4096",
+        r"\ifnum\count0<1",
+        r"\count0=1",
+        r"\fi",
+        r"\ifnum\count2<1",
+        r"\count2=1",
+        r"\fi",
+        r"\ifnum\count4<1",
+        r"\count4=1",
+        r"\fi",
+        r"\ifnum\count6<1",
+        r"\count6=1",
+        r"\fi",
+        r"\count8=\count2",
+        r"\ifnum\count0>\count4",
+        r"\count8=\numexpr\count2*\count4/\count0\relax",
+        r"\fi",
+        r"\ifnum\count8>\count6",
+        r"\resizebox{\linewidth}{!}{" + shipped + r"}%",
+        r"\else",
+        r"\ifnum\count0>\count4",
+        r"\resizebox{!}{\dimexpr\textheight/100*38\relax}{" + shipped + r"}%",
+        r"\else",
+        r"\resizebox{\wd0}{!}{" + shipped + r"}%",
+        r"\fi",
+        r"\fi",
+        r"\endgroup",
+    ]
 
 
 def _checked_output(root: Path, record: dict[str, object]) -> str | None:
