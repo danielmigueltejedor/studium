@@ -4,16 +4,14 @@ QUESTION_EN = (
     "Do you have your own course materials? You can provide lecture notes, "
     "Moodle PDFs, slides, problem sheets, previous exams, formula sheets, "
     "lab material, recommended bibliography or your own notes. They are "
-    "optional. If you do not have any, Studium will research the official "
-    "course guide and authoritative academic sources itself."
+    "optional. If you do not have any, just say so."
 )
 
 QUESTION_ES = (
     "¿Tienes materiales propios de la asignatura? Puedes aportar apuntes, "
     "PDFs de Moodle, diapositivas, hojas de problemas, exámenes anteriores, "
     "formularios, material de laboratorio, bibliografía recomendada o tus "
-    "propias notas. Son opcionales. Si no tienes, Studium investigará la "
-    "guía oficial y las fuentes académicas de autoridad."
+    "propias notas. Son opcionales. Si no tienes, basta con decirlo."
 )
 
 
