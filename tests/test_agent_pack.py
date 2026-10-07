@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 from studium.cli.app import main
-from studium.research.guidance import QUESTION_EN
+from studium.research.guidance import QUESTION_EN, QUESTION_ES, local_source_guidance
 from studium.research.sources import agent_pack, source_status
 
 _COURSE = [
@@ -189,6 +189,24 @@ def test_imported_reports_ids_roles_and_classification_without_bytes(tmp_path, m
     text = capsys.readouterr().out
     assert "SRC-0001 roles=COURSE_TERMINOLOGY,LECTURE_EMPHASIS classification=AUDITED" in text
     assert _MARKER.decode() not in text
+
+
+def test_questions_say_materials_are_optional_and_do_not_promise_research():
+    assert "optional" in QUESTION_EN
+    assert "just say so" in QUESTION_EN
+    assert "opcionales" in QUESTION_ES
+    assert "basta con decirlo" in QUESTION_ES
+    for question in (QUESTION_EN, QUESTION_ES):
+        lowered = question.casefold()
+        assert "research" not in lowered
+        assert "investig" not in lowered
+        assert "course guide" not in lowered
+        assert "guía oficial" not in question
+        assert "authoritative" not in lowered
+    spanish = local_source_guidance({"status": "UNKNOWN", "prompted": False}, [], "es")
+    assert spanish["question"] == QUESTION_ES
+    english = local_source_guidance({"status": "UNKNOWN", "prompted": False}, [], "en")
+    assert english["question"] == QUESTION_EN
 
 
 def test_missing_project_is_not_an_unknown_command(capsys):
