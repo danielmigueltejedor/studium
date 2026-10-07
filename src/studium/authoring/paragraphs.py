@@ -76,6 +76,69 @@ def record_paragraph(
         return _error("storage.locked", "project is locked")
 
 
+def replace_paragraph(
+    root: Path,
+    *,
+    paragraph_id: object,
+    text: object,
+    excerpts: object,
+    actor: dict[str, object] | None = None,
+) -> dict[str, object]:
+    """Rewrite one stored paragraph in place. The new text still cites an excerpt.
+
+    Conflicts and course sources the guide does not cite are rejected, the same
+    as ``record_paragraph``. The id does not change. The result stays a draft.
+    """
+
+    identifier = _paragraph_id(paragraph_id)
+    if identifier is None:
+        return _error("mcp.invalid_input", "id is required")
+    current = next((item for item in fold_by_id(root / PARAGRAPHS) if item.get("id") == identifier), None)
+    if current is None:
+        return _error("paragraph.not_found", "no stored paragraph with that id")
+    cleaned_text, text_error = _text(text)
+    if text_error is not None:
+        return text_error
+    excerpt_ids, excerpt_error = _excerpts(excerpts)
+    if excerpt_error is not None:
+        return excerpt_error
+    assert cleaned_text is not None and excerpt_ids is not None
+    if directive_changes_policy(cleaned_text):
+        return _error("policy.overridden", "paragraph text changed policy")
+    blockers = paragraph_citation_blockers(root, excerpt_ids)
+    if blockers:
+        return _rejected(root, blockers)
+    section_id = current.get("section")
+    if not isinstance(section_id, str):
+        return _error("paragraph.section_unknown", "section is not in the stored blueprint")
+    try:
+        with project_lock(root):
+            state = load_state_holding_lock(root)
+            fresh_blockers = paragraph_citation_blockers(root, excerpt_ids)
+            if fresh_blockers:
+                return _rejected_state(state, fresh_blockers)
+            digest = _digest(section_id, cleaned_text, excerpt_ids)
+            record: dict[str, object] = {
+                "schema_version": "1.0.0",
+                "id": identifier,
+                "section": section_id,
+                "text": cleaned_text,
+                "excerpts": excerpt_ids,
+                "status": "draft",
+                "classification": "PENDING",
+                "text_sha256": digest,
+                "content_directives_ignored": contains_directive(cleaned_text.encode("utf-8")),
+                "recorded_at": utc_now(),
+                "replaces": identifier,
+            }
+            append_jsonl(root / PARAGRAPHS, record)
+            _audit(root, record=record, actor=actor, operation="replace_paragraph")
+            fresh = load_state_holding_lock(root)
+            return _body(fresh, record, status="replaced")
+    except ProjectLocked:
+        return _error("storage.locked", "project is locked")
+
+
 def list_paragraphs(root: Path) -> dict[str, object]:
     """List stored draft paragraphs. Text is untrusted data."""
 
@@ -267,20 +330,35 @@ def _read_state(root: Path) -> dict[str, object]:
         return {}
 
 
-def _audit(root: Path, *, record: dict[str, object], actor: dict[str, object] | None) -> None:
+def _paragraph_id(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    cleaned = value.strip()
+    if not cleaned or len(cleaned) > 128:
+        return None
+    return cleaned
+
+
+def _audit(
+    root: Path,
+    *,
+    record: dict[str, object],
+    actor: dict[str, object] | None,
+    operation: str = "record_paragraph",
+) -> None:
     append_jsonl(
         root / _AUDIT,
         {
             "schema_version": "1.0.0",
             "timestamp": utc_now(),
             "source_id": record.get("id"),
-            "operation": "record_paragraph",
+            "operation": operation,
             "origin": None,
             "actor": _actor(actor),
             "previous_hash": None,
             "new_hash": record.get("text_sha256"),
             "result": "draft",
-            "tool": "paragraph_record",
+            "tool": operation,
         },
     )
 

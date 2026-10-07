@@ -58,6 +58,7 @@ class SourceOrigin(Enum):
     INSTITUTIONAL_REPOSITORY = "institutional_repository"
     PUBLISHER = "publisher"
     GENERATED_DATA = "generated_data"
+    STUDENT_NOTES = "student_notes"
 
 
 SOURCE_ORIGINS: frozenset[str] = frozenset(item.value for item in SourceOrigin)

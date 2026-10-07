@@ -10,6 +10,7 @@ scientific authority and it does not mark the source accepted or verified.
 import hashlib
 import re
 from pathlib import Path
+from urllib.parse import urlparse
 
 from studium.domain.enums import SourceOrigin
 from studium.domain.profiles import BOOK_TOPIC, WRITING_STILL_UNAVAILABLE
@@ -44,6 +45,25 @@ def unauthorized_copy(value: object) -> bool:
     if isinstance(value, str) and value.strip().lower() in _UNAUTHORIZED_KINDS | {"true", "yes"}:
         return True
     return False
+
+
+def license_forbids_use(value: object) -> bool:
+    """True when the client says the license forbids this use."""
+
+    if value is True:
+        return True
+    if isinstance(value, str) and "forbid" in value.lower():
+        return True
+    return False
+
+
+def openstax_host(url: object) -> bool:
+    """True for an OpenStax host. Used by media and student-note intake."""
+
+    if not isinstance(url, str):
+        return False
+    host = urlparse(url).hostname or ""
+    return host.lower().endswith("openstax.org")
 
 
 def record_public_source(
@@ -375,6 +395,11 @@ def _listed(record: dict[str, object]) -> dict[str, object]:
     if record.get("open_supplement") is True:
         listed["open_supplement"] = True
         listed["guide_bibliography"] = False
+    if record.get("origin") == SourceOrigin.STUDENT_NOTES.value:
+        listed["origin"] = SourceOrigin.STUDENT_NOTES.value
+        listed["guide_bibliography"] = False
+        if isinstance(record.get("kind"), str):
+            listed["kind"] = record["kind"]
     if record.get("identity") == BIBLIOGRAPHIC_IDENTITY:
         listed["identity"] = BIBLIOGRAPHIC_IDENTITY
     return listed
