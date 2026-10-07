@@ -148,6 +148,7 @@ def main(argv: list[str] | None = None) -> int:
         "computation",
         "media",
         "student-notes",
+        "figure",
     }:
         return _authoring(args)
     if args.command == "mcp":

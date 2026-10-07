@@ -10,6 +10,7 @@ from pathlib import Path
 
 from studium.authoring.blueprint import current_sections
 from studium.authoring.excerpts import excerpts_by_id
+from studium.authoring.figures import figure_gap, figures_in_section
 from studium.authoring.paragraphs import GAP_LABEL, supported_paragraphs
 from studium.authoring.section_blocks import blocked_ids
 from studium.authoring.support import corroboration_for_excerpts, supported_drafts
@@ -260,6 +261,7 @@ def _document(root: Path) -> str:
         r"  \ifx\directlua\undefined",
         r"    \usepackage[utf8]{inputenc}",
         r"    \usepackage[T1]{fontenc}",
+        r"    \usepackage{graphicx}",
         r"  \fi",
         r"\fi",
         r"\makeatother",
@@ -301,10 +303,11 @@ def _document(root: Path) -> str:
                         + latex_escape("Blocked: no second independent open excerpt and no replayed check."),
                     ]
                 )
-            continue
-        for paragraph in section_paragraphs:
-            lines.extend(_claim_lines(paragraph, titles, excerpts, sources))
-            lines.extend(["", r"\noindent " + latex_escape(_audit_label(root, paragraph)) + "."])
+        else:
+            for paragraph in section_paragraphs:
+                lines.extend(_claim_lines(paragraph, titles, excerpts, sources))
+                lines.extend(["", r"\noindent " + latex_escape(_audit_label(root, paragraph)) + "."])
+        lines.extend(_figure_lines(root, section["id"]))
     lines.extend(
         [
             "",
@@ -341,6 +344,53 @@ def _document(root: Path) -> str:
     lines.extend(_bibliography_lines(root))
     lines.extend([r"\end{thebibliography}", r"\end{document}", ""])
     return "\n".join(lines)
+
+
+def _figure_lines(root: Path, section_id: str) -> list[str]:
+    lines: list[str] = []
+    for record in figures_in_section(root, section_id):
+        output = _checked_output(root, record)
+        identifier = record.get("id") if isinstance(record.get("id"), str) else "figure"
+        if output is None:
+            lines.extend(["", r"\noindent " + latex_escape(figure_gap(identifier))])
+            continue
+        caption = record.get("caption") if isinstance(record.get("caption"), str) else ""
+        lines.extend(
+            [
+                "",
+                r"\begin{figure}",
+                r"\centering",
+                r"\includegraphics[width=0.8\textwidth]{" + output + "}",
+                r"\caption{" + latex_escape(caption) + "}",
+                r"\end{figure}",
+                "",
+                r"\noindent A figure does not prove the science.",
+            ]
+        )
+        if record.get("caption_corroboration") == "unchecked":
+            lines.extend(["", r"\noindent The numeric claim in the caption is unchecked."])
+    return lines
+
+
+def _checked_output(root: Path, record: dict[str, object]) -> str | None:
+    if record.get("status") != "checked" or record.get("correct") is not True:
+        return None
+    output = record.get("output")
+    if not isinstance(output, str) or not output.startswith("figures/FIG-") or ".." in Path(output).parts:
+        return None
+    if not output.endswith(("/figure.png", "/figure.pdf")):
+        return None
+    path = (root / output).resolve()
+    try:
+        path.relative_to(root.resolve())
+    except ValueError:
+        return None
+    try:
+        if path.is_symlink() or not path.is_file() or path.stat().st_size <= 0:
+            return None
+    except OSError:
+        return None
+    return "../" + output
 
 
 def _audit_label(root: Path, record: dict[str, object]) -> str:

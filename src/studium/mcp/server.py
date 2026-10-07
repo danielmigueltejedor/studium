@@ -29,6 +29,7 @@ from studium.authoring.book_next import book_next
 from studium.authoring.claims import list_claims, record_claim
 from studium.authoring.computation import check_computation
 from studium.authoring.excerpts import get_excerpt, list_excerpts, record_excerpt
+from studium.authoring.figures import check_figure, record_figure
 from studium.authoring.paragraphs import (
     annotate_next_action,
     draft_completeness,
@@ -362,6 +363,29 @@ _TOOLS: tuple[dict[str, object], ...] = (
         ),
     },
     {
+        "name": "studium_figure_record",
+        "class": "WRITE",
+        "description": (
+            "Store a figure for a blueprint section: caption, executable TikZ or Python source, "
+            "and the excerpt ids it illustrates. "
+            "Reject a figure with no executable source. "
+            "Does not run the source, does not fetch URLs, and does not move the book to RELEASED. "
+            "The model describing a drawing is not a check. A figure does not prove the science."
+        ),
+    },
+    {
+        "name": "studium_figure_check",
+        "class": "WRITE",
+        "description": (
+            "Run the stored figure source again. TikZ uses pdflatex. A plot uses python3. "
+            "Timeout, no network, and files only inside the book. "
+            "The figure is checked only when that rerun succeeds and the output file exists. "
+            "A failed or missing engine returns an error and does not mark the figure checked. "
+            "A numeric claim in the caption still needs two excerpts or a replayed computation. "
+            "Does not fetch URLs and does not move the book to RELEASED."
+        ),
+    },
+    {
         "name": "studium_computation_check",
         "class": "WRITE",
         "description": (
@@ -590,6 +614,17 @@ _INSTRUCTIONS = (
             "Where the section is code or a replayable calculation, add at least one checked problem. "
             "studium_computation_check stores the expression and the result and accepts it only when the server evaluates the same expression again. "
             "Do not trust a number the model reports. "
+            "A figure inside an explanation must be executed. "
+            "studium_figure_record stores a caption, the blueprint section, TikZ or Python source, "
+            "and the excerpt ids it illustrates. Reject a figure with no executable source. "
+            "studium_figure_check runs that source again with pdflatex or python3, a timeout, and no network, "
+            "and writes only inside the book. "
+            "The figure is checked only when that rerun succeeds and the output file exists. "
+            "A failed or missing engine does not mark it checked. "
+            "Render includes a checked figure in the DRAFT and leaves an unchecked figure as a labeled gap. "
+            "A figure does not prove the science. "
+            "A numeric claim in the caption still needs two excerpts or a replayed computation. "
+            "Do not fetch URLs. "
             "Render the DRAFT. Do not request release. "
             "Refuse pirate copies and conflicting citations. "
             "Do not ask the user what to do next. "
@@ -976,6 +1011,18 @@ def _dispatch(session: McpSession, name: str, arguments: Mapping[str, object]) -
         )
     if name == "studium_problem_check":
         return check_problem(root, arguments.get("id") if "id" in arguments else None)
+    if name == "studium_figure_record":
+        return record_figure(
+            root,
+            section=arguments.get("section"),
+            caption=arguments.get("caption"),
+            source=arguments.get("source") if "source" in arguments else None,
+            kind=arguments.get("kind") if "kind" in arguments else None,
+            excerpts=arguments.get("excerpts") if "excerpts" in arguments else None,
+            actor=actor if isinstance(actor, dict) else None,
+        )
+    if name == "studium_figure_check":
+        return check_figure(root, arguments.get("id") if "id" in arguments else None)
     if name == "studium_computation_check":
         return check_computation(
             root,
@@ -1707,6 +1754,44 @@ def _schema(tool: Mapping[str, object]) -> dict[str, object]:
             },
             "additionalProperties": True,
         }
+    elif name == "studium_figure_record":
+        input_schema = {
+            "type": "object",
+            "properties": {
+                "project": _project_property(),
+                "section": {"type": "string", "description": "Blueprint section id."},
+                "caption": {
+                    "type": "string",
+                    "description": "Figure caption. A numeric claim still needs two excerpts or a replayed computation.",
+                },
+                "kind": {
+                    "type": "string",
+                    "enum": ["tikz", "python"],
+                    "description": "tikz runs under pdflatex. python runs under python3 and must write figure.png or figure.pdf.",
+                },
+                "source": {
+                    "type": "string",
+                    "description": "Executable TikZ commands or a Python program. Required. The model is not a source.",
+                },
+                "excerpts": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Stored excerpt ids the figure illustrates.",
+                },
+            },
+            "required": ["section", "caption", "kind", "source", "excerpts"],
+            "additionalProperties": True,
+        }
+    elif name == "studium_figure_check":
+        input_schema = {
+            "type": "object",
+            "properties": {
+                "project": _project_property(),
+                "id": {"type": "string", "description": "Figure id from studium_figure_record. The stored source is rerun."},
+            },
+            "required": ["id"],
+            "additionalProperties": True,
+        }
     elif name == "studium_problem_check":
         input_schema = {
             "type": "object",
@@ -1894,6 +1979,7 @@ def _failed(payload: Mapping[str, object]) -> bool:
         "rendered",
         "replayed",
         "replaced",
+        "checked",
         "bibliographic_conflict",
         "bibliographic_identity",
     }:

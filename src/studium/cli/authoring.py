@@ -10,6 +10,7 @@ from studium.authoring.book_next import book_next
 from studium.authoring.claims import list_claims, record_claim
 from studium.authoring.computation import check_computation
 from studium.authoring.excerpts import get_excerpt, list_excerpts, record_excerpt
+from studium.authoring.figures import check_figure, record_figure
 from studium.authoring.paragraphs import draft_completeness, list_paragraphs, record_paragraph, replace_paragraph
 from studium.research.media import record_media
 from studium.research.student_notes import record_student_notes
@@ -19,7 +20,7 @@ from studium.authoring.verify import verify_book
 
 EXIT_GATE = 2
 EXIT_COMPILER = 4
-_OK = frozenset({"ok", "recorded", "rendered", "replayed", "replaced"})
+_OK = frozenset({"ok", "recorded", "rendered", "replayed", "replaced", "checked"})
 
 
 def register(subparsers: argparse._SubParsersAction) -> None:
@@ -114,6 +115,19 @@ def register(subparsers: argparse._SubParsersAction) -> None:
 
     book = subparsers.add_parser("book-next", help=argparse.SUPPRESS)
     _project(book)
+
+    figure = subparsers.add_parser("figure", help=argparse.SUPPRESS)
+    figure_commands = figure.add_subparsers(dest="figure_command")
+    figure_add = figure_commands.add_parser("add")
+    figure_add.add_argument("--section", required=True)
+    figure_add.add_argument("--caption", required=True)
+    figure_add.add_argument("--kind", required=True, choices=["tikz", "python"])
+    figure_add.add_argument("--source", required=True)
+    figure_add.add_argument("--excerpt", action="append", required=True)
+    _project(figure_add)
+    figure_check = figure_commands.add_parser("check")
+    figure_check.add_argument("figure_id")
+    _project(figure_check)
 
     computation = subparsers.add_parser("computation", help=argparse.SUPPRESS)
     computation.add_argument("--expression")
@@ -245,6 +259,24 @@ def run(args: argparse.Namespace, root: Path) -> int:
         if args.problem_command == "list":
             return _emit(list_problems(root), args.json)
         print("unknown command: problem", file=sys.stderr)
+        return 3
+    if command == "figure":
+        if args.figure_command == "add":
+            return _emit(
+                record_figure(
+                    root,
+                    section=args.section,
+                    caption=args.caption,
+                    source=args.source,
+                    kind=args.kind,
+                    excerpts=list(args.excerpt),
+                    actor={"kind": "cli"},
+                ),
+                args.json,
+            )
+        if args.figure_command == "check":
+            return _emit(check_figure(root, args.figure_id), args.json)
+        print("unknown command: figure", file=sys.stderr)
         return 3
     if command == "book-next":
         return _emit(book_next(root), args.json)
