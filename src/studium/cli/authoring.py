@@ -6,7 +6,9 @@ import sys
 from pathlib import Path
 
 from studium.authoring.blueprint import get_blueprint, store_blueprint
+from studium.authoring.book_next import book_next
 from studium.authoring.claims import list_claims, record_claim
+from studium.authoring.computation import check_computation
 from studium.authoring.excerpts import get_excerpt, list_excerpts, record_excerpt
 from studium.authoring.paragraphs import draft_completeness, list_paragraphs, record_paragraph
 from studium.authoring.problems import check_problem, list_problems, record_problem
@@ -15,7 +17,7 @@ from studium.authoring.verify import verify_book
 
 EXIT_GATE = 2
 EXIT_COMPILER = 4
-_OK = frozenset({"ok", "recorded", "rendered"})
+_OK = frozenset({"ok", "recorded", "rendered", "replayed"})
 
 
 def register(subparsers: argparse._SubParsersAction) -> None:
@@ -89,6 +91,16 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     _project(problem_check)
     problem_list = problem_commands.add_parser("list")
     _project(problem_list)
+
+    book = subparsers.add_parser("book-next", help=argparse.SUPPRESS)
+    _project(book)
+
+    computation = subparsers.add_parser("computation", help=argparse.SUPPRESS)
+    computation.add_argument("--expression")
+    computation.add_argument("--result")
+    computation.add_argument("--id")
+    computation.add_argument("--section")
+    _project(computation)
 
 
 def run(args: argparse.Namespace, root: Path) -> int:
@@ -180,6 +192,20 @@ def run(args: argparse.Namespace, root: Path) -> int:
             return _emit(list_problems(root), args.json)
         print("unknown command: problem", file=sys.stderr)
         return 3
+    if command == "book-next":
+        return _emit(book_next(root), args.json)
+    if command == "computation":
+        return _emit(
+            check_computation(
+                root,
+                expression=args.expression,
+                result=args.result,
+                computation_id=args.id,
+                section=args.section,
+                actor={"kind": "cli"},
+            ),
+            args.json,
+        )
     print("unknown command", file=sys.stderr)
     return 3
 
@@ -215,6 +241,16 @@ def _code(payload: dict[str, object]) -> int:
 
 def _text(payload: dict[str, object]) -> str:
     status = str(payload.get("status", ""))
+    if "reason" in payload and "ask_user" in payload:
+        tool = payload.get("tool")
+        return "\n".join(
+            [
+                f"tool: {tool if isinstance(tool, str) else 'none'}",
+                f"reason: {payload.get('reason')}",
+                "ask_user: no",
+                f"released: {_yes_no(payload.get('released'))}",
+            ]
+        )
     if status == "gate":
         lines = [
             f"state: {payload.get('project_state')}",

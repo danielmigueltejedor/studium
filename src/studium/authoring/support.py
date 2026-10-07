@@ -112,6 +112,43 @@ def paragraph_citation_blockers(root: Path, excerpt_ids: list[str]) -> list[dict
     return blockers
 
 
+def draft_source_usable(root: Path, record: dict[str, object]) -> bool:
+    """A public source may support a draft paragraph or excerpt.
+
+    Conflicts stay unusable. A course book also needs a guide citation or an
+    open supplement. A topic book does not need a university guide.
+    """
+
+    if _conflict_blocker(record) is not None:
+        return False
+    if book_kind(root) == BOOK_TOPIC:
+        return True
+    return record.get("course_guide_cited") is True or record.get("open_supplement") is True
+
+
+def corroboration_for_excerpts(root: Path, excerpt_ids: list[str]) -> str | None:
+    """``two_witnesses`` when two stored excerpts come from different public sources.
+
+    Agreement is not verified and it is not absolute truth.
+    """
+
+    if len(excerpt_ids) < 2:
+        return None
+    excerpts = excerpts_by_id(root)
+    sources: set[str] = set()
+    for excerpt_id in excerpt_ids:
+        excerpt = excerpts.get(excerpt_id)
+        if excerpt is None:
+            return None
+        source_id = excerpt.get("source_id")
+        if not isinstance(source_id, str) or not source_id:
+            return None
+        sources.add(source_id)
+    if len(sources) < 2:
+        return None
+    return "two_witnesses"
+
+
 def citation_blockers(
     root: Path,
     source_ids: list[str],
