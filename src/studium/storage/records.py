@@ -7,6 +7,8 @@ from studium.domain.ids import IdAllocator
 
 COURSE_CANDIDATES = "course/candidates.jsonl"
 PUBLIC_BIBLIOGRAPHY = "bibliography/public.jsonl"
+BLUEPRINT = "blueprint/outline.jsonl"
+CLAIMS = "claims/claims.jsonl"
 
 
 def read_jsonl(path: Path) -> list[dict[str, object]]:

@@ -9,6 +9,8 @@ import tomllib
 from pathlib import Path
 
 from studium import __version__
+from studium.cli.authoring import register as register_authoring
+from studium.cli.authoring import run as run_authoring
 from studium.cli.sources import register as register_sources
 from studium.cli.sources import run as run_sources
 from studium.config.resolve import resolve_project
@@ -44,8 +46,10 @@ Workflow:
   studium status [--json] [--project PATH]
   studium next [--json] [--project PATH]
   studium run [--project PATH]
-  studium research [--check] [--json] [--project PATH]
+  studium blueprint set --section ID TITLE [--section ID TITLE ...] [--json] [--project PATH]
+  studium claim add --text STR --source ID [--source ID ...] [--json] [--project PATH]
   studium verify (--fast | --full) [--entity ID] [--json] [--project PATH]
+  studium render [--json] [--project PATH]
   studium build [--project PATH]
   studium release [--project PATH]
   studium mcp [--workspace PATH] [--project PATH] [--http] [--public] [--port PORT] [--token TOKEN]
@@ -125,6 +129,8 @@ def main(argv: list[str] | None = None) -> int:
         return _next(args)
     if args.command == "sources":
         return _sources(args)
+    if args.command in {"blueprint", "claim", "verify", "render"}:
+        return _authoring(args)
     if args.command == "mcp":
         return _mcp(args)
     if args.command == "agent-pack":
@@ -166,6 +172,7 @@ def _build_parser() -> StudiumParser:
     pack.add_argument("--json", action="store_true")
     pack.add_argument("--project")
     register_sources(commands)
+    register_authoring(commands)
     register_mcp(commands)
     return parser
 
@@ -365,6 +372,17 @@ def _agent_pack_text(payload: dict[str, object]) -> str:
 
 def _yes_no(value: object) -> str:
     return "yes" if value is True else "no"
+
+
+def _authoring(args: argparse.Namespace) -> int:
+    root = _require_project(args.project)
+    if root is None:
+        return 3
+    try:
+        return run_authoring(args, root)
+    except (OSError, json.JSONDecodeError, UnicodeError, tomllib.TOMLDecodeError, TypeError, AttributeError):
+        print("invalid project", file=sys.stderr)
+        return 1
 
 
 def _sources(args: argparse.Namespace) -> int:
