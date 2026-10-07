@@ -12,7 +12,6 @@ _COURSE = {
 _SENTENCE = "Mass is conserved when a steady flow crosses a fixed control surface."
 _PASSAGE = "For steady flow the mass entering a fixed control volume equals the mass leaving it."
 _GATES = (
-    "corpus_started",
     "corpus_sufficient",
     "blueprint_accepted",
     "authoring_complete",
@@ -155,6 +154,7 @@ def test_verify_still_does_not_release(tmp_path, monkeypatch):
     assert checked["local_sources"]["status"] == "NONE"
     assert checked["draft_claims"] == ["CLM-0001"]
     messages = [item["message"] for item in checked["blockers"]]
+    assert any(item["code"] == "state.corpus_incomplete" for item in checked["blockers"])
     for gate in _GATES:
         assert f"gate {gate} is not implemented" in messages
     assert (root / ".studium" / "state.json").read_bytes() == state_before

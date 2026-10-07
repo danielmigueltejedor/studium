@@ -10,6 +10,7 @@ from pathlib import Path
 
 from studium.authoring.blueprint import current_sections
 from studium.authoring.excerpts import excerpts_by_id
+from studium.authoring.paragraphs import GAP_LABEL, supported_paragraphs
 from studium.authoring.support import supported_drafts
 from studium.domain.profiles import BOOK_TOPIC
 from studium.research.public_sources import bibliography_counts
@@ -63,6 +64,9 @@ def render_draft(root: Path) -> dict[str, object]:
         "project_state": project_state,
         "local_sources": local,
         "draft_claims": [str(claim["id"]) for claim in supported_drafts(root) if isinstance(claim.get("id"), str)],
+        "draft_paragraphs": [
+            str(paragraph["id"]) for paragraph in supported_paragraphs(root) if isinstance(paragraph.get("id"), str)
+        ],
     }
     if engine is None:
         return {
@@ -110,18 +114,16 @@ def _document(root: Path) -> str:
     kind = book_kind(root)
     sections = current_sections(root)
     claims = supported_drafts(root)
+    paragraphs = supported_paragraphs(root)
     titles = _source_titles(root)
     excerpts = excerpts_by_id(root)
     counts = bibliography_counts(root)
     book = _book_name(root)
-    placed: dict[str, list[dict[str, object]]] = {}
-    loose: list[dict[str, object]] = []
-    for claim in claims:
-        section = claim.get("section")
-        if isinstance(section, str) and any(item["id"] == section for item in sections):
-            placed.setdefault(section, []).append(claim)
-        else:
-            loose.append(claim)
+    by_section: dict[str, list[dict[str, object]]] = {}
+    for paragraph in paragraphs:
+        section = paragraph.get("section")
+        if isinstance(section, str):
+            by_section.setdefault(section, []).append(paragraph)
     lines = [
         r"\documentclass{article}",
         r"\makeatletter",
@@ -147,12 +149,16 @@ def _document(root: Path) -> str:
         lines.append("No blueprint is stored.")
     for section in sections:
         lines.extend(["", r"\section{" + latex_escape(section["title"]) + "}"])
-        for claim in placed.get(section["id"], []):
-            lines.extend(_claim_lines(claim, titles, excerpts))
+        section_paragraphs = by_section.get(section["id"], [])
+        if not section_paragraphs:
+            lines.extend(["", r"\noindent " + latex_escape(GAP_LABEL)])
+            continue
+        for paragraph in section_paragraphs:
+            lines.extend(_claim_lines(paragraph, titles, excerpts))
     lines.extend(["", r"\section*{Draft claims}"])
-    if not loose and not placed:
+    if not claims:
         lines.append("No supported draft claims.")
-    for claim in loose:
+    for claim in claims:
         lines.extend(_claim_lines(claim, titles, excerpts))
     lines.extend(["", r"\end{document}", ""])
     return "\n".join(lines)

@@ -5,7 +5,7 @@ import pytest
 from studium.domain.ids import PREFIXES, IdAllocator
 
 _ID_RE = re.compile(
-    r"^(SRC|EVD|CLM|CON|SYM|TRM|EQ|DER|FIG|EX|CH|REV|TSK|TOP|OUT|SKL|CNF|WAV|CST)-[0-9]{4,}$"
+    r"^(SRC|EVD|CLM|PAR|CON|SYM|TRM|EQ|DER|FIG|EX|CH|REV|TSK|TOP|OUT|SKL|CNF|WAV|CST)-[0-9]{4,}$"
 )
 
 

@@ -8,6 +8,7 @@ from pathlib import Path
 from studium.authoring.blueprint import get_blueprint, store_blueprint
 from studium.authoring.claims import list_claims, record_claim
 from studium.authoring.excerpts import get_excerpt, list_excerpts, record_excerpt
+from studium.authoring.paragraphs import draft_completeness, list_paragraphs, record_paragraph
 from studium.authoring.render import render_draft
 from studium.authoring.verify import verify_book
 
@@ -58,6 +59,19 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     excerpt_get = excerpt_commands.add_parser("get")
     excerpt_get.add_argument("excerpt_id")
     _project(excerpt_get)
+
+    paragraph = subparsers.add_parser("paragraph", help=argparse.SUPPRESS)
+    paragraph_commands = paragraph.add_subparsers(dest="paragraph_command")
+    paragraph_add = paragraph_commands.add_parser("add")
+    paragraph_add.add_argument("--section", required=True)
+    paragraph_add.add_argument("--text", required=True)
+    paragraph_add.add_argument("--excerpt", action="append", required=True)
+    _project(paragraph_add)
+    paragraph_list = paragraph_commands.add_parser("list")
+    _project(paragraph_list)
+
+    completeness = subparsers.add_parser("completeness", help=argparse.SUPPRESS)
+    _project(completeness)
 
 
 def run(args: argparse.Namespace, root: Path) -> int:
@@ -110,6 +124,24 @@ def run(args: argparse.Namespace, root: Path) -> int:
             return _emit(get_excerpt(root, args.excerpt_id), args.json)
         print("unknown command: excerpt", file=sys.stderr)
         return 3
+    if command == "paragraph":
+        if args.paragraph_command == "add":
+            return _emit(
+                record_paragraph(
+                    root,
+                    section=args.section,
+                    text=args.text,
+                    excerpts=list(args.excerpt),
+                    actor={"kind": "cli"},
+                ),
+                args.json,
+            )
+        if args.paragraph_command == "list":
+            return _emit(list_paragraphs(root), args.json)
+        print("unknown command: paragraph", file=sys.stderr)
+        return 3
+    if command == "completeness":
+        return _emit(draft_completeness(root), args.json)
     print("unknown command", file=sys.stderr)
     return 3
 
@@ -196,6 +228,29 @@ def _text(payload: dict[str, object]) -> str:
     excerpt = payload.get("excerpt")
     if status in {"recorded", "already_recorded", "ok"} and isinstance(excerpt, dict):
         return f"{excerpt.get('id')} source: {excerpt.get('source_id')} classification: PENDING"
+    paragraphs = payload.get("paragraphs")
+    if status == "ok" and isinstance(paragraphs, list):
+        if not paragraphs:
+            return "paragraphs: none"
+        return "\n".join(
+            f"{item.get('id')} {item.get('section')} {item.get('status')}"
+            for item in paragraphs
+            if isinstance(item, dict)
+        )
+    paragraph = payload.get("paragraph")
+    if status in {"recorded", "already_recorded"} and isinstance(paragraph, dict):
+        return f"{paragraph.get('id')} status: draft"
+    if status == "ok" and "supported_section_count" in payload:
+        empty = payload.get("empty_sections")
+        names = "none"
+        if isinstance(empty, list) and empty:
+            names = ", ".join(
+                f"{item.get('id')} ({item.get('title')})" for item in empty if isinstance(item, dict)
+            )
+        return (
+            f"supported_sections: {payload.get('supported_section_count')}"
+            f"/{payload.get('section_count')}\nempty: {names}"
+        )
     excerpts = payload.get("excerpts")
     if status == "ok" and isinstance(excerpts, list):
         if not excerpts:

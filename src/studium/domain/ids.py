@@ -11,6 +11,7 @@ PREFIXES: frozenset[str] = frozenset(
         "SRC",
         "EVD",
         "CLM",
+        "PAR",
         "CON",
         "SYM",
         "TRM",
