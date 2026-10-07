@@ -5,8 +5,9 @@ from pathlib import Path
 from studium.domain.enums import ProjectEvent, ProjectState
 from studium.state.gates import COURSE_JSON, gate_for
 from studium.state.machine import apply
-from studium.storage.init_project import load_state_holding_lock, write_state
+from studium.storage.init_project import load_project_toml, load_state_holding_lock, write_state
 from studium.storage.locking import ProjectLocked, project_lock
+from studium.storage.records import COURSE_CANDIDATES, fold_by_id
 
 
 def attempt_course_recorded(root: Path) -> dict[str, object]:
@@ -21,7 +22,7 @@ def attempt_course_recorded(root: Path) -> dict[str, object]:
             result = apply(
                 current,
                 ProjectEvent.COURSE_RECORDED.value,
-                {COURSE_JSON: gate_for(COURSE_JSON)},
+                {COURSE_JSON: gate_for(COURSE_JSON, _course(root), fold_by_id(root / COURSE_CANDIDATES))},
             )
             if not result.applied or result.entry is None or result.state is None:
                 return {
@@ -48,6 +49,13 @@ def attempt_course_recorded(root: Path) -> dict[str, object]:
             return {"status": "ok", "state": result.state.value, "event": result.entry.event}
     except ProjectLocked:
         return {"status": "storage.locked", "message": "project is locked"}
+
+
+def _course(root: Path) -> dict[str, object] | None:
+    loaded = load_project_toml(root).get("course")
+    if isinstance(loaded, dict):
+        return loaded
+    return None
 
 
 def _state(value: object) -> ProjectState | None:

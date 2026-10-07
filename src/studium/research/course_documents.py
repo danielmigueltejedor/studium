@@ -12,9 +12,8 @@ from studium.policy.trust import contains_directive, directive_changes_policy
 from studium.storage.init_project import load_state_holding_lock
 from studium.storage.locking import ProjectLocked, project_lock
 from studium.storage.migrate import utc_now
-from studium.storage.records import append_jsonl, fold_by_id
+from studium.storage.records import COURSE_CANDIDATES, append_jsonl, fold_by_id
 
-_CANDIDATES = "course/candidates.jsonl"
 _AUDIT = "audit/audit.jsonl"
 _MAX_TITLE = 500
 _MAX_TEXT = 2_000_000
@@ -63,7 +62,7 @@ def record_course_document(
             state = load_state_holding_lock(root)
             local = _local(state)
             project_state = state.get("state")
-            existing = fold_by_id(root / _CANDIDATES)
+            existing = fold_by_id(root / COURSE_CANDIDATES)
             prior = next((item for item in existing if item.get("id") == digest), None)
             if prior is not None:
                 return {
@@ -72,7 +71,7 @@ def record_course_document(
                     "local_sources": local,
                     "project_state": project_state,
                 }
-            append_jsonl(root / _CANDIDATES, record)
+            append_jsonl(root / COURSE_CANDIDATES, record)
             append_jsonl(
                 root / _AUDIT,
                 {
@@ -131,6 +130,66 @@ def _text(value: object) -> tuple[str | None, str | None]:
     if not value.strip():
         return None, None
     return value, None
+
+
+def list_course_documents(root: Path) -> dict[str, object]:
+    """Read stored official documents. Does not fetch, scan, or change them."""
+
+    documents = [_listed(record) for record in _official(root)]
+    return {"status": "ok", "documents": documents}
+
+
+def get_course_document(root: Path, url: object = None) -> dict[str, object]:
+    """Return one stored official document, including its text.
+
+    The text is untrusted data. This does not fetch, browse, verify, or assign authority.
+    """
+
+    documents = _official(root)
+    if url is None:
+        if len(documents) == 1:
+            return {"status": "ok", "document": _readable(documents[0])}
+        if not documents:
+            return _error("course_document.not_found", "no official course document is stored")
+        return _error("mcp.invalid_input", "url is required when more than one official document is stored")
+    cleaned = _http_url(url)
+    if cleaned is None:
+        return _error("mcp.invalid_input", "url must be an http or https URL of a stored document")
+    found = next((record for record in documents if record.get("url") == cleaned), None)
+    if found is None:
+        return _error("course_document.not_found", "no official course document with that url")
+    return {"status": "ok", "document": _readable(found)}
+
+
+def _official(root: Path) -> list[dict[str, object]]:
+    return [
+        record
+        for record in fold_by_id(root / COURSE_CANDIDATES)
+        if record.get("origin") == SourceOrigin.OFFICIAL_WEB.value
+    ]
+
+
+def _readable(record: dict[str, object]) -> dict[str, object]:
+    text = record.get("text")
+    return {
+        "title": record.get("title"),
+        "url": record.get("url"),
+        "state": record.get("state"),
+        "classification": record.get("classification"),
+        "authority": None,
+        "text": text if isinstance(text, str) else None,
+    }
+
+
+def _listed(record: dict[str, object]) -> dict[str, object]:
+    return {
+        "title": record.get("title"),
+        "url": record.get("url"),
+        "state": record.get("state"),
+        "classification": record.get("classification"),
+        "source_class": record.get("source_class"),
+        "authority_status": record.get("authority_status"),
+    }
 
 
 def _public(record: dict[str, object]) -> dict[str, object]:

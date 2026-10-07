@@ -288,10 +288,21 @@ def _status(args: argparse.Namespace) -> int:
         action = payload.get("next_action")
         if isinstance(action, str):
             print(f"next_action: {action}")
+        _print_writing_status(payload)
         return 0
     print(f"course.university: {fields.get('university', '')}")
     print(f"course.degree: {fields.get('degree', '')}")
+    action = payload.get("next_action")
+    if isinstance(action, str):
+        print(f"next_action: {action}")
+    _print_writing_status(payload)
     return 0
+
+
+def _print_writing_status(payload: dict[str, object]) -> None:
+    writing = payload.get("writing_status")
+    if isinstance(writing, str):
+        print(writing)
 
 
 def _agent_pack(args: argparse.Namespace) -> int:
@@ -330,6 +341,8 @@ def _agent_pack_text(payload: dict[str, object]) -> str:
         lines.append("course_guide: no")
     if isinstance(payload.get("next_action"), str):
         lines.append(f"next_action: {payload['next_action']}")
+    if isinstance(payload.get("writing_status"), str):
+        lines.append(str(payload["writing_status"]))
     status = payload.get("status")
     if payload.get("should_ask") and isinstance(payload.get("question"), str):
         lines.append(f"question: {payload['question']}")
