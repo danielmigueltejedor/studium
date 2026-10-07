@@ -159,6 +159,9 @@ def test_stdio_still_answers_initialize(tmp_path):
         check=False,
     )
     assert completed.returncode == 0
+    assert completed.stdout.endswith(b"\n")
+    assert not completed.stdout.lower().startswith(b"content-length:")
+    assert completed.stdout.count(b"\n") == 1
     parsed = read_message(BytesIO(completed.stdout))
     assert parsed["result"]["serverInfo"]["name"] == "studium"
     assert parsed["result"]["protocolVersion"] == "2024-11-05"

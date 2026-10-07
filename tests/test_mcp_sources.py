@@ -177,6 +177,9 @@ def test_mcp_stdio_announces_versions():
         check=False,
     )
     assert completed.returncode == 0
+    assert completed.stdout.endswith(b"\n")
+    assert not completed.stdout.lower().startswith(b"content-length:")
+    assert completed.stdout.count(b"\n") == 1
     parsed = read_message(_Reader(completed.stdout))
     info = parsed["result"]["serverInfo"]
     assert info["name"] == "studium"
@@ -216,7 +219,11 @@ class _Reader:
 
 def test_write_message_roundtrip():
     sink = _Buffer()
-    write_message(sink, {"jsonrpc": "2.0", "id": 1, "result": {"ok": True}})
+    message = {"jsonrpc": "2.0", "id": 1, "result": {"ok": True}}
+    write_message(sink, message)
+    assert sink.data == json.dumps(message, separators=(",", ":")).encode("utf-8") + b"\n"
+    assert sink.data.count(b"\n") == 1
+    assert not sink.data.lower().startswith(b"content-length:")
     loaded = read_message(_Reader(sink.data))
     assert loaded["result"]["ok"] is True
 

@@ -246,8 +246,8 @@ def read_message(stream: BinaryIO) -> dict[str, object] | None:
 
 
 def write_message(stream: BinaryIO, message: Mapping[str, object]) -> None:
-    body = json.dumps(message, ensure_ascii=False).encode("utf-8")
-    stream.write(f"Content-Length: {len(body)}\r\n\r\n".encode("ascii") + body)
+    line = json.dumps(message, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    stream.write(line + b"\n")
     stream.flush()
 
 

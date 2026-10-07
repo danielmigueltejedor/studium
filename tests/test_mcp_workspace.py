@@ -65,6 +65,9 @@ def test_cli_mcp_starts_without_a_project(tmp_path):
         check=False,
     )
     assert completed.returncode == 0
+    assert completed.stdout.endswith(b"\n")
+    assert not completed.stdout.lower().startswith(b"content-length:")
+    assert completed.stdout.count(b"\n") == 1
     parsed = read_message(BytesIO(completed.stdout))
     assert parsed["result"]["serverInfo"]["name"] == "studium"
     assert b"project.not_found" not in completed.stderr
