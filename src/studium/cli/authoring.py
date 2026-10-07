@@ -73,7 +73,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     paragraph_add.add_argument("--section", required=True)
     paragraph_add.add_argument("--text", required=True)
     paragraph_add.add_argument("--excerpt", action="append", required=True)
-    paragraph_add.add_argument("--role", choices=["purpose", "explanation", "self_check"])
+    paragraph_add.add_argument("--role", choices=["purpose", "explanation", "consejo", "definition", "self_check"])
     _project(paragraph_add)
     paragraph_list = paragraph_commands.add_parser("list")
     _project(paragraph_list)
@@ -81,7 +81,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     paragraph_replace.add_argument("paragraph_id")
     paragraph_replace.add_argument("--text", required=True)
     paragraph_replace.add_argument("--excerpt", action="append", required=True)
-    paragraph_replace.add_argument("--role", choices=["purpose", "explanation", "self_check"])
+    paragraph_replace.add_argument("--role", choices=["purpose", "explanation", "consejo", "definition", "self_check"])
     _project(paragraph_replace)
 
     media = subparsers.add_parser("media", help=argparse.SUPPRESS)

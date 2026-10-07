@@ -259,16 +259,21 @@ def annotate_next_action(root: Path, payload: dict[str, object]) -> dict[str, ob
     return updated
 
 
+_KEPT_ROLES = {"purpose", "self_check", "consejo", "definition"}
+
+
 def _role(value: object) -> tuple[str | None, dict[str, object] | None]:
     if value is None:
         return None, None
     if not isinstance(value, str):
-        return None, _error("mcp.invalid_input", "role must be purpose, explanation, or self_check")
+        return None, _error("mcp.invalid_input", "role must be purpose, explanation, consejo, definition, or self_check")
     cleaned = value.strip().lower()
+    if cleaned in {"definicion", "definición"}:
+        cleaned = "definition"
     if cleaned == "explanation":
         return None, None
-    if cleaned not in {"purpose", "self_check"}:
-        return None, _error("mcp.invalid_input", "role must be purpose, explanation, or self_check")
+    if cleaned not in _KEPT_ROLES:
+        return None, _error("mcp.invalid_input", "role must be purpose, explanation, consejo, definition, or self_check")
     return cleaned, None
 
 
@@ -318,7 +323,7 @@ def _public(record: dict[str, object]) -> dict[str, object]:
         "status": "draft",
         "classification": "PENDING",
     }
-    if record.get("role") in {"purpose", "self_check"}:
+    if record.get("role") in _KEPT_ROLES:
         visible["role"] = record["role"]
     if record.get("content_directives_ignored") is True:
         visible["content_directives_ignored"] = True

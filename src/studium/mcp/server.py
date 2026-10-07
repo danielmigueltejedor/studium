@@ -674,8 +674,11 @@ _INSTRUCTIONS = (
             "A chapter is teaching prose, not a sentence that repeats an excerpt. "
             "The writer may rewrite it with studium_paragraph_replace. "
             "Use the model's knowledge only by attaching the sources used. "
-            "Each chapter uses one format: what this section is for, the explanation, one worked problem, "
-            "a short self-check, and a line saying what was audited. "
+            "Write a full chapter in Spanish, several paragraphs of explanation, not a summary and not a sentence. "
+            "Use the same shape every chapter: a short lead, the explanation, at most one consejo, "
+            "definitions only when a term is introduced, one worked problem, and one autoficha. "
+            "Cite stored sources. A formula still needs a quoted excerpt or a replayed computation. "
+            "Do not ask the user how to format the page. The renderer owns the boxes. "
             "A section of one short paragraph does not count as written. "
             "Status and studium_book_next lead the client through write, then audit, then contradiction scan, "
             "then review, then render. "
@@ -703,8 +706,12 @@ _INSTRUCTIONS = (
             "The footer is then Borrador. "
             "A stale draft.toc is deleted before compile so the contents page is rebuilt. "
             "The preamble uses T1 fontenc and UTF-8. "
-            "Tip, definition, worked-problem, and self-check blocks are tcolorbox environments. "
-            "In Spanish those titles are Consejo, Definición, Problema resuelto, and Autoficha. "
+            "Explanation is normal body text under a section heading, not a box. "
+            "Only four kinds are boxes: Consejo, Definición, Problema resuelto, and Autoficha. "
+            "One consejo, the definitions, one worked problem, and one autoficha per chapter. "
+            "A worked problem has three labeled parts: Enunciado, Resolución, and Respuesta. "
+            "The lead is italic under the chapter title, not a box. "
+            "A paragraph with no kind is body text. "
             "Entity ids are not printed in the chapter text. "
             "A small footer marks the file as a draft. "
             "The source audit stays in the appendix. "
@@ -1956,8 +1963,8 @@ def _schema(tool: Mapping[str, object]) -> dict[str, object]:
                 },
                 "role": {
                     "type": "string",
-                    "enum": ["purpose", "explanation", "self_check"],
-                    "description": "purpose, explanation, or self_check. Teaching prose, not a restatement.",
+                    "enum": ["purpose", "explanation", "consejo", "definition", "self_check"],
+                    "description": "purpose is the italic lead, explanation is body text, consejo and definition are boxes, self_check is the autoficha. The renderer owns the boxes.",
                 },
             },
             "required": ["section", "text", "excerpts"],
@@ -1980,8 +1987,8 @@ def _schema(tool: Mapping[str, object]) -> dict[str, object]:
                 },
                 "role": {
                     "type": "string",
-                    "enum": ["purpose", "explanation", "self_check"],
-                    "description": "purpose, explanation, or self_check.",
+                    "enum": ["purpose", "explanation", "consejo", "definition", "self_check"],
+                    "description": "purpose is the italic lead, explanation is body text, consejo and definition are boxes, self_check is the autoficha.",
                 },
             },
             "required": ["id", "text", "excerpts"],

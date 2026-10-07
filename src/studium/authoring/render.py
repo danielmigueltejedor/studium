@@ -314,7 +314,13 @@ def _copy(language: str) -> dict[str, str]:
             "leftover": "Borrador antiguo.",
             "note": "Este archivo es un borrador. No está publicado.",
             "how_a": "Una sección puede contener varios párrafos. Cada párrafo sustantivo cita un extracto almacenado.",
-            "how_b": "Un capítulo dice para qué sirve la sección, la explicación, un problema resuelto y una autoficha breve.",
+            "how_b": "Un capítulo lleva una entrada en cursiva, la explicación en el cuerpo, como mucho un consejo, definiciones solo al introducir un término, un problema resuelto y una autoficha.",
+            "consejo": "Consejo",
+            "definition": "Definición",
+            "section": "Explicación",
+            "enunciado": "Enunciado",
+            "resolucion": "Resolución",
+            "respuesta": "Respuesta",
             "open_supplement": "Suplemento abierto:",
             "not_guide": "No es la bibliografía de la guía.",
         }
@@ -341,7 +347,13 @@ def _copy(language: str) -> dict[str, str]:
         "leftover": "Leftover draft.",
         "note": "This file is a DRAFT. It is not RELEASED.",
         "how_a": "A section may hold several paragraphs. Each substantive paragraph cites a stored excerpt.",
-        "how_b": "A chapter states what the section is for, the explanation, one worked problem, and a short self-check.",
+            "how_b": "A chapter has an italic lead, the explanation as body text, at most one tip, definitions only when a term is introduced, one worked problem, and one self-check.",
+            "consejo": "Tip",
+            "definition": "Definition",
+            "section": "Explanation",
+            "enunciado": "Statement",
+            "resolucion": "Solution",
+            "respuesta": "Answer",
         "open_supplement": "Open supplement:",
         "not_guide": "Not the guide bibliography.",
     }
@@ -463,17 +475,51 @@ def _chapter_lines(
     paragraphs: list[dict[str, object]],
     copy: dict[str, str],
 ) -> list[str]:
-    """Chapter prose only. Ids and source status stay in the appendix."""
+    """Lead and explanation stay in the body. Only four kinds are boxes."""
 
     purpose = [record for record in paragraphs if record.get("role") == "purpose"]
+    consejo = [record for record in paragraphs if record.get("role") == "consejo"]
+    definitions = [record for record in paragraphs if record.get("role") == "definition"]
     self_check = [record for record in paragraphs if record.get("role") == "self_check"]
-    explanation = [record for record in paragraphs if record.get("role") not in {"purpose", "self_check"}]
+    body = [
+        record
+        for record in paragraphs
+        if record.get("role") not in {"purpose", "consejo", "definition", "self_check"}
+    ]
     lines: list[str] = []
-    lines.extend(_box(copy["purpose"], _prose(purpose)))
-    lines.extend(_box(copy["explanation"], _prose(explanation)))
-    lines.extend(_box(copy["worked"], _section_worked(root, section_id)))
-    lines.extend(_box(copy["self_check"], _prose(self_check)))
+    lines.extend(_italic(_prose_text(purpose)))
+    if _prose_text(body):
+        lines.extend(["", r"\section{" + latex_escape(copy["section"]) + "}"])
+        lines.extend(_plain(_prose_text(body)))
+    lines.extend(_box(copy["consejo"], _plain(_prose_text(consejo))))
+    for record in definitions:
+        lines.extend(_box(copy["definition"], _plain(_prose_text([record]))))
+    lines.extend(_worked_box(root, section_id, copy))
+    lines.extend(_box(copy["self_check"], _plain(_prose_text(self_check))))
     return lines
+
+
+def _italic(chunks: list[str]) -> list[str]:
+    lines: list[str] = []
+    for text in chunks:
+        lines.extend(["", r"\noindent\textit{" + latex_escape(text) + "}"])
+    return lines
+
+
+def _plain(chunks: list[str]) -> list[str]:
+    lines: list[str] = []
+    for text in chunks:
+        lines.extend(["", latex_escape(text)])
+    return lines
+
+
+def _prose_text(paragraphs: list[dict[str, object]]) -> list[str]:
+    found: list[str] = []
+    for paragraph in paragraphs:
+        text = paragraph.get("text") if isinstance(paragraph.get("text"), str) else ""
+        if text.strip():
+            found.append(text)
+    return found
 
 
 def _box(title: str, body: list[str]) -> list[str]:
@@ -487,28 +533,41 @@ def _box(title: str, body: list[str]) -> list[str]:
     ]
 
 
-def _prose(paragraphs: list[dict[str, object]]) -> list[str]:
-    lines: list[str] = []
-    for paragraph in paragraphs:
-        text = paragraph.get("text") if isinstance(paragraph.get("text"), str) else ""
-        if not text.strip():
-            continue
+def _worked_box(root: Path, section_id: str, copy: dict[str, str]) -> list[str]:
+    """One worked problem per chapter, with the statement, the working, and the answer."""
+
+    problems = [record for record in fold_by_id(root / PROBLEMS) if record.get("section") == section_id]
+    computations = [
+        record
+        for record in fold_by_id(root / COMPUTATIONS)
+        if record.get("section") == section_id and record.get("status") == "replayed" and record.get("correct") is True
+    ]
+    if not problems and not computations:
+        return []
+    problem = problems[0] if problems else {}
+    computation = computations[0] if computations else {}
+    prompt = problem.get("prompt") if isinstance(problem.get("prompt"), str) else ""
+    expected = problem.get("expected") if isinstance(problem.get("expected"), str) else ""
+    source = problem.get("source_text") if isinstance(problem.get("source_text"), str) else ""
+    expression = computation.get("expression") if isinstance(computation.get("expression"), str) else ""
+    result = computation.get("server_result") if isinstance(computation.get("server_result"), str) else ""
+    statement = prompt.strip() or expression.strip()
+    working = expression.strip() if expression.strip() and expression.strip() != statement else source.strip()
+    if not working and expression.strip():
+        working = expression.strip()
+    answer = result.strip() or expected.strip()
+    body = [
+        *_labeled(copy["enunciado"], statement),
+        *_labeled(copy["resolucion"], working),
+        *_labeled(copy["respuesta"], answer),
+    ]
+    return _box(copy["worked"], body)
+
+
+def _labeled(label: str, text: str) -> list[str]:
+    lines = ["", r"\noindent\textbf{" + latex_escape(label) + "}"]
+    if text.strip():
         lines.extend(["", latex_escape(text)])
-    return lines
-
-
-def _section_worked(root: Path, section_id: str) -> list[str]:
-    lines: list[str] = []
-    for record in fold_by_id(root / PROBLEMS):
-        if record.get("section") == section_id:
-            lines.extend(_problem_body(record))
-    for record in fold_by_id(root / COMPUTATIONS):
-        if record.get("section") != section_id:
-            continue
-        if record.get("status") == "replayed" and record.get("correct") is True:
-            expression = record.get("expression") if isinstance(record.get("expression"), str) else ""
-            if expression.strip():
-                lines.extend(["", latex_escape(expression)])
     return lines
 
 
@@ -583,13 +642,6 @@ def _section_has_replay(root: Path, section_id: str) -> bool:
         if record.get("section") == section_id and record.get("status") == "replayed" and record.get("correct") is True:
             return True
     return False
-
-
-def _problem_body(record: dict[str, object]) -> list[str]:
-    prompt = record.get("prompt") if isinstance(record.get("prompt"), str) else ""
-    if not prompt.strip():
-        return []
-    return ["", latex_escape(prompt)]
 
 
 def _solution_lines(root: Path, copy: dict[str, str]) -> list[str]:

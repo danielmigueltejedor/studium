@@ -22,7 +22,7 @@ def test_book_next_on_an_empty_topic_book(tmp_path, monkeypatch):
     assert nxt["tool"] == "studium_public_source_record"
     assert nxt["ask_user"] is False
     assert nxt["released"] is False
-    assert "ask the user" not in json.dumps(nxt).lower()
+    assert "ask the user" not in json.dumps(nxt).lower().replace("do not ask the user how to format the page.", "")
     assert "studium_book_next" in tool_names()
     assert "studium_computation_check" in tool_names()
 
@@ -47,7 +47,7 @@ def test_book_next_moves_on_when_a_section_is_filled(tmp_path, monkeypatch):
     assert nxt["arguments"]["section"] == "tema-1"
     assert nxt["arguments"]["excerpts"] == [excerpt_id]
     assert nxt["ask_user"] is False
-    assert "ask the user" not in json.dumps(nxt).lower()
+    assert "ask the user" not in json.dumps(nxt).lower().replace("do not ask the user how to format the page.", "")
     recorded = dispatch(
         "studium_paragraph_record",
         {
@@ -65,13 +65,13 @@ def test_book_next_moves_on_when_a_section_is_filled(tmp_path, monkeypatch):
     assert "too short" in nxt["reason"]
     assert nxt["ask_user"] is False
     assert nxt["released"] is False
-    assert "ask the user" not in json.dumps(nxt).lower()
+    assert "ask the user" not in json.dumps(nxt).lower().replace("do not ask the user how to format the page.", "")
     rendered = _until_tool(session, "studium_render")
     assert rendered["arguments"].get("section") != "tema-1"
     assert "tema-2" in rendered["reason"]
     assert "tema-1" not in rendered["reason"]
     assert rendered["released"] is False
-    assert "ask the user" not in json.dumps(rendered).lower()
+    assert "ask the user" not in json.dumps(rendered).lower().replace("do not ask the user how to format the page.", "")
 
 
 def test_computation_is_accepted_only_when_replayed(tmp_path, monkeypatch):
@@ -232,7 +232,7 @@ def test_verify_still_refuses_release(tmp_path, monkeypatch):
     assert done["ask_user"] is False
     assert done["released"] is False
     assert "Do not request release." in done["reason"]
-    assert "ask the user" not in json.dumps(done).lower()
+    assert "ask the user" not in json.dumps(done).lower().replace("do not ask the user how to format the page.", "")
     assert json.loads(state_before)["state"] != "RELEASED"
     assert (root / ".studium" / "state.json").read_bytes() == state_before
 
@@ -285,7 +285,7 @@ def _until_tool(session, tool: str | None) -> dict[str, object]:
         nxt = dispatch("studium_book_next", {}, session=session)
         assert nxt["ask_user"] is False
         assert nxt["released"] is False
-        assert "ask the user" not in json.dumps(nxt).lower()
+        assert "ask the user" not in json.dumps(nxt).lower().replace("do not ask the user how to format the page.", "")
         last = nxt
         if nxt["tool"] == "studium_render" and tool != "studium_render":
             assert dispatch("studium_render", {}, session=session)["released"] is False

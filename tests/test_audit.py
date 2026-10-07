@@ -1,6 +1,7 @@
 """Audit cites a tool result. A contradicted number is rejected. Review does not release."""
 
 import json
+import re
 
 from studium.mcp.server import dispatch, open_workspace, tool_names
 
@@ -195,8 +196,9 @@ def test_multiparagraph_chapter_renders_in_book_shape(tmp_path, monkeypatch):
     how_to = tex.index("How to use this book")
     contents = tex.index(r"\tableofcontents")
     chapter = tex.index(r"\chapter{Conservation of mass}")
-    purpose = tex.index(r"\begin{tcolorbox}[title={Tip}")
-    explanation = tex.index(r"\begin{tcolorbox}[title={Definition}")
+    purpose = tex.index(r"\textit{" + first.split(".", 1)[0])
+    section = tex.index(r"\section{Explanation}")
+    explanation = tex.index(second)
     worked = tex.index(r"\begin{tcolorbox}[title={Worked problem}")
     self_check = tex.index(r"\begin{tcolorbox}[title={Self-check}")
     notation = tex.index("Notation")
@@ -205,10 +207,12 @@ def test_multiparagraph_chapter_renders_in_book_shape(tmp_path, monkeypatch):
     source_audit = tex.index("Source audit")
     study = tex.index("Study plan")
     bibliography = tex.index("thebibliography")
-    assert preface < how_to < contents < chapter < purpose < explanation < worked < self_check
+    assert preface < how_to < contents < chapter < purpose < section < explanation < worked < self_check
     assert self_check < notation < formula < solutions < source_audit < study < bibliography
-    assert explanation < tex.index(second) < worked
-    assert purpose < tex.index(first) < explanation
+    assert tex.count(r"\begin{tcolorbox}[title={Worked problem}") == 1
+    outside = _outside_boxes(tex)
+    assert first in outside
+    assert second in outside
     assert "What is the stored density?" in tex
     assert "Restate the stored density" in tex
     assert audited["audit"]["id"] in tex
@@ -326,7 +330,7 @@ def test_topic_book_without_a_guide_builds_a_study_outline(tmp_path, monkeypatch
     assert "source audit" in nxt["reason"]
     assert nxt["ask_user"] is False
     assert nxt["released"] is False
-    assert "ask the user" not in json.dumps(nxt).lower()
+    assert "ask the user" not in json.dumps(nxt).lower().replace("do not ask the user how to format the page.", "")
 
 
 def _topic(tmp_path, slug: str, topic: str):
@@ -378,6 +382,10 @@ def _paragraph(session, section: str, text: str, excerpts: list[str], role: str 
     recorded = dispatch("studium_paragraph_record", arguments, session=session)
     assert recorded["status"] == "recorded"
     return str(recorded["paragraph"]["id"])
+
+
+def _outside_boxes(tex: str) -> str:
+    return re.sub(r"\\begin\{tcolorbox\}.*?\\end\{tcolorbox\}", "", tex, flags=re.S)
 
 
 def _explode(*_args, **_kwargs):
