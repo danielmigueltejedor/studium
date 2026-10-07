@@ -13,23 +13,23 @@ from studium.cli.sources import register as register_sources
 from studium.cli.sources import run as run_sources
 from studium.config.resolve import resolve_project
 from studium.domain.enums import ProjectState
+from studium.mcp.http_server import serve_http
 from studium.mcp.server import build_parser as register_mcp
 from studium.mcp.server import serve as serve_mcp
 from studium.research.sources import agent_pack, project_status
 from studium.state.gates import PROJECT_TOML, gate_for
 from studium.state.machine import earlier_gates_fail
 from studium.storage.init_project import (
-    CreateRequest,
+    SOURCES_MISSING_WARNING,
+    build_create_request,
     create_project,
     load_project_toml,
     load_state,
     load_tasks,
-    local_sources_label,
     select_next_task,
 )
 
 _PROFILES = ("STEM", "HUMANITIES", "SOCIAL_SCIENCES", "COMPUTER_SCIENCE", "LAW")
-_SOURCES_WARNING = "sources path not found; continuing with COURSE_DISCOVERY"
 
 _WORKFLOW = """\
 Workflow:
@@ -44,7 +44,7 @@ Workflow:
   studium verify (--fast | --full) [--entity ID] [--json] [--project PATH]
   studium build [--project PATH]
   studium release [--project PATH]
-  studium mcp [--project PATH]
+  studium mcp [--workspace PATH] [--project PATH] [--http] [--public] [--port PORT] [--token TOKEN]
 """
 
 _ADVANCED = """\
@@ -122,7 +122,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "sources":
         return _sources(args)
     if args.command == "mcp":
-        return serve_mcp(sys.stdin.buffer, sys.stdout.buffer, default_project=args.project)
+        return _mcp(args)
     if args.command == "agent-pack":
         return _agent_pack(args)
     parser.print_help(sys.stderr)
@@ -165,38 +165,49 @@ def _build_parser() -> StudiumParser:
     return parser
 
 
+def _mcp(args: argparse.Namespace) -> int:
+    if args.workspace is not None and not Path(args.workspace).expanduser().is_dir():
+        print("workspace not found", file=sys.stderr)
+        return 3
+    if args.port < 1 or args.port > 65535:
+        print("invalid port", file=sys.stderr)
+        return 3
+    if args.public or args.http:
+        return serve_http(
+            workspace=args.workspace,
+            default_project=args.project,
+            port=args.port,
+            token=args.token,
+            public=bool(args.public),
+        )
+    return serve_mcp(
+        sys.stdin.buffer,
+        sys.stdout.buffer,
+        workspace=args.workspace,
+        default_project=args.project,
+    )
+
+
 def _create(args: argparse.Namespace) -> int:
     parent = Path(args.project_dir) if args.project_dir else Path.cwd()
     if not parent.is_dir():
         print("project directory not found", file=sys.stderr)
         return 3
 
-    sources_missing = False
-    sources_present = False
-    label = None
-    if args.sources:
-        label = local_sources_label(args.sources)
-        if Path(args.sources).exists():
-            sources_present = True
-        else:
-            sources_missing = True
-
-    result = create_project(
-        CreateRequest(
-            slug=args.slug,
-            parent=parent,
-            name=args.course,
-            university=args.university,
-            degree=args.degree,
-            academic_year=args.academic_year,
-            course_code=args.course_code,
-            semester=args.semester,
-            language=args.language,
-            domain_profile=args.profile or "GENERAL",
-            local_sources=label,
-            sources_present=sources_present,
-        )
+    request, sources_missing = build_create_request(
+        slug=args.slug,
+        parent=parent,
+        course=args.course,
+        university=args.university,
+        degree=args.degree,
+        academic_year=args.academic_year,
+        course_code=args.course_code,
+        semester=args.semester,
+        language=args.language,
+        profile=args.profile,
+        sources=args.sources,
     )
+    result = create_project(request)
     if result.failure == "invalid_slug":
         print("invalid slug", file=sys.stderr)
         return 3
@@ -215,7 +226,7 @@ def _create(args: argparse.Namespace) -> int:
         return 3
 
     if sources_missing:
-        print(_SOURCES_WARNING, file=sys.stderr)
+        print(SOURCES_MISSING_WARNING, file=sys.stderr)
     print("Studium project created.")
     print("Next: COURSE_DISCOVERY")
     print("Run: studium agent-pack")

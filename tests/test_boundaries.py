@@ -36,6 +36,7 @@ _ALLOWED = {
         "studium.domain",
         "studium.config",
         "studium.research",
+        "studium.storage",
         "studium.mcp",
     },
 }

@@ -52,11 +52,56 @@ class CreateResult:
     blockers: tuple[Blocker, ...] = ()
 
 
+SOURCES_MISSING_WARNING = "sources path not found; continuing with COURSE_DISCOVERY"
+
+
 def local_sources_label(raw: str) -> str:
     path = Path(raw)
     if path.is_absolute():
         return path.name or raw
     return path.as_posix()
+
+
+def build_create_request(
+    *,
+    slug: str,
+    parent: Path,
+    course: str,
+    university: str,
+    degree: str,
+    academic_year: str | None = None,
+    course_code: str | None = None,
+    semester: str | None = None,
+    language: str | None = None,
+    profile: str | None = None,
+    sources: str | None = None,
+) -> tuple[CreateRequest, bool]:
+    """Same inputs as ``studium create``. The bool is the missing-sources warning."""
+
+    sources_missing = False
+    sources_present = False
+    label = None
+    if sources:
+        label = local_sources_label(sources)
+        if Path(sources).exists():
+            sources_present = True
+        else:
+            sources_missing = True
+    request = CreateRequest(
+        slug=slug,
+        parent=parent,
+        name=course,
+        university=university,
+        degree=degree,
+        academic_year=academic_year,
+        course_code=course_code,
+        semester=semester,
+        language=language,
+        domain_profile=profile or "GENERAL",
+        local_sources=label,
+        sources_present=sources_present,
+    )
+    return request, sources_missing
 
 
 def create_project(request: CreateRequest) -> CreateResult:
