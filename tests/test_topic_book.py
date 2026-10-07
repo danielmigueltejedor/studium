@@ -4,7 +4,7 @@ import json
 import tomllib
 
 from studium.cli.app import main
-from studium.domain.profiles import EVIDENCE_RULE, TOPIC_BOOK_STATUS, infer_topic_profile
+from studium.domain.profiles import EVIDENCE_RULE, TOPIC_BOOK_NEXT_ACTION, TOPIC_BOOK_STATUS, infer_topic_profile
 from studium.mcp.server import dispatch, open_workspace
 from studium.research.sources import project_status
 
@@ -133,6 +133,7 @@ def test_topic_book_keeps_local_source_decisions(tmp_path):
     session = open_workspace(str(tmp_path))
     assert dispatch("studium_project_create", {"slug": "rust", "topic": "Rust"}, session=session)["status"] == "created"
     before = dispatch("studium_project_status", {}, session=session)
+    assert "next_action" not in before
     question = before["guidance"]["question"]
     assert isinstance(question, str)
     assert "course guide" not in question.casefold()
@@ -144,6 +145,43 @@ def test_topic_book_keeps_local_source_decisions(tmp_path):
     assert status["local_sources"]["status"] == "NONE"
     assert status["course_guide_required"] is False
     assert status["guidance"]["question"] is None
+
+
+def test_topic_book_decision_none_next_action_is_stop(tmp_path):
+    session = open_workspace(str(tmp_path))
+    created = dispatch("studium_project_create", {"slug": "rust", "topic": "Rust"}, session=session)
+    assert created["status"] == "created"
+    assert "next_action" not in created["project"]
+    registered = dispatch("studium_source_register", {"decision": "none"}, session=session)
+    assert registered["next_action"] == TOPIC_BOOK_NEXT_ACTION
+    status = dispatch("studium_project_status", {}, session=session)
+    assert status["local_sources"]["status"] == "NONE"
+    assert status["next_action"] == TOPIC_BOOK_NEXT_ACTION
+    assert status["writing_available"] is False
+    assert status["message"] == TOPIC_BOOK_STATUS
+
+
+def test_topic_book_skipped_and_available_also_stop(tmp_path):
+    for decision, label in (("skipped", "SKIPPED"), ("available", "AVAILABLE")):
+        workspace = tmp_path / decision
+        workspace.mkdir()
+        session = open_workspace(str(workspace))
+        assert dispatch("studium_project_create", {"slug": "rust", "topic": "Rust"}, session=session)["status"] == "created"
+        dispatch("studium_source_register", {"decision": decision}, session=session)
+        status = dispatch("studium_project_status", {}, session=session)
+        assert status["local_sources"]["status"] == label
+        assert status["next_action"] == TOPIC_BOOK_NEXT_ACTION
+
+
+def test_course_book_decision_none_does_not_stop(tmp_path):
+    session = open_workspace(str(tmp_path))
+    assert dispatch("studium_project_create", {"slug": "fluidos", **_COURSE}, session=session)["status"] == "created"
+    registered = dispatch("studium_source_register", {"decision": "none"}, session=session)
+    assert "next_action" not in registered
+    status = dispatch("studium_project_status", {}, session=session)
+    assert status["local_sources"]["status"] == "NONE"
+    assert "next_action" not in status
+    assert "message" not in status
 
 
 def test_course_book_still_requires_university_and_degree(tmp_path):

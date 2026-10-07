@@ -15,7 +15,13 @@ from studium.domain.enums import (
     SOURCE_ORIGINS,
     SOURCE_ROLES,
 )
-from studium.domain.profiles import BOOK_TOPIC, EVIDENCE_RULE, TOPIC_BOOK_STATUS
+from studium.domain.profiles import (
+    BOOK_TOPIC,
+    EVIDENCE_RULE,
+    TOPIC_BOOK_NEXT_ACTION,
+    TOPIC_BOOK_STATUS,
+    TOPIC_BOOK_STOP_DECISIONS,
+)
 from studium.policy.authority import authority_assignment_error, source_class_error
 from studium.policy.trust import contains_directive, directive_changes_policy
 from studium.research.attachments import attachment_to_intake
@@ -102,6 +108,8 @@ def project_status(root: Path) -> dict[str, object]:
         payload["message"] = TOPIC_BOOK_STATUS
         payload["writing_available"] = False
         payload["course_guide_required"] = False
+        if local.get("status") in TOPIC_BOOK_STOP_DECISIONS:
+            payload["next_action"] = TOPIC_BOOK_NEXT_ACTION
     return payload
 
 
@@ -158,6 +166,8 @@ def agent_pack(root: Path, task: str | None = None) -> dict[str, object]:
         payload["message"] = TOPIC_BOOK_STATUS
         payload["writing_available"] = False
         payload["course_guide_required"] = False
+        if local_status in TOPIC_BOOK_STOP_DECISIONS:
+            payload["next_action"] = TOPIC_BOOK_NEXT_ACTION
     return payload
 
 
@@ -288,7 +298,7 @@ def source_register(
                     updated["source_count"] = 0
                     changed = True
             if not changed:
-                return {"status": "ok", "local_sources": updated, "project_state": state.get("state")}
+                return _register_result(root, updated, state)
             updated["last_updated"] = utc_now()
             state["local_sources"] = updated
             write_state(root, state)
@@ -303,9 +313,24 @@ def source_register(
                 result=str(updated["status"]),
                 tool="source_register",
             )
-            return {"status": "ok", "local_sources": updated, "project_state": state.get("state")}
+            return _register_result(root, updated, state)
     except ProjectLocked:
         return _error("storage.locked", "project is locked")
+
+
+def _register_result(
+    root: Path,
+    local: dict[str, object],
+    state: dict[str, object],
+) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "status": "ok",
+        "local_sources": local,
+        "project_state": state.get("state"),
+    }
+    if book_kind(root) == BOOK_TOPIC and local.get("status") in TOPIC_BOOK_STOP_DECISIONS:
+        payload["next_action"] = TOPIC_BOOK_NEXT_ACTION
+    return payload
 
 
 def source_audit(

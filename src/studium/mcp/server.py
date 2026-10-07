@@ -17,6 +17,7 @@ from studium.domain.profiles import (
     BOOK_TOPIC,
     EVIDENCE_RULE,
     PROFILES,
+    TOPIC_BOOK_NEXT_ACTION,
     TOPIC_BOOK_STATUS,
     TOPIC_NO_COURSE_GUIDE,
 )
@@ -160,6 +161,8 @@ _INSTRUCTIONS = (
     "A programming topic uses COMPUTER_SCIENCE. "
     "Do not store a computing, math, or engineering topic as GENERAL. "
     "After creation the status says the topic book exists and writing is not available yet. "
+    "After a topic book records local sources as none, skipped, or available, "
+    f"studium_project_status next_action is: {TOPIC_BOOK_NEXT_ACTION} "
     f"{EVIDENCE_RULE} "
     "When the user says they have no course materials, call studium_source_register with decision none. "
     "Do not scan the disk. Do not claim that research or an official course-guide investigation is available. "

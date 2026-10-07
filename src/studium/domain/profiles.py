@@ -18,6 +18,11 @@ PROFILES: tuple[str, ...] = (
 PROFILE_CHOICES: tuple[str, ...] = tuple(profile for profile in PROFILES if profile != "GENERAL")
 
 TOPIC_BOOK_STATUS = "Topic book exists. Writing is not available yet."
+TOPIC_BOOK_STOP_DECISIONS = frozenset({"NONE", "SKIPPED", "AVAILABLE"})
+TOPIC_BOOK_NEXT_ACTION = (
+    "Stop. Writing is not available. Public source discovery is not available. "
+    "Do not browse, do not invent a bibliography, and do not look for a university course guide."
+)
 EVIDENCE_RULE = (
     "The model is not a source. Claims need corroborated public sources. Verification is not skipped."
 )
