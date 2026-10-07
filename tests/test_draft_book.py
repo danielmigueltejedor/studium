@@ -184,6 +184,7 @@ def test_spanish_draft_uses_boxes_without_internal_ids(tmp_path, monkeypatch):
         r"\part{Problems}",
         "Gap:",
         "Source status:",
+        "Definition",
     ):
         assert english not in tex
     chapter, _separator, appendix = tex.partition(r"\chapter{Auditoría de fuentes}")
@@ -208,6 +209,76 @@ def test_spanish_draft_uses_boxes_without_internal_ids(tmp_path, monkeypatch):
     else:
         assert rendered["status"] == "compiler_missing"
         assert rendered["pdf"] is None
+
+
+def test_spanish_prose_without_a_stored_language_uses_spanish_headings(tmp_path, monkeypatch):
+    monkeypatch.setattr("urllib.request.urlopen", _explode)
+    session = open_workspace(str(tmp_path))
+    created = dispatch(
+        "studium_project_create",
+        {"slug": "fluidos", "topic": "Fluidos"},
+        session=session,
+    )
+    assert created["status"] == "created"
+    root = tmp_path / "fluidos"
+    assert "language =" not in (root / "project.toml").read_text(encoding="utf-8")
+    source_id = _source(session, "https://open.example/fluidos")
+    excerpt_id = _excerpt(session, source_id, "https://open.example/fluidos", "La pagina abierta describe el fluido.")
+    dispatch(
+        "studium_blueprint_store",
+        {"sections": [{"id": "continuidad", "title": "Continuidad"}]},
+        session=session,
+    )
+    dispatch(
+        "studium_paragraph_record",
+        {
+            "section": "continuidad",
+            "text": "La densidad del fluido permanece constante en el volumen de control.",
+            "excerpts": [excerpt_id],
+        },
+        session=session,
+    )
+    state_before = (root / ".studium" / "state.json").read_bytes()
+    dispatch("studium_render", {}, session=session)
+    toc = root / "latex" / "draft.toc"
+    toc.parent.mkdir(parents=True, exist_ok=True)
+    toc.write_text(
+        "\\contentsline {part}{Problems}{2}{}\n\\contentsline {chapter}{Exam preparation}{4}{}\n",
+        encoding="utf-8",
+    )
+    rendered = dispatch("studium_render", {}, session=session)
+    tex = (root / "latex" / "draft.tex").read_text(encoding="utf-8")
+    assert r"\begin{tcolorbox}[title={Definición}" in tex
+    assert "Borrador" in tex
+    assert r"\chapter{Prefacio}" in tex
+    assert "Cómo usar este libro" in tex
+    assert "Notación" in tex
+    assert "Hoja de fórmulas" in tex
+    assert "Auditoría de fuentes" in tex
+    assert "Preface" not in tex
+    assert "Definition" not in tex
+    assert "DRAFT" not in tex
+    assert "How to use this book" not in tex
+    assert "Notation" not in tex
+    assert "Formula sheet" not in tex
+    assert "Source audit" not in tex
+    assert rendered["released"] is False
+    assert (root / ".studium" / "state.json").read_bytes() == state_before
+    if find_engine() is not None:
+        assert rendered["status"] == "rendered"
+        rebuilt = toc.read_text(encoding="utf-8")
+        assert "Problems" not in rebuilt
+        assert "Exam preparation" not in rebuilt
+        visible = subprocess.check_output(["pdftotext", str(root / "latex" / "draft.pdf"), "-"], text=True)
+        assert "Definición" in visible
+        assert "Borrador" in visible
+        assert "Preface" not in visible
+        assert "Definition" not in visible
+        assert "Exam preparation" not in visible
+        assert "Problems" not in visible
+    else:
+        assert rendered["status"] == "compiler_missing"
+        assert not toc.exists()
 
 
 def test_paragraph_replace_keeps_the_id_and_rejects_bad_citations(tmp_path, monkeypatch):

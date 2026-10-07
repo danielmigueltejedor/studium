@@ -154,6 +154,7 @@ def render_draft(root: Path) -> dict[str, object]:
             document = _document(root)
             tex_path.parent.mkdir(parents=True, exist_ok=True)
             tex_path.write_text(document, encoding="utf-8")
+            _remove_stale_toc(tex_path)
             if pdf_path.exists():
                 pdf_path.unlink()
             local = _local(state)
@@ -240,13 +241,50 @@ def latex_escape(value: str) -> str:
 
 
 _TEMA_PREFIX = re.compile(r"(?i)^(?:tema\s+\d+\s*:\s*)+")
+_SPANISH_MARK = re.compile(
+    r"[ÁÉÍÓÚÜÑáéíóúüñ¿¡]"
+    r"|\b(?:el|la|los|las|del|una|unos|unas|para|como|esta|este|estos|estas|que|también|más|sección|capítulo|fluidos|ecuación|presión|cuando|donde|porque|desde|hasta)\b",
+    re.IGNORECASE,
+)
 
 
 def _language(root: Path) -> str:
+    """Book language. A missing language with Spanish prose is es."""
+
     course = load_project_toml(root).get("course")
     if isinstance(course, dict) and isinstance(course.get("language"), str):
-        return course["language"].strip().lower()
+        stored = course["language"].strip().lower()
+        if stored:
+            return stored
+    if _prose_is_spanish(root):
+        return "es"
     return ""
+
+
+def _prose_is_spanish(root: Path) -> bool:
+    """True when blueprint titles or draft prose are Spanish.
+
+    The course name is not enough: a Spanish course title can still hold English paragraphs.
+    """
+
+    chunks: list[str] = []
+    for section in current_sections(root):
+        title = section.get("title")
+        if isinstance(title, str):
+            chunks.append(title)
+    for paragraph in supported_paragraphs(root):
+        text = paragraph.get("text")
+        if isinstance(text, str):
+            chunks.append(text)
+    for claim in supported_drafts(root):
+        text = claim.get("text")
+        if isinstance(text, str):
+            chunks.append(text)
+    for record in fold_by_id(root / PROBLEMS):
+        prompt = record.get("prompt")
+        if isinstance(prompt, str):
+            chunks.append(prompt)
+    return _SPANISH_MARK.search("\n".join(chunks)) is not None
 
 
 def _copy(language: str) -> dict[str, str]:
@@ -751,7 +789,32 @@ def _outputs(root: Path) -> tuple[Path | None, Path | None]:
     return tex_path, pdf_path
 
 
+def _remove_stale_toc(tex_path: Path) -> None:
+    """Drop the previous contents file so the next compile rebuilds it."""
+
+    toc = tex_path.with_suffix(".toc")
+    try:
+        if toc.is_symlink() or not toc.is_file():
+            return
+        toc.unlink()
+    except OSError:
+        return
+
+
 def _compile(engine: str, tex_path: Path, out_dir: Path) -> tuple[bool, str]:
+    _remove_stale_toc(tex_path)
+    # pdflatex reads the contents file from the previous pass. The second pass
+    # puts the new headings on the contents page. Tectonic repeats internally.
+    passes = 1 if Path(engine).name.startswith("tectonic") else 2
+    detail = ""
+    for _ in range(passes):
+        compiled, detail = _run_latex(engine, tex_path, out_dir)
+        if not compiled:
+            return False, detail
+    return True, ""
+
+
+def _run_latex(engine: str, tex_path: Path, out_dir: Path) -> tuple[bool, str]:
     name = Path(engine).name
     if name.startswith("tectonic"):
         command = [engine, "--outdir", str(out_dir), str(tex_path)]
