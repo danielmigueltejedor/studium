@@ -544,9 +544,9 @@ def _chapter_lines(
             body.append(raw)
     lines: list[str] = []
     lines.extend(_italic(purpose))
-    if body:
+    for text in body:
         lines.extend(["", r"\section{" + latex_escape(copy["section"]) + "}"])
-        lines.extend(_plain(body))
+        lines.extend(_plain([text]))
     lines.extend(_box(copy["consejo"], _plain(consejo)))
     for text in definitions:
         lines.extend(_box(copy["definition"], _plain([text])))
