@@ -21,6 +21,14 @@ _ALLOWED = {
         "studium.storage",
         "studium.research",
     },
+    "studium.authoring": {
+        "studium.domain",
+        "studium.policy",
+        "studium.state",
+        "studium.storage",
+        "studium.research",
+        "studium.authoring",
+    },
     "studium.cli": {
         "studium",
         "studium.domain",
@@ -30,6 +38,7 @@ _ALLOWED = {
         "studium.research",
         "studium.mcp",
         "studium.cli",
+        "studium.authoring",
     },
     "studium.mcp": {
         "studium",
@@ -38,6 +47,7 @@ _ALLOWED = {
         "studium.research",
         "studium.storage",
         "studium.mcp",
+        "studium.authoring",
     },
 }
 
