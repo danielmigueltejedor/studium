@@ -24,7 +24,7 @@ from studium.domain.profiles import (
     TOPIC_BOOK_STATUS,
     WRITING_STILL_UNAVAILABLE,
 )
-from studium.research.public_sources import public_source_count
+from studium.research.public_sources import public_bibliography_next_action, public_source_count
 from studium.policy.authority import authority_assignment_error, source_class_error
 from studium.policy.trust import contains_directive, directive_changes_policy
 from studium.research.attachments import attachment_to_intake
@@ -349,6 +349,7 @@ def _note_public_sources(root: Path, payload: dict[str, object]) -> None:
         return
     payload["writing_available"] = False
     payload["writing_status"] = WRITING_STILL_UNAVAILABLE
+    payload["next_action"] = public_bibliography_next_action(root)
 
 
 def source_audit(

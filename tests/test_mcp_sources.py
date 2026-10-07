@@ -293,7 +293,19 @@ def test_register_intake_and_create_schemas_match_the_parameters():
     assert {"title", "url", "authors", "year", "kind", "text"} <= set(public_record["inputSchema"]["properties"])
     assert "does not fetch the url" in public_record["description"].lower()
     assert "does not mark anything verified" in tools["studium_public_source_list"]["description"].lower()
+    check = tools["studium_public_source_check"]
+    assert check["annotations"]["class"] == "WRITE"
+    assert check["inputSchema"]["required"] == ["id", "url", "title", "year"]
+    assert "does not fetch" in check["description"].lower()
+    assert "bibliographic identity" in check["description"].lower()
+    guide = tools["studium_public_source_guide_citation"]
+    assert guide["annotations"]["class"] == "WRITE"
+    assert guide["inputSchema"]["required"] == ["id", "course_guide_cited"]
+    assert "does not infer" in guide["description"].lower()
     assert "In SOURCE_DISCOVERY, studium_project_status next_action is:" in instructions
+    assert "studium_public_source_check" in instructions
+    assert "studium_public_source_guide_citation" in instructions
+    assert "Do not infer it." in instructions
     assert "studium_public_source_record" in instructions
     assert "Record only a source whose URL you actually opened." in instructions
     assert "Do not invent a citation." in instructions

@@ -7,3 +7,5 @@ User files improve course fit: syllabus emphasis, terminology, symbols, problem 
 `local_sources.status` is `UNKNOWN`, `NONE`, `AVAILABLE`, `IMPORTED`, or `SKIPPED`. It is a field on the project, not a new project state. `NONE` and `SKIPPED` do not block discovery and do not weaken evidence rules.
 
 Intake records a candidate. It does not finish research.
+
+A stored public source stays `DISCOVERED` and `PENDING`. The client can check a page it has already opened. The server does not fetch that page. A year, title, or ISBN that disagrees with the stored citation is stored as a conflict, and classification stays `PENDING`. Two opened pages that agree on author, title, and year record bibliographic identity only. That identity is not scientific authority and it is not proof of a claim. The client may mark whether the stored course guide cites the source. The server does not infer that mark, and a source that is not cited stays in the bibliography. After public sources exist, status reports how many are pending, conflicting, and not cited by the stored course guide. Writing stays unavailable.
