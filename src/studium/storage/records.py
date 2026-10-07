@@ -15,6 +15,7 @@ SECTION_OFFERS = "draft/section_offers.jsonl"
 SECTION_BLOCKS = "draft/section_blocks.jsonl"
 PROBLEMS = "problems/problems.jsonl"
 COMPUTATIONS = "problems/computations.jsonl"
+FIGURES = "figures/figures.jsonl"
 MEDIA = "media/media.jsonl"
 
 
