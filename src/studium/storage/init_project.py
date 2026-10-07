@@ -4,7 +4,6 @@ import json
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from pathlib import Path
 
 import tomllib
@@ -13,6 +12,8 @@ from studium.domain.enums import ProjectEvent, ProjectState
 from studium.domain.ids import IdAllocator
 from studium.state.gates import PROJECT_TOML, Blocker, gate_for
 from studium.state.machine import HistoryEntry, apply
+from studium.storage.locking import ProjectLocked, project_lock
+from studium.storage.migrate import initial_local_sources, migrate_state, utc_now
 
 _SLUG = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 _PROFILES = frozenset(
@@ -41,7 +42,7 @@ class CreateRequest:
     language: str | None = None
     domain_profile: str = "GENERAL"
     local_sources: str | None = None
-    local_sources_missing: bool = False
+    sources_present: bool = False
 
 
 @dataclass(frozen=True)
@@ -83,11 +84,12 @@ def create_project(request: CreateRequest) -> CreateResult:
 
     allocator = IdAllocator()
     task_id, allocator = allocator.allocate("TSK")
-    now = _timestamp()
+    now = utc_now()
+    availability = "AVAILABLE" if request.sources_present else "UNKNOWN"
     state_document = _state_document(
         discovered.state,
         (opened.entry, discovered.entry),
-        request.local_sources_missing,
+        initial_local_sources(availability, now),
     )
     task = {
         "schema_version": "1.0.0",
@@ -147,7 +149,61 @@ def render_project_toml(request: CreateRequest) -> str:
 
 
 def load_state(root: Path) -> dict[str, object]:
-    return json.loads((root / ".studium" / "state.json").read_text(encoding="utf-8"))
+    """Load ``state.json``, migrating a stage 0 boolean in place when needed."""
+
+    document = _read_state(root)
+    migrated, changed = migrate_state(document, labeled=_sources_labeled(root))
+    if not changed:
+        return migrated
+    try:
+        with project_lock(root):
+            current = _read_state(root)
+            migrated, changed = migrate_state(current, labeled=_sources_labeled(root))
+            if changed:
+                _write_state(root, migrated)
+    except ProjectLocked:
+        return migrated
+    return migrated
+
+
+def load_state_holding_lock(root: Path) -> dict[str, object]:
+    """Migrate and return state. The caller already holds ``project_lock``."""
+
+    migrated, changed = migrate_state(_read_state(root), labeled=_sources_labeled(root))
+    if changed:
+        _write_state(root, migrated)
+    return migrated
+
+
+def read_state_unmigrated(root: Path) -> dict[str, object]:
+    return _read_state(root)
+
+
+def write_state(root: Path, document: dict[str, object]) -> None:
+    _write_state(root, document)
+
+
+def _read_state(root: Path) -> dict[str, object]:
+    loaded = json.loads((root / ".studium" / "state.json").read_text(encoding="utf-8"))
+    if not isinstance(loaded, dict):
+        raise TypeError("state document must be an object")
+    return loaded
+
+
+def _write_state(root: Path, document: dict[str, object]) -> None:
+    (root / ".studium" / "state.json").write_text(_dump(document), encoding="utf-8")
+
+
+def _sources_labeled(root: Path) -> bool:
+    try:
+        document = load_project_toml(root)
+    except (OSError, tomllib.TOMLDecodeError):
+        return False
+    course = document.get("course")
+    if not isinstance(course, dict):
+        return False
+    label = course.get("local_sources")
+    return isinstance(label, str) and bool(label.strip())
 
 
 def load_project_toml(root: Path) -> dict[str, object]:
@@ -206,13 +262,13 @@ def _task_sort_key(task: Mapping[str, object]) -> tuple[int, str]:
 def _state_document(
     state: ProjectState,
     history: tuple[HistoryEntry, ...],
-    local_sources_missing: bool,
+    local_sources: dict[str, object],
 ) -> dict[str, object]:
     return {
         "schema_version": "1.0.0",
         "state": state.value,
         "edition_cycle": 1,
-        "local_sources_missing": local_sources_missing,
+        "local_sources": local_sources,
         "history": [
             {
                 "from": None if entry.from_state is None else entry.from_state.value,
@@ -240,4 +296,4 @@ def _dump(document: object) -> str:
 
 
 def _timestamp() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return utc_now()

@@ -9,7 +9,13 @@ import tomllib
 from pathlib import Path
 
 from studium import __version__
+from studium.cli.sources import register as register_sources
+from studium.cli.sources import run as run_sources
+from studium.config.resolve import resolve_project
 from studium.domain.enums import ProjectState
+from studium.mcp.server import build_parser as register_mcp
+from studium.mcp.server import serve as serve_mcp
+from studium.research.sources import project_status
 from studium.state.gates import PROJECT_TOML, gate_for
 from studium.state.machine import earlier_gates_fail
 from studium.storage.init_project import (
@@ -38,6 +44,7 @@ Workflow:
   studium verify (--fast | --full) [--entity ID] [--json] [--project PATH]
   studium build [--project PATH]
   studium release [--project PATH]
+  studium mcp [--project PATH]
 """
 
 _ADVANCED = """\
@@ -59,6 +66,7 @@ Records:
   studium equation ...
   studium figure ...
   studium review ...
+  studium sources status|add|list|audit
 """
 
 
@@ -111,6 +119,10 @@ def main(argv: list[str] | None = None) -> int:
         return _status(args)
     if args.command == "next":
         return _next(args)
+    if args.command == "sources":
+        return _sources(args)
+    if args.command == "mcp":
+        return serve_mcp(sys.stdin.buffer, sys.stdout.buffer, default_project=args.project)
     parser.print_help(sys.stderr)
     return 3
 
@@ -141,6 +153,8 @@ def _build_parser() -> StudiumParser:
     nxt = commands.add_parser("next", help=argparse.SUPPRESS)
     nxt.add_argument("--json", action="store_true")
     nxt.add_argument("--project")
+    register_sources(commands)
+    register_mcp(commands)
     return parser
 
 
@@ -151,10 +165,13 @@ def _create(args: argparse.Namespace) -> int:
         return 3
 
     sources_missing = False
+    sources_present = False
     label = None
     if args.sources:
         label = local_sources_label(args.sources)
-        if not Path(args.sources).exists():
+        if Path(args.sources).exists():
+            sources_present = True
+        else:
             sources_missing = True
 
     result = create_project(
@@ -170,7 +187,7 @@ def _create(args: argparse.Namespace) -> int:
             language=args.language,
             domain_profile=args.profile or "GENERAL",
             local_sources=label,
-            local_sources_missing=sources_missing,
+            sources_present=sources_present,
         )
     )
     if result.failure == "invalid_slug":
@@ -203,34 +220,41 @@ def _status(args: argparse.Namespace) -> int:
     if root is None:
         return 3
     try:
-        state = load_state(root)
-        document = load_project_toml(root)
+        payload = project_status(root)
     except (OSError, json.JSONDecodeError, UnicodeError, tomllib.TOMLDecodeError, TypeError, AttributeError):
         print("invalid project", file=sys.stderr)
         return 1
     if args.json:
-        course = document.get("course")
-        payload = {
-            "schema_version": state.get("schema_version"),
-            "state": state.get("state"),
-            "edition": document.get("edition"),
-            "edition_cycle": state.get("edition_cycle"),
-            "local_sources_missing": state.get("local_sources_missing"),
-            "history": state.get("history"),
-            "course": course if isinstance(course, dict) else {},
-        }
         print(_json(payload))
         return 0
-    course = document.get("course")
+    course = payload.get("course")
     fields = course if isinstance(course, dict) else {}
-    print(f"state: {state.get('state')}")
-    print(f"edition: {document.get('edition', '')}")
-    print(f"edition_cycle: {state.get('edition_cycle')}")
-    print(f"local_sources_missing: {str(state.get('local_sources_missing')).lower()}")
+    local = payload.get("local_sources")
+    fields_local = local if isinstance(local, dict) else {}
+    print(f"state: {payload.get('state')}")
+    print(f"edition: {payload.get('edition', '')}")
+    print(f"edition_cycle: {payload.get('edition_cycle')}")
+    print(f"local_sources.status: {fields_local.get('status', '')}")
+    print(f"local_sources.prompted: {str(fields_local.get('prompted', False)).lower()}")
+    print(f"local_sources.source_count: {fields_local.get('source_count', 0)}")
     print(f"course.name: {fields.get('name', '')}")
     print(f"course.university: {fields.get('university', '')}")
     print(f"course.degree: {fields.get('degree', '')}")
     return 0
+
+
+def _sources(args: argparse.Namespace) -> int:
+    if not getattr(args, "sources_command", None):
+        print("unknown command: sources", file=sys.stderr)
+        return 3
+    root = _require_project(args.project)
+    if root is None:
+        return 3
+    try:
+        return run_sources(args, root)
+    except (OSError, json.JSONDecodeError, UnicodeError, tomllib.TOMLDecodeError, TypeError, AttributeError):
+        print("invalid project", file=sys.stderr)
+        return 1
 
 
 def _next(args: argparse.Namespace) -> int:
@@ -314,22 +338,7 @@ def _require_project(explicit: str | None) -> Path | None:
 
 
 def _resolve_project(explicit: str | None) -> Path | None:
-    if explicit is not None:
-        candidate = Path(explicit).expanduser().resolve()
-        return candidate if _is_project(candidate) else None
-    env = os.environ.get("STUDIUM_PROJECT")
-    if env:
-        candidate = Path(env).expanduser().resolve()
-        return candidate if _is_project(candidate) else None
-    current = Path.cwd().resolve()
-    for candidate in (current, *current.parents):
-        if _is_project(candidate):
-            return candidate
-    return None
-
-
-def _is_project(path: Path) -> bool:
-    return (path / "project.toml").is_file() and (path / ".studium" / "state.json").is_file()
+    return resolve_project(explicit)
 
 
 def _json(payload: object) -> str:

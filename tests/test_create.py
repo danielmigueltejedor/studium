@@ -58,7 +58,11 @@ def test_create_writes_the_four_files_and_the_stdout_contract(tmp_path, monkeypa
     assert state["schema_version"] == "1.0.0"
     assert state["state"] == "COURSE_DISCOVERY"
     assert state["edition_cycle"] == 1
-    assert state["local_sources_missing"] is False
+    assert "local_sources_missing" not in state
+    assert state["local_sources"]["status"] == "UNKNOWN"
+    assert state["local_sources"]["prompted"] is False
+    assert state["local_sources"]["source_count"] == 0
+    assert state["local_sources"]["last_updated"]
     assert state["history"] == [
         {"from": None, "to": "CREATED", "event": "project_created"},
         {"from": "CREATED", "to": "COURSE_DISCOVERY", "event": "begin_discovery"},
@@ -77,7 +81,7 @@ def test_create_writes_the_four_files_and_the_stdout_contract(tmp_path, monkeypa
     assert task["dependencies"] == []
 
 
-def test_missing_sources_exit_zero_and_mark_the_flag(tmp_path, monkeypatch, capsys):
+def test_missing_sources_exit_zero_and_stay_unknown(tmp_path, monkeypatch, capsys):
     monkeypatch.chdir(tmp_path)
     missing = tmp_path / "private-notes"
     rc = main(["create", "fluidos", *_COURSE, "--sources", str(missing)])
@@ -89,7 +93,11 @@ def test_missing_sources_exit_zero_and_mark_the_flag(tmp_path, monkeypatch, caps
 
     root = tmp_path / "fluidos"
     state = json.loads((root / ".studium" / "state.json").read_text(encoding="utf-8"))
-    assert state["local_sources_missing"] is True
+    assert "local_sources_missing" not in state
+    assert state["state"] == "COURSE_DISCOVERY"
+    assert state["local_sources"]["status"] == "UNKNOWN"
+    assert state["local_sources"]["prompted"] is False
+    assert state["local_sources"]["source_count"] == 0
     text = (root / "project.toml").read_text(encoding="utf-8")
     assert str(missing) not in text
     assert 'local_sources = "private-notes"' in text
@@ -110,7 +118,10 @@ def test_existing_sources_are_not_copied(tmp_path, monkeypatch, capsys):
 
     root = tmp_path / "fluidos"
     state = json.loads((root / ".studium" / "state.json").read_text(encoding="utf-8"))
-    assert state["local_sources_missing"] is False
+    assert "local_sources_missing" not in state
+    assert state["local_sources"]["status"] == "AVAILABLE"
+    assert state["local_sources"]["prompted"] is False
+    assert state["local_sources"]["source_count"] == 0
     assert list(root.rglob("secret.pdf")) == []
     files = sorted(path.relative_to(root).as_posix() for path in root.rglob("*") if path.is_file())
     assert files == [
