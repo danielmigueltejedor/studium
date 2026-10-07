@@ -7,6 +7,8 @@ closed with ``state.gate_not_implemented``.
 from collections.abc import Mapping
 from dataclasses import dataclass
 
+from studium.domain.profiles import BOOK_TOPIC
+
 PROJECT_TOML = "project_toml"
 COURSE_JSON = "course_json"
 CORPUS_STARTED = "corpus_started"
@@ -19,6 +21,7 @@ RELEASE = "release"
 RELEASE_INTACT = "release_intact"
 
 _REQUIRED_COURSE_FIELDS = ("name", "university", "degree")
+_REQUIRED_TOPIC_FIELDS = ("name",)
 
 
 @dataclass(frozen=True)
@@ -37,9 +40,10 @@ class GateResult:
 
 def project_toml_gate(course: Mapping[str, object] | None = None) -> GateResult:
     fields = {} if course is None else course
+    required = _REQUIRED_TOPIC_FIELDS if fields.get("kind") == BOOK_TOPIC else _REQUIRED_COURSE_FIELDS
     missing = [
         f"course.{key}"
-        for key in _REQUIRED_COURSE_FIELDS
+        for key in required
         if not isinstance(fields.get(key), str) or not str(fields.get(key)).strip()
     ]
     if missing:
