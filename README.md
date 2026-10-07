@@ -41,7 +41,7 @@ studium create fluid-mechanics \
 studium run
 ```
 
-Local sources such as Moodle material, lecture notes, exams or problem sheets are optional. When available, they can improve course alignment. They are never assumed to be authoritative simply because they were provided.
+Studium works from only a course, university, and degree. If you have lecture notes, Moodle material, exams, or problem sheets, you can provide them to align the result with your real course. Local sources are optional. When available, they can improve course alignment. They are never assumed to be authoritative simply because they were provided.
 
 > [!IMPORTANT]
 > **Studium does not treat AI-generated text as evidence.**
