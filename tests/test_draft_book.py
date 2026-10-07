@@ -1,6 +1,8 @@
 """The DRAFT is a book. Greek is escaped. Nothing here is RELEASED."""
 
 import json
+import re
+import subprocess
 
 from studium.authoring.render import find_engine
 from studium.mcp.server import dispatch, open_workspace
@@ -49,11 +51,12 @@ def test_draft_tex_has_the_book_skeleton_and_escapes_greek(tmp_path, monkeypatch
     audit = tex.index("Source audit")
     bibliography = tex.index("thebibliography")
     assert preface < how_to < contents < chapter < audit < bibliography
-    assert r"\part{Problems}" in tex
+    assert r"\part{Problems}" not in tex
+    assert "Problem solving" not in tex
+    assert "PAR-" not in tex
+    assert "tcolorbox" in tex
+    assert r"\usepackage[T1]{fontenc}" in tex
     for title in (
-        "Problem solving",
-        "Worked problems",
-        "Exam preparation",
         "Notation",
         "Formula sheet",
         "Solutions",
@@ -70,7 +73,7 @@ def test_draft_tex_has_the_book_skeleton_and_escapes_greek(tmp_path, monkeypatch
     assert r"_{0}" in tex
     for raw in ("Σ", "ρ", "ℓ", "μ", "×", "₀"):
         assert raw not in tex
-    assert f"{greek['paragraph']['id']}: single excerpt" in tex
+    assert "single excerpt" in tex
     assert f"{claim['claim']['id']}: unchecked" in tex
     assert _UNCHECKED in tex
     assert "DRAFT" in tex
@@ -85,6 +88,393 @@ def test_draft_tex_has_the_book_skeleton_and_escapes_greek(tmp_path, monkeypatch
         assert rendered["status"] == "compiler_missing"
         assert rendered["pdf"] is None
         assert not (root / "latex" / "draft.pdf").exists()
+
+
+def test_spanish_draft_uses_boxes_without_internal_ids(tmp_path, monkeypatch):
+    monkeypatch.setattr("urllib.request.urlopen", _explode)
+    session = open_workspace(str(tmp_path))
+    created = dispatch(
+        "studium_project_create",
+        {"slug": "fluidos", "topic": "Mecánica de fluidos", "language": "es"},
+        session=session,
+    )
+    assert created["status"] == "created"
+    root = tmp_path / "fluidos"
+    source_id = _source(session, "https://open.example/fluidos")
+    excerpt_id = _excerpt(session, source_id, "https://open.example/fluidos", "La página abierta describe los fluidos.")
+    dispatch(
+        "studium_blueprint_store",
+        {
+            "sections": [
+                {"id": "tema-1", "title": "Tema 1: Tema 1: Conservación"},
+                {"id": "tema-2", "title": "Tema 2: Energía"},
+            ]
+        },
+        session=session,
+    )
+    dispatch(
+        "studium_paragraph_record",
+        {
+            "section": "tema-1",
+            "role": "purpose",
+            "text": "Los fluidos en conflicto definen esta sección.",
+            "excerpts": [excerpt_id],
+        },
+        session=session,
+    )
+    dispatch(
+        "studium_paragraph_record",
+        {
+            "section": "tema-1",
+            "role": "explanation",
+            "text": "La definición permanece ligada a la página abierta.",
+            "excerpts": [excerpt_id],
+        },
+        session=session,
+    )
+    dispatch(
+        "studium_paragraph_record",
+        {
+            "section": "tema-1",
+            "role": "consejo",
+            "text": "Comprueba las unidades antes de sustituir los datos.",
+            "excerpts": [excerpt_id],
+        },
+        session=session,
+    )
+    dispatch(
+        "studium_paragraph_record",
+        {
+            "section": "tema-1",
+            "role": "definition",
+            "text": "Se llama densidad a la masa por unidad de volumen.",
+            "excerpts": [excerpt_id],
+        },
+        session=session,
+    )
+    dispatch(
+        "studium_paragraph_record",
+        {
+            "section": "tema-1",
+            "role": "self_check",
+            "text": "Escribe la definición con tus palabras.",
+            "excerpts": [excerpt_id],
+        },
+        session=session,
+    )
+    computed = dispatch(
+        "studium_computation_check",
+        {"expression": "2 + 2", "result": 4, "section": "tema-1"},
+        session=session,
+    )
+    assert computed["status"] == "replayed"
+    state_before = (root / ".studium" / "state.json").read_bytes()
+    rendered = dispatch("studium_render", {}, session=session)
+    tex = (root / "latex" / "draft.tex").read_text(encoding="utf-8")
+    assert "tcolorbox" in tex
+    assert "PAR-" not in tex
+    assert r"\usepackage[T1]{fontenc}" in tex
+    assert r"\usepackage[utf8]{inputenc}" in tex
+    assert r"\chapter{Conservación}" in tex
+    assert "Tema 1:" not in tex
+    assert "Tema 2:" not in tex
+    assert r"\chapter{Energía}" in tex
+    assert "Esta sección está vacía." in tex
+    for heading in (
+        "Prefacio",
+        "Cómo usar este libro",
+        "Auditoría de fuentes",
+        "Plan de estudio",
+        "Notación",
+        "Hoja de fórmulas",
+        "Soluciones",
+        "Borrador",
+        "Consejo",
+        "Definición",
+        "Problema resuelto",
+        "Autoficha",
+    ):
+        assert heading in tex
+    for english in (
+        "Preface",
+        "How to use this book",
+        "Problems",
+        "Problem solving",
+        "Worked problems",
+        "Exam preparation",
+        r"\part{Problems}",
+        "Gap:",
+        "Source status:",
+        "Definition",
+    ):
+        assert english not in tex
+    chapter, _separator, appendix = tex.partition(r"\chapter{Auditoría de fuentes}")
+    assert "Estado de las fuentes:" not in chapter
+    assert "Estado de las fuentes:" in appendix
+    assert "PENDING" not in chapter
+    assert "Los fluidos en conflicto definen esta sección." in chapter
+    assert tex.count(r"\begin{tcolorbox}[title={Problema resuelto}") == 1
+    assert tex.count(r"\begin{tcolorbox}[title={Consejo}") == 1
+    assert "La definición permanece ligada a la página abierta." in _outside_boxes(tex)
+    assert rendered["released"] is False
+    assert rendered["project_state"] != "RELEASED"
+    assert (root / ".studium" / "state.json").read_bytes() == state_before
+    if find_engine() is not None:
+        assert rendered["status"] == "rendered"
+        pdf = root / "latex" / "draft.pdf"
+        assert pdf.read_bytes().startswith(b"%PDF-")
+        visible = subprocess.check_output(["pdftotext", str(pdf), "-"], text=True)
+        assert "fluidos" in visible
+        assert "conflicto" in visible
+        assert "Borrador" in visible
+        assert "Definición" in visible
+        assert "PAR-" not in visible
+        assert "con icto" not in visible
+    else:
+        assert rendered["status"] == "compiler_missing"
+        assert rendered["pdf"] is None
+
+
+def test_spanish_prose_without_a_stored_language_uses_spanish_headings(tmp_path, monkeypatch):
+    monkeypatch.setattr("urllib.request.urlopen", _explode)
+    session = open_workspace(str(tmp_path))
+    created = dispatch(
+        "studium_project_create",
+        {"slug": "fluidos", "topic": "Fluidos"},
+        session=session,
+    )
+    assert created["status"] == "created"
+    root = tmp_path / "fluidos"
+    assert "language =" not in (root / "project.toml").read_text(encoding="utf-8")
+    source_id = _source(session, "https://open.example/fluidos")
+    excerpt_id = _excerpt(session, source_id, "https://open.example/fluidos", "La pagina abierta describe el fluido.")
+    dispatch(
+        "studium_blueprint_store",
+        {"sections": [{"id": "continuidad", "title": "Continuidad"}]},
+        session=session,
+    )
+    dispatch(
+        "studium_paragraph_record",
+        {
+            "section": "continuidad",
+            "text": "La densidad del fluido permanece constante en el volumen de control.",
+            "excerpts": [excerpt_id],
+        },
+        session=session,
+    )
+    dispatch(
+        "studium_paragraph_record",
+        {
+            "section": "continuidad",
+            "role": "definition",
+            "text": "Se llama densidad a la masa por unidad de volumen.",
+            "excerpts": [excerpt_id],
+        },
+        session=session,
+    )
+    state_before = (root / ".studium" / "state.json").read_bytes()
+    dispatch("studium_render", {}, session=session)
+    toc = root / "latex" / "draft.toc"
+    toc.parent.mkdir(parents=True, exist_ok=True)
+    toc.write_text(
+        "\\contentsline {part}{Problems}{2}{}\n\\contentsline {chapter}{Exam preparation}{4}{}\n",
+        encoding="utf-8",
+    )
+    rendered = dispatch("studium_render", {}, session=session)
+    tex = (root / "latex" / "draft.tex").read_text(encoding="utf-8")
+    assert r"\begin{tcolorbox}[title={Definición}" in tex
+    assert "Borrador" in tex
+    assert r"\chapter{Prefacio}" in tex
+    assert "Cómo usar este libro" in tex
+    assert "Notación" in tex
+    assert "Hoja de fórmulas" in tex
+    assert "Auditoría de fuentes" in tex
+    assert "Preface" not in tex
+    assert "Definition" not in tex
+    assert "DRAFT" not in tex
+    assert "How to use this book" not in tex
+    assert "Notation" not in tex
+    assert "Formula sheet" not in tex
+    assert "Source audit" not in tex
+    assert "La densidad del fluido permanece constante en el volumen de control." in _outside_boxes(tex)
+    assert rendered["released"] is False
+    assert (root / ".studium" / "state.json").read_bytes() == state_before
+    if find_engine() is not None:
+        assert rendered["status"] == "rendered"
+        rebuilt = toc.read_text(encoding="utf-8")
+        assert "Problems" not in rebuilt
+        assert "Exam preparation" not in rebuilt
+        visible = subprocess.check_output(["pdftotext", str(root / "latex" / "draft.pdf"), "-"], text=True)
+        assert "Definición" in visible
+        assert "Borrador" in visible
+        assert "Preface" not in visible
+        assert "Definition" not in visible
+        assert "Exam preparation" not in visible
+        assert "Problems" not in visible
+    else:
+        assert rendered["status"] == "compiler_missing"
+        assert not toc.exists()
+
+
+def test_explanation_stays_outside_the_one_worked_problem_box(tmp_path, monkeypatch):
+    monkeypatch.setattr("urllib.request.urlopen", _explode)
+    session = open_workspace(str(tmp_path))
+    created = dispatch(
+        "studium_project_create",
+        {"slug": "fluidos", "topic": "Mecánica de fluidos", "language": "es"},
+        session=session,
+    )
+    assert created["status"] == "created"
+    root = tmp_path / "fluidos"
+    source_id = _source(session, "https://open.example/fluidos")
+    excerpt_id = _excerpt(session, source_id, "https://open.example/fluidos", "La página abierta describe el balance.")
+    dispatch(
+        "studium_blueprint_store",
+        {"sections": [{"id": "tema-1", "title": "Continuidad"}]},
+        session=session,
+    )
+    explanation = "La explicación desarrolla el balance en varios párrafos y no cabe en una caja."
+    dispatch(
+        "studium_paragraph_record",
+        {"section": "tema-1", "role": "explanation", "text": explanation, "excerpts": [excerpt_id]},
+        session=session,
+    )
+    dispatch(
+        "studium_paragraph_record",
+        {
+            "section": "tema-1",
+            "role": "definition",
+            "text": "Se llama densidad a la masa por unidad de volumen.",
+            "excerpts": [excerpt_id],
+        },
+        session=session,
+    )
+    computed = dispatch(
+        "studium_computation_check",
+        {"expression": "2 + 2", "result": 4, "section": "tema-1"},
+        session=session,
+    )
+    assert computed["status"] == "replayed"
+    rendered = dispatch("studium_render", {}, session=session)
+    tex = (root / "latex" / "draft.tex").read_text(encoding="utf-8")
+    assert tex.count(r"\begin{tcolorbox}[title={Problema resuelto}") == 1
+    assert "Enunciado" in tex
+    assert "Resolución" in tex
+    assert "Respuesta" in tex
+    outside = _outside_boxes(tex)
+    assert explanation in outside
+    assert r"\section{Explicación}" in outside
+    assert rendered["released"] is False
+    assert rendered["project_state"] != "RELEASED"
+
+
+def test_consejo_paragraph_becomes_a_tcolorbox_with_babel_spanish(tmp_path, monkeypatch):
+    monkeypatch.setattr("urllib.request.urlopen", _explode)
+    session = open_workspace(str(tmp_path))
+    created = dispatch(
+        "studium_project_create",
+        {"slug": "fluidos", "topic": "Mecánica de fluidos", "language": "es"},
+        session=session,
+    )
+    assert created["status"] == "created"
+    root = tmp_path / "fluidos"
+    source_id = _source(session, "https://open.example/fluidos")
+    excerpt_id = _excerpt(session, source_id, "https://open.example/fluidos", "La página abierta describe el balance.")
+    dispatch(
+        "studium_blueprint_store",
+        {"sections": [{"id": "tema-1", "title": "Continuidad"}]},
+        session=session,
+    )
+    explanation = "La explicación desarrolla el balance en el cuerpo del capítulo."
+    dispatch(
+        "studium_paragraph_record",
+        {"section": "tema-1", "role": "explanation", "text": explanation, "excerpts": [excerpt_id]},
+        session=session,
+    )
+    dispatch(
+        "studium_paragraph_record",
+        {
+            "section": "tema-1",
+            "role": "consejo",
+            "text": "Comprueba las unidades antes de sustituir los datos.",
+            "excerpts": [excerpt_id],
+        },
+        session=session,
+    )
+    dispatch(
+        "studium_paragraph_record",
+        {
+            "section": "tema-1",
+            "text": "Consejo: No mezcles las unidades en el mismo término.",
+            "excerpts": [excerpt_id],
+        },
+        session=session,
+    )
+    dispatch(
+        "studium_paragraph_record",
+        {
+            "section": "tema-1",
+            "text": "Definición: Se llama densidad a la masa por unidad de volumen.",
+            "excerpts": [excerpt_id],
+        },
+        session=session,
+    )
+    dispatch(
+        "studium_paragraph_record",
+        {
+            "section": "tema-1",
+            "text": "Autoficha: Escribe la relación con tus palabras.",
+            "excerpts": [excerpt_id],
+        },
+        session=session,
+    )
+    computed = dispatch(
+        "studium_computation_check",
+        {"expression": "2 + 2", "result": 4, "section": "tema-1"},
+        session=session,
+    )
+    assert computed["status"] == "replayed"
+    rendered = dispatch("studium_render", {}, session=session)
+    tex = (root / "latex" / "draft.tex").read_text(encoding="utf-8")
+    assert r"\usepackage[spanish]{babel}" in tex
+    assert r"\usepackage[a4paper,margin=2.5cm]{geometry}" in tex
+    assert r"\usepackage{titlesec}" in tex
+    assert r"\let\cleardoublepage\clearpage" in tex
+    assert r"\renewcommand{\contentsname}{Índice}" in tex
+    assert "Contents" not in tex
+    assert "Cada párrafo sustantivo cita un extracto almacenado." not in tex
+    assert "Borrador" in tex
+    assert tex.count(r"\begin{tcolorbox}[title={Consejo}") == 1
+    assert tex.count(r"\begin{tcolorbox}[title={Definición}") == 1
+    assert tex.count(r"\begin{tcolorbox}[title={Problema resuelto}") == 1
+    assert tex.count(r"\begin{tcolorbox}[title={Autoficha}") == 1
+    assert "Enunciado" in tex
+    assert "Resolución" in tex
+    assert "Respuesta" in tex
+    assert "Consejo:" not in tex
+    assert "Definición:" not in tex
+    assert "Autoficha:" not in tex
+    outside = _outside_boxes(tex)
+    assert explanation in outside
+    assert "No mezcles las unidades en el mismo término." not in outside
+    assert "Se llama densidad a la masa por unidad de volumen." not in outside
+    assert "Escribe la relación con tus palabras." not in outside
+    assert r"\section{Explicación}" in outside
+    assert rendered["released"] is False
+    if find_engine() is not None:
+        assert rendered["status"] == "rendered"
+        visible = subprocess.check_output(["pdftotext", "-layout", str(root / "latex" / "draft.pdf"), "-"], text=True)
+        pages = visible.split("\f")
+        if pages and not pages[-1].strip():
+            pages = pages[:-1]
+        assert pages
+        assert all(page.strip() not in {"", "Borrador"} for page in pages)
+        assert "Índice" in visible
+        assert "Contents" not in visible
+
+
+def _outside_boxes(tex: str) -> str:
+    return re.sub(r"\\begin\{tcolorbox\}.*?\\end\{tcolorbox\}", "", tex, flags=re.S)
 
 
 def test_paragraph_replace_keeps_the_id_and_rejects_bad_citations(tmp_path, monkeypatch):
@@ -174,7 +564,7 @@ def test_book_next_renders_when_a_section_is_blocked(tmp_path, monkeypatch):
         nxt = dispatch("studium_book_next", {}, session=session)
         assert nxt["ask_user"] is False
         assert nxt["released"] is False
-        assert "ask the user" not in json.dumps(nxt).lower()
+        assert "ask the user" not in json.dumps(nxt).lower().replace("do not ask the user how to format the page.", "")
         if nxt["tool"] == "studium_render":
             second = nxt
             break

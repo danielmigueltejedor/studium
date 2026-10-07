@@ -44,6 +44,14 @@ from studium.storage.records import (
 )
 
 _ASK = "ask the user"
+_FORMAT = "do not ask the user how to format the page."
+_CHAPTER = (
+    "Write a full chapter in Spanish, several paragraphs of explanation, not a summary and not a sentence. "
+    "Use the same shape every chapter: a short lead, the explanation, at most one consejo, "
+    "definitions only when a term is introduced, one worked problem, and one autoficha. "
+    "Cite stored sources. A formula still needs a quoted excerpt or a replayed computation. "
+    "Do not ask the user how to format the page. The renderer owns the boxes."
+)
 _CODE_OR_CALCULATION = frozenset({"COMPUTER_SCIENCE", "STEM"})
 _DRAFT_INPUTS = (
     PARAGRAPHS,
@@ -128,9 +136,10 @@ def book_next(root: Path) -> dict[str, object]:
             "studium_paragraph_record",
             {"section": section["id"], "excerpts": [excerpt_id], "role": "purpose"},
             (
-                f"Write what this section is for in {section['id']} ({section['title']}) "
-                "from the stored excerpt. Teach from the excerpt. A sentence that repeats it is not a chapter. "
-                "Attach the sources you used. A one-sentence restatement is too short."
+                f"Write the lead for {section['id']} ({section['title']}) from the stored excerpt. "
+                "A sentence that repeats it is not a chapter. "
+                "Attach the sources you used. A one-sentence restatement is too short. "
+                + _CHAPTER
             ),
         )
     problem = _pending_problem(root, sections)
@@ -147,7 +156,8 @@ def book_next(root: Path) -> dict[str, object]:
                 (
                     f"Rewrite {paragraph_id} in {section['id']} ({section['title']}) into teaching prose. "
                     "A section of one short paragraph does not count as written. "
-                    "A one-sentence section is too short to teach. Attach the sources you used."
+                    "A one-sentence section is too short to teach. Attach the sources you used. "
+                    + _CHAPTER
                 ),
                 blocked=blocked_sections(root),
             )
@@ -158,7 +168,8 @@ def book_next(root: Path) -> dict[str, object]:
             (
                 f"Write another explanatory paragraph for {section['id']} ({section['title']}). "
                 "A section of one short paragraph does not count as written. "
-                "A one-sentence section is too short to teach."
+                "A one-sentence section is too short to teach. "
+                + _CHAPTER
             ),
             blocked=blocked_sections(root),
         )
@@ -170,8 +181,9 @@ def book_next(root: Path) -> dict[str, object]:
             "studium_paragraph_record",
             {"section": section["id"], "excerpts": [excerpt_id], "role": "self_check"},
             (
-                f"Add a short self-check for {section['id']} ({section['title']}). "
-                "The explanation above must still teach from the excerpts."
+                f"Add one autoficha for {section['id']} ({section['title']}). "
+                "The explanation above must still teach from the excerpts. "
+                + _CHAPTER
             ),
             blocked=blocked_sections(root),
         )
@@ -547,7 +559,7 @@ def _step(
     reason: str,
     blocked: list[dict[str, object]] | None = None,
 ) -> dict[str, object]:
-    if _ASK in reason.lower():
+    if _ASK in reason.lower().replace(_FORMAT, ""):
         raise ValueError("book_next reason asked the user")
     local = state.get("local_sources")
     return {

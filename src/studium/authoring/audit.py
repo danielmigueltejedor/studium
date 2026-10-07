@@ -392,44 +392,48 @@ def _teaching_paragraphs(root: Path, section_id: str) -> list[dict[str, object]]
 
 
 def _chapter_passages(root: Path, target_id: str, target_kind: str) -> list[tuple[str, str]]:
-    section_id = target_id if target_kind == "section" else None
-    if target_kind == "paragraph":
-        found = next((record for record in supported_paragraphs(root) if record.get("id") == target_id), None)
-        if isinstance(found, dict) and isinstance(found.get("section"), str):
-            section_id = str(found["section"])
-    if target_kind == "problem":
-        found = next((record for record in fold_by_id(root / PROBLEMS) if record.get("id") == target_id), None)
-        if isinstance(found, dict) and isinstance(found.get("section"), str):
-            section_id = str(found["section"])
+    """Paragraph and problem text. Stored CLM claims are not chapter sentences."""
+
     passages: list[tuple[str, str]] = []
-    if section_id is not None:
-        for record in _section_paragraphs(root, section_id):
-            identifier = record.get("id")
-            text = record.get("text")
-            if isinstance(identifier, str) and isinstance(text, str):
-                passages.append((identifier, text))
-        for record in supported_drafts(root):
-            if record.get("section") != section_id:
-                continue
-            identifier = record.get("id")
-            text = record.get("text")
-            if isinstance(identifier, str) and isinstance(text, str):
-                passages.append((identifier, text))
-    if target_kind == "problem":
-        found = next((record for record in fold_by_id(root / PROBLEMS) if record.get("id") == target_id), None)
-        if isinstance(found, dict):
-            prompt = found.get("prompt") if isinstance(found.get("prompt"), str) else ""
-            source = found.get("source_text") if isinstance(found.get("source_text"), str) else ""
-            passages.append((target_id, f"{prompt}\n{source}"))
+    for record in _grounded_records(root, target_id, target_kind):
+        identifier = record.get("id")
+        text = record.get("text")
+        if isinstance(identifier, str) and isinstance(text, str):
+            passages.append((identifier, text))
     return passages
 
 
+def _grounded_records(root: Path, target_id: str, target_kind: str) -> list[dict[str, object]]:
+    if target_kind == "paragraph":
+        found = next((record for record in supported_paragraphs(root) if record.get("id") == target_id), None)
+        return [found] if isinstance(found, dict) else []
+    if target_kind == "section":
+        return _section_paragraphs(root, target_id)
+    if target_kind == "problem":
+        found = next((record for record in fold_by_id(root / PROBLEMS) if record.get("id") == target_id), None)
+        records: list[dict[str, object]] = []
+        if isinstance(found, dict):
+            prompt = found.get("prompt") if isinstance(found.get("prompt"), str) else ""
+            source = found.get("source_text") if isinstance(found.get("source_text"), str) else ""
+            excerpts = found.get("excerpts") if isinstance(found.get("excerpts"), list) else []
+            records.append({"id": target_id, "text": f"{prompt}\n{source}", "excerpts": excerpts})
+            section = found.get("section")
+            if isinstance(section, str):
+                records.extend(_section_paragraphs(root, section))
+        return records
+    return []
+
+
 def _chapter_conflict(root: Path, target_id: str, target_kind: str, evidence: dict[str, object]) -> str | None:
-    """Reject a chapter whose numbers contradict stored sources or are not in them."""
+    """Reject a sentence whose formula or number is not quoted or replayed."""
 
     if target_kind == "section" and not _section_paragraphs(root, target_id):
         return "an empty section is a gap, not a written chapter"
+    missing = _ungrounded_formulas(root, target_id, target_kind)
+    if missing:
+        return "the formula is not in the cited excerpts and was not replayed: " + "; ".join(missing)
     by_name, bare = _evidence_numbers(root, evidence)
+    cited_numbers = _cited_numbers(root, target_id, target_kind)
     for name, values in by_name.items():
         if len(values) > 1:
             return f"the stored sources contradict each other on {name}"
@@ -441,9 +445,167 @@ def _chapter_conflict(root: Path, target_id: str, target_kind: str, evidence: di
                     f"the chapter contradicts a stored number: {name} is {value} in the chapter "
                     f"and {', '.join(sorted(stored))} in the stored sources"
                 )
-            if value not in bare:
+            if value not in bare and value not in cited_numbers:
                 return f"the chapter states {name} is {value}, which the stored sources do not support"
     return None
+
+
+def _ungrounded_formulas(root: Path, target_id: str, target_kind: str) -> list[str]:
+    """Formulas the paragraph states that no cited excerpt quotes and no computation replayed."""
+
+    expressions = [
+        record.get("expression")
+        for record in fold_by_id(root / COMPUTATIONS)
+        if record.get("status") == "replayed" and record.get("correct") is True and isinstance(record.get("expression"), str)
+    ]
+    stored_excerpts = excerpts_by_id(root)
+    missing: list[str] = []
+    seen: set[str] = set()
+    for record in _grounded_records(root, target_id, target_kind):
+        bodies = _record_excerpt_texts(record, stored_excerpts)
+        text = record.get("text") if isinstance(record.get("text"), str) else ""
+        for sentence in _sentences(text):
+            for formula in _formulas(sentence):
+                if _formula_grounded(formula, bodies, expressions):
+                    continue
+                key = _normalize_formula(formula)
+                if key in seen:
+                    continue
+                seen.add(key)
+                missing.append(formula)
+    return missing
+
+
+def _cited_numbers(root: Path, target_id: str, target_kind: str) -> set[str]:
+    found: set[str] = set()
+    stored_excerpts = excerpts_by_id(root)
+    for record in _grounded_records(root, target_id, target_kind):
+        for body in _record_excerpt_texts(record, stored_excerpts):
+            for match in re.finditer(r"-?\d+(?:\.\d+)?", body):
+                found.add(_canon_number(match.group(0)))
+    for record in fold_by_id(root / COMPUTATIONS):
+        if record.get("status") != "replayed" or record.get("correct") is not True:
+            continue
+        result = record.get("server_result")
+        expression = record.get("expression")
+        if isinstance(result, str):
+            found.add(_canon_number(result))
+        if isinstance(expression, str):
+            for match in re.finditer(r"-?\d+(?:\.\d+)?", expression):
+                found.add(_canon_number(match.group(0)))
+    return found
+
+
+def _record_excerpt_texts(record: dict[str, object], stored: dict[str, dict[str, object]]) -> list[str]:
+    raw = record.get("excerpts") if isinstance(record.get("excerpts"), list) else []
+    bodies: list[str] = []
+    for excerpt_id in raw:
+        excerpt = stored.get(excerpt_id) if isinstance(excerpt_id, str) else None
+        body = excerpt.get("text") if isinstance(excerpt, dict) else None
+        if isinstance(body, str) and body.strip():
+            bodies.append(body)
+    return bodies
+
+
+def _sentences(text: str) -> list[str]:
+    return [part.strip() for part in re.split(r"[.!?]+", text) if part.strip()]
+
+
+_MATH_OPS = set("+-×·*/^()=")
+
+
+def _formulas(sentence: str) -> list[str]:
+    found: list[str] = []
+    start = 0
+    while True:
+        index = sentence.find("=", start)
+        if index < 0:
+            return found
+        left = _expand_math(sentence, index, -1)
+        right = _expand_math(sentence, index + 1, 1)
+        raw = " ".join(sentence[left:right].split())
+        if _looks_like_formula(raw):
+            found.append(raw)
+        start = index + 1
+
+
+def _looks_like_formula(raw: str) -> bool:
+    compact = _normalize_formula(raw)
+    if "=" not in compact:
+        return False
+    if re.fullmatch(r"[a-z][a-z0-9_]{0,40}=-?\d+(?:\.\d+)?", compact):
+        return False
+    return bool(re.search(r"[+\-*/]", compact))
+
+
+def _formula_grounded(formula: str, excerpts: list[str], expressions: list[object]) -> bool:
+    needle = _normalize_formula(formula)
+    if not needle or "=" not in needle:
+        return False
+    for text in excerpts:
+        if needle in _normalize_formula(text):
+            return True
+    for expression in expressions:
+        if isinstance(expression, str) and needle in _normalize_formula(expression):
+            return True
+    return False
+
+
+def _normalize_formula(text: str) -> str:
+    cleaned = text.casefold().replace("×", "*").replace("·", "*").replace("−", "-").replace("–", "-")
+    return "".join(cleaned.split())
+
+
+def _expand_math(sentence: str, pos: int, direction: int) -> int:
+    i = pos
+    limit = len(sentence)
+    while True:
+        if direction < 0:
+            while i > 0 and sentence[i - 1].isspace():
+                i -= 1
+            if i == 0:
+                return 0
+            if sentence[i - 1] in _MATH_OPS:
+                i -= 1
+                continue
+            token_end = i
+            while i > 0 and (sentence[i - 1].isalnum() or sentence[i - 1] == "_"):
+                i -= 1
+            token = sentence[i:token_end]
+            if token and (_is_math_token(token) or token.isdigit()):
+                toward = _nearest_nonspace(sentence, token_end, 1)
+                if toward is not None and sentence[toward] in _MATH_OPS:
+                    continue
+            return token_end
+        while i < limit and sentence[i].isspace():
+            i += 1
+        if i >= limit:
+            return limit
+        if sentence[i] in _MATH_OPS:
+            i += 1
+            continue
+        token_start = i
+        while i < limit and (sentence[i].isalnum() or sentence[i] == "_"):
+            i += 1
+        token = sentence[token_start:i]
+        if token and (_is_math_token(token) or token.isdigit()):
+            toward = _nearest_nonspace(sentence, token_start - 1, -1)
+            if toward is not None and sentence[toward] in _MATH_OPS:
+                continue
+        return token_start
+
+
+def _nearest_nonspace(sentence: str, pos: int, direction: int) -> int | None:
+    i = pos
+    while 0 <= i < len(sentence):
+        if not sentence[i].isspace():
+            return i
+        i += direction
+    return None
+
+
+def _is_math_token(token: str) -> bool:
+    return bool(re.fullmatch(r"[A-Za-z]{1,3}", token))
 
 
 def _evidence_numbers(root: Path, evidence: dict[str, object]) -> tuple[dict[str, set[str]], set[str]]:

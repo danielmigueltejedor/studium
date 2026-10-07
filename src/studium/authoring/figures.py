@@ -127,9 +127,14 @@ exec(code, {"__name__": "__main__", "__file__": "plot.py"})
 
 
 def figure_gap(identifier: str) -> str:
-    """Visible placeholder for a drawing that was not checked."""
+    """Visible placeholder for a drawing that was not checked.
 
-    return f"Gap: {identifier} is unchecked. The drawing is omitted."
+    The figure id stays out of the chapter. Callers still pass it so the
+    gap stays tied to that record in code.
+    """
+
+    del identifier
+    return "Gap: this figure is unchecked. The drawing is omitted."
 
 
 def record_figure(

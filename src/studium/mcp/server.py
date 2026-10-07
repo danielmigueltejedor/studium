@@ -674,8 +674,11 @@ _INSTRUCTIONS = (
             "A chapter is teaching prose, not a sentence that repeats an excerpt. "
             "The writer may rewrite it with studium_paragraph_replace. "
             "Use the model's knowledge only by attaching the sources used. "
-            "Each chapter uses one format: what this section is for, the explanation, one worked problem, "
-            "a short self-check, and a line saying what was audited. "
+            "Write a full chapter in Spanish, several paragraphs of explanation, not a summary and not a sentence. "
+            "Use the same shape every chapter: a short lead, the explanation, at most one consejo, "
+            "definitions only when a term is introduced, one worked problem, and one autoficha. "
+            "Cite stored sources. A formula still needs a quoted excerpt or a replayed computation. "
+            "Do not ask the user how to format the page. The renderer owns the boxes. "
             "A section of one short paragraph does not count as written. "
             "Status and studium_book_next lead the client through write, then audit, then contradiction scan, "
             "then review, then render. "
@@ -684,6 +687,9 @@ _INSTRUCTIONS = (
             "or a figure the server reran. "
             "A note that the auditor agrees is rejected. a second model opinion is not a source of truth. "
             "If the chapter contradicts those sources, or states a number they do not support, the audit rejects it. "
+            "A factual formula is accepted only when that formula is quoted in an excerpt the paragraph cites "
+            "or replayed by studium_computation_check. "
+            "A deduction that is not quoted and was not replayed is rejected. "
             "The audit adds no new prose. "
             "studium_contradiction_scan records a contradiction when two accepted passages assign different values "
             "to the same named quantity. An open contradiction blocks review. "
@@ -693,8 +699,23 @@ _INSTRUCTIONS = (
             "With a guide, chapters follow the stored guide. "
             "Explanations must teach from the excerpts. Short restatements do not satisfy the length rule. "
             "studium_render uses the book class in this order: front matter (title, preface, how to use, table of contents), "
-            "parts and chapters from the blueprint, a problem part (problem solving, worked problems, exam preparation), "
+            "parts and chapters from the blueprint, "
             "appendices (notation, formula sheet, solutions, source audit, study plan), then the bibliography. "
+            "When the book language is es, every generated heading is Spanish. "
+            "If the stored language is missing and the prose is Spanish, treat the book as es. "
+            "The footer is then Borrador. "
+            "A stale draft.toc is deleted before compile so the contents page is rebuilt. "
+            "The preamble uses T1 fontenc and UTF-8. "
+            "Explanation is normal body text under a section heading, not a box. "
+            "Only four kinds are boxes: Consejo, Definición, Problema resuelto, and Autoficha. "
+            "One consejo, the definitions, one worked problem, and one autoficha per chapter. "
+            "A worked problem has three labeled parts: Enunciado, Resolución, and Respuesta. "
+            "The lead is italic under the chapter title, not a box. "
+            "A paragraph with no kind is body text. "
+            "Entity ids are not printed in the chapter text. "
+            "A small footer marks the file as a draft. "
+            "The source audit stays in the appendix. "
+            "Stored CLM claims may be listed there as leftover drafts and are not chapter prose. "
             "The source audit lists each paragraph as two_witnesses, replayed check, single excerpt, or unchecked. "
             "Unchecked prose may appear only in the DRAFT and is labeled unchecked. "
             "Greek letters and operators are translated into LaTeX. "
@@ -1942,8 +1963,8 @@ def _schema(tool: Mapping[str, object]) -> dict[str, object]:
                 },
                 "role": {
                     "type": "string",
-                    "enum": ["purpose", "explanation", "self_check"],
-                    "description": "purpose, explanation, or self_check. Teaching prose, not a restatement.",
+                    "enum": ["purpose", "explanation", "consejo", "definition", "self_check"],
+                    "description": "purpose is the italic lead, explanation is body text, consejo and definition are boxes, self_check is the autoficha. The renderer owns the boxes.",
                 },
             },
             "required": ["section", "text", "excerpts"],
@@ -1966,8 +1987,8 @@ def _schema(tool: Mapping[str, object]) -> dict[str, object]:
                 },
                 "role": {
                     "type": "string",
-                    "enum": ["purpose", "explanation", "self_check"],
-                    "description": "purpose, explanation, or self_check.",
+                    "enum": ["purpose", "explanation", "consejo", "definition", "self_check"],
+                    "description": "purpose is the italic lead, explanation is body text, consejo and definition are boxes, self_check is the autoficha.",
                 },
             },
             "required": ["id", "text", "excerpts"],
