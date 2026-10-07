@@ -1,6 +1,7 @@
 """A figure is checked only when its stored source is run again."""
 
 import json
+import re
 from pathlib import Path
 
 from studium.authoring.figures import figure_gap
@@ -285,6 +286,64 @@ def test_removed_figure_is_absent_and_the_warning_stays_in_the_audit(tmp_path, m
     assert (root / ".studium" / "state.json").read_bytes() == state_before
     assert json.loads(state_before)["state"] != "RELEASED"
     assert "studium_figure_remove" in tool_names()
+
+
+def test_inline_figure_does_not_force_a_float_page(tmp_path, monkeypatch):
+    monkeypatch.setattr("urllib.request.urlopen", _explode)
+    session, root = _topic(tmp_path)
+    excerpt_id = _ready(session)
+    dispatch(
+        "studium_paragraph_record",
+        {
+            "section": "tema-1",
+            "text": "The opened page describes the control volume.",
+            "excerpts": [excerpt_id],
+        },
+        session=session,
+    )
+    dispatch(
+        "studium_paragraph_record",
+        {
+            "section": "tema-1",
+            "text": "The next paragraph stays with the drawing.",
+            "excerpts": [excerpt_id],
+        },
+        session=session,
+    )
+    recorded = dispatch(
+        "studium_figure_record",
+        {
+            "section": "tema-1",
+            "caption": "A line from the opened page.",
+            "kind": "tikz",
+            "source": r"\draw (0,0) -- (1,1);",
+            "excerpts": [excerpt_id],
+        },
+        session=session,
+    )
+    checked = dispatch("studium_figure_check", {"id": recorded["figure"]["id"]}, session=session)
+    assert checked["checked"] is True
+    assert checked["released"] is False
+    rendered = dispatch("studium_render", {}, session=session)
+    tex = (root / "latex" / "draft.tex").read_text(encoding="utf-8")
+    assert r"\begin{figure}" not in tex
+    assert re.search(r"\\begin\{figure\*?\}(\s*\[[^\]]*[pP][^\]]*\])?", tex) is None
+    assert re.search(r"\\resizebox\{[^{}]*\}\{[^{}]*\}\{\s*\\begin\{tikzpicture\}", tex)
+    assert r"\textheight/100*38" in tex
+    assert r"\linewidth" in tex
+    opening = tex.index("The opened page describes the control volume.")
+    picture = tex.index(r"\begin{tikzpicture}")
+    caption = tex.index("A line from the opened page.")
+    following = tex.index("The next paragraph stays with the drawing.")
+    assert opening < picture < caption < following
+    assert r"\begin{figure}" not in tex[picture:following]
+    assert rendered["released"] is False
+    assert rendered["project_state"] != "RELEASED"
+    if find_engine() is not None:
+        assert rendered["status"] == "rendered"
+        assert (root / "latex" / "draft.pdf").read_bytes().startswith(b"%PDF-")
+    else:
+        assert rendered["status"] == "compiler_missing"
 
 
 def test_tikz_without_an_output_stays_unchecked(tmp_path, monkeypatch):
