@@ -176,7 +176,7 @@ def test_verify_still_blocks_release(tmp_path, monkeypatch):
 
 def _fluidos(tmp_path):
     session = open_workspace(str(tmp_path))
-    assert dispatch("studium_project_create", {"slug": "fluidos", **_COURSE}, session=session)["status"] == "created"
+    assert dispatch("studium_project_create", {"slug": "fluidos", **_COURSE, "language": "en"}, session=session)["status"] == "created"
     dispatch("studium_source_register", {"decision": "none"}, session=session)
     assert (
         dispatch(

@@ -104,6 +104,7 @@ _TOOLS: tuple[dict[str, object], ...] = (
             "A programming topic uses COMPUTER_SCIENCE. "
             "Computing, math, and engineering topics are not stored as GENERAL. "
             "A new topic book exists, and writing is not available yet. "
+            "Set language for either kind: a BCP 47 tag or a TeX babel name. An empty or unknown code is rejected. "
             "Evidence rules are the same for both kinds. "
             "Does not scan the home directory. There is no tool to change profile later."
         ),
@@ -129,12 +130,17 @@ _TOOLS: tuple[dict[str, object], ...] = (
             "a worked problem's resolution is only an arithmetic expression, or a Rust test is the worked problem "
             "of a book that is not COMPUTER_SCIENCE. "
             "Remove that stored Rust problem with studium_problem_remove before recording a new computation. "
-            "Do not return render as completion while any blueprint chapter has no paragraphs. "
-            "The next action is to write that unwritten chapter by name. "
+            "Do not return render as completion while any blueprint chapter has no paragraphs "
+            "or is short of the draft contract. "
+            "The next action is to write that unfinished chapter by name and to name the missing contract pieces. "
+            "Do not hand the draft over, and do not treat a partial PDF as a reason to stop. "
+            "Render once only after every planned chapter meets the contract. "
             "User-provided local sources and open-web sources both count. Pirate copies and forbidden licenses do not. "
             "The order is write, then audit, then contradiction scan, then review, then render. "
-            "Each chapter is a short lead, several paragraphs of explanation as body text, at most one consejo, "
-            "definitions only for new terms, one worked problem with enunciado, resolución, and respuesta, and one autoficha. "
+            "Each chapter is a short lead, several paragraphs of explanation as body text, at most one tip, "
+            "definitions only for new terms, and one worked problem with a statement, a solution, and an answer, plus one self-check. "
+            "Write that chapter in the book's language. The reason names the language and its framework titles. "
+            "Do not demand Spanish titles when the book is not Spanish. "
             "Boxes are only those four. "
             "Does not ask the user when that step can be done from open sources or from sources already given. "
             "Does not fetch URLs and does not move the book to RELEASED."
@@ -681,7 +687,7 @@ _INSTRUCTIONS = (
             "A model-written solution is not correct until the check passes. "
             "Call studium_book_next and perform that tool call. "
             "Search open sources, open the page, and record the excerpt. "
-            "Fill every empty section from an opened excerpt, or leave the gap. "
+            "Fill every planned section until it meets the draft contract. Do not leave a gap. "
             "Where the section is code or a replayable calculation, add at least one checked problem. "
             "studium_computation_check stores the expression and the result and accepts it only when the server evaluates the same expression again. "
             "An expression that uses only integers and the four operators is accepted only when those numbers appear in one cited excerpt. "
@@ -699,7 +705,8 @@ _INSTRUCTIONS = (
             "A figure does not prove the science. "
             "A numeric claim in the caption still needs two excerpts or a replayed computation. "
             "Do not fetch URLs. "
-            "Render the DRAFT. Do not request release. "
+            "Render the DRAFT once, only after every planned chapter meets the contract. "
+            "Do not stop mid-book for a preview. Do not request release. "
             "Refuse pirate copies and conflicting citations. "
             "Do not ask the user what to do next. "
             "A section may hold several explanatory paragraphs that teach from the stored excerpts, "
@@ -708,13 +715,15 @@ _INSTRUCTIONS = (
             "studium_paragraph_replace rewrites one paragraph in place. The new text cites a stored excerpt. Status stays draft. "
             "When a section cannot get a second independent open excerpt or a replayed check, "
             "studium_book_next marks that section blocked. "
-            "Empty sections stay visible gaps and do not block render once they are marked blocked. "
+            "A blocked section that is missing or short of the draft contract is still the next chapter to write. "
+            "Do not render it and do not stop. "
             "A chapter is teaching prose, not a sentence that repeats an excerpt. "
             "The writer may rewrite it with studium_paragraph_replace. "
             "Use the model's knowledge only by attaching the sources used. "
-            "Chapter contract, in English: a short lead, several paragraphs of explanation as body text, "
-            "at most one consejo, definitions only for new terms, one worked problem with enunciado, resolución, and respuesta, "
-            "and one autoficha. Boxes are only those four. Cite stored excerpts. "
+            "Chapter contract: a short lead, several paragraphs of explanation as body text, "
+            "at most one tip, definitions only for new terms, one worked problem with a statement, a solution, and an answer, "
+            "and one self-check. The visible titles are the book's language, not Spanish unless the book is Spanish. "
+            "Boxes are only those four. Cite stored excerpts. "
             "A formula must be quoted in an excerpt or replayed. "
             "Code behavior needs two sources or a test that passed 3 times. "
             "Refuse pirate copies and licenses that forbid this use. "
@@ -727,7 +736,7 @@ _INSTRUCTIONS = (
             "Search open sources before writing. Do not write a sentence and do not render "
             "while the blueprint has fewer than 8 sections, fewer than 12 distinct sources are stored, "
             "a written chapter has fewer than two explanation sections, under 400 words of explanation, "
-            "a missing lead, consejo, worked problem, or autoficha, "
+            "a missing lead, tip, worked problem, or self-check, "
             "a worked problem's resolution is only an arithmetic expression, "
             "or a Rust test is the worked problem of a book that is not COMPUTER_SCIENCE. "
             "Remove that stored Rust problem with studium_problem_remove before recording a new computation. "
@@ -739,14 +748,15 @@ _INSTRUCTIONS = (
             "When no course guide is stored, the blueprint is a study book: roadmap, foundations, the topic chapters, "
             "worked problems, self-check, a formula or concept sheet, and the source audit. "
             "When a guide exists, chapters follow the guide and the same chapter contract applies. "
-            "Write a full chapter in Spanish, several paragraphs of explanation as body text, not a summary and not a sentence. "
-            "Use the same shape every chapter: a short lead, the explanation, at most one consejo, "
-            "definitions only for new terms, one worked problem with enunciado, resolución, and respuesta, and one autoficha. "
+            "Write a full chapter in the book's language, several paragraphs of explanation as body text, not a summary and not a sentence. "
+            "studium_book_next names that language and the framework titles for it. "
+            "Do not demand Spanish section titles when the book is not Spanish. "
+            "A Spanish book uses consejo, enunciado, resolución, respuesta, and autoficha. "
             "Cite stored excerpts. A formula must be quoted in an excerpt or replayed. "
             "Do not ask the user how to format the page. The renderer owns the boxes. "
             "A section of one short paragraph does not count as written. "
             "Status and studium_book_next lead the client through write, then audit, then contradiction scan, "
-            "then review, then render. "
+            "then review, then render once. Render stays closed while any planned chapter is missing or short of the contract. "
             "studium_audit_record accepts a paragraph, problem, or chapter only when it cites a passed tool result already stored: "
             "two excerpts from different sources, a replayed computation, a Rust test that passed 3 times, "
             "or a figure the server reran. "
@@ -766,15 +776,22 @@ _INSTRUCTIONS = (
             "studium_render uses the book class in this order: front matter (title, preface, how to use, table of contents), "
             "parts and chapters from the blueprint, "
             "appendices (notation, formula sheet, solutions, source audit, study plan), then the bibliography. "
-            "When the book language is es, every generated heading is Spanish. "
-            "If the stored language is missing and the prose is Spanish, treat the book as es. "
-            "The footer is then Borrador. "
+            "Set the book language at creation with a BCP 47 tag or a TeX babel name. "
+            "An empty or unknown language is rejected and is not stored as Spanish. "
+            "A project with no language stays Spanish. "
+            "The renderer loads that babel language, or polyglossia only when babel cannot name it. "
+            "Hyphenation, captions, and the date follow the language. Body prose is not translated. "
+            "Cover draft status, box titles, problem labels, the contents title, and the audit headings "
+            "come from the catalog for Spanish, English, French, German, Portuguese, Italian, Catalan, and Galician. "
+            "A babel language with no catalog entry uses English chrome. "
+            "When the book language is Spanish, the footer is Borrador. "
             "A stale draft.toc is deleted before compile so the contents page is rebuilt. "
             "The preamble uses T1 fontenc and UTF-8. "
             "Explanation is normal body text under a section heading, not a box. "
-            "Only four kinds are boxes: Consejo, Definición, Problema resuelto, and Autoficha. "
-            "One consejo, the definitions, one worked problem, and one autoficha per chapter. "
-            "A worked problem has three labeled parts: Enunciado, Resolución, and Respuesta. "
+            "Only four kinds are boxes. Their titles follow the book language. "
+            "In Spanish they are Consejo, Definición, Problema resuelto, and Autoficha. "
+            "One tip, the definitions, one worked problem, and one self-check per chapter. "
+            "A worked problem has three labeled parts. In Spanish they are Enunciado, Resolución, and Respuesta. "
             "The lead is italic under the chapter title, not a box. "
             "A paragraph with no kind is body text. "
             "Entity ids are not printed in the chapter text. "
@@ -1390,6 +1407,11 @@ def _finish_create(session: McpSession, request: CreateRequest, sources_missing:
         return {"status": "invalid_slug", "message": "invalid slug"}
     if result.failure == "invalid_profile":
         return {"status": "invalid_profile", "message": "invalid profile"}
+    if result.failure == "invalid_language":
+        return {
+            "status": "invalid_language",
+            "message": "language must be a BCP 47 tag or a TeX babel language name",
+        }
     if result.failure == "already_exists":
         return {"status": "already_exists", "message": "project already exists", "slug": request.slug}
     if result.failure == "gate":
@@ -1581,7 +1603,14 @@ def _schema(tool: Mapping[str, object]) -> dict[str, object]:
                 "academic_year": {"type": "string"},
                 "course_code": {"type": "string"},
                 "semester": {"type": "string"},
-                "language": {"type": "string"},
+                "language": {
+                    "type": "string",
+                    "description": (
+                        "Book language, set at creation for a course book or a topic book. "
+                        "A BCP 47 tag such as es, en, fr, or pt-BR, or a TeX babel name such as spanish or dutch. "
+                        "An empty or unknown code is rejected. A project with no language stays Spanish."
+                    ),
+                },
                 "profile": {
                     "type": "string",
                     "enum": list(_PROFILES),

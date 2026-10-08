@@ -1002,7 +1002,14 @@ def test_explanation_paragraphs_empty_chapters_and_figure_space(tmp_path, monkey
 
 def _topic(tmp_path, slug: str, topic: str):
     session = open_workspace(str(tmp_path))
-    assert dispatch("studium_project_create", {"slug": slug, "topic": topic}, session=session)["status"] == "created"
+    assert (
+        dispatch(
+            "studium_project_create",
+            {"slug": slug, "topic": topic, "language": "en"},
+            session=session,
+        )["status"]
+        == "created"
+    )
     return session, tmp_path / slug
 
 

@@ -491,7 +491,11 @@ def test_one_written_chapter_and_one_empty_chapter_is_not_render(tmp_path, monke
     assert nxt["reason"] == (
         "Write the next unwritten chapter: SQL. "
         "The book is incomplete while SQL has no paragraphs. "
-        "Do not render it as finished."
+        "Do not render it as finished. "
+        "Missing contract pieces: paragraphs, two explanation sections, 400 words of explanation, "
+        "lead, consejo, worked problem, autoficha. "
+        "Do not render. Do not hand the draft over. "
+        "A partial PDF is not a reason to stop."
     )
     assert nxt["released"] is False
     rendered = dispatch("studium_render", {}, session=session)
@@ -510,10 +514,181 @@ def test_one_written_chapter_and_one_empty_chapter_is_not_render(tmp_path, monke
     assert again["reason"] == nxt["reason"]
 
 
+def test_unwritten_section_does_not_get_a_render_or_a_stop(tmp_path, monkeypatch):
+    monkeypatch.setattr("urllib.request.urlopen", _explode)
+    session, _root = _topic(tmp_path, "historia", "Historia medieval")
+    for index in range(12):
+        _opened_source(session, index)
+    dispatch(
+        "studium_blueprint_store",
+        {
+            "sections": [
+                {"id": "historia", "title": "Historia"},
+                {"id": "sql", "title": "SQL"},
+                *[{"id": f"tema-{index}", "title": f"Tema {index}"} for index in range(3, 9)],
+            ]
+        },
+        session=session,
+    )
+    pieces = (
+        "paragraphs",
+        "two explanation sections",
+        "400 words of explanation",
+        "lead",
+        "consejo",
+        "worked problem",
+        "autoficha",
+    )
+    for _ in range(6):
+        nxt = dispatch("studium_book_next", {}, session=session)
+        _assert_writes_the_chapter(nxt, "Historia")
+        assert nxt["arguments"]["section"] == "historia"
+        for piece in pieces:
+            assert piece in nxt["reason"]
+    rendered = dispatch("studium_render", {}, session=session)
+    assert rendered["released"] is False
+    assert rendered["status"] == "incomplete"
+    after = dispatch("studium_book_next", {}, session=session)
+    _assert_writes_the_chapter(after, "Historia")
+    assert after["arguments"]["section"] == "historia"
+    status = dispatch("studium_project_status", {}, session=session)
+    action = str(status["next_action"])
+    assert "Write the next unfinished chapter: Historia." in action
+    assert "Missing contract pieces:" in action
+    assert "then render" not in action
+    assert "Do not render." in action
+    assert "Do not hand the draft over." in action
+    assert "A partial PDF is not a reason to stop." in action
+    assert status["state"] != "RELEASED"
+
+
+def test_contract_complete_book_may_render_once_and_stays_unreleased(tmp_path, monkeypatch):
+    monkeypatch.setattr("urllib.request.urlopen", _explode)
+    session, root = _topic(tmp_path, "historia", "Historia medieval")
+    excerpts = [_opened_source(session, index) for index in range(12)]
+    dispatch("studium_blueprint_store", {"sections": _eight_sections()}, session=session)
+    _fill_contract(session, excerpts)
+    seen: list[str | None] = []
+    rendered_step: dict[str, object] | None = None
+    last: dict[str, object] = {}
+    for _ in range(24):
+        nxt = dispatch("studium_book_next", {}, session=session)
+        last = nxt
+        assert nxt["released"] is False
+        assert nxt["ask_user"] is False
+        seen.append(nxt["tool"] if isinstance(nxt["tool"], str) else None)
+        if nxt["tool"] is None:
+            raise AssertionError(f"stopped before render: {nxt['reason']}")
+        if nxt["tool"] == "studium_render":
+            rendered_step = nxt
+            break
+        result = _perform_next(session, nxt, excerpts)
+        assert result.get("released") is False
+        if nxt["tool"] == "studium_book_review":
+            assert result["audit_passed"] is True, result.get("reasons")
+    assert rendered_step is not None, f"book_next did not reach render: {last.get('tool')} {last.get('reason')}"
+    assert seen[:8] == ["studium_audit_record"] * 8
+    assert seen[8:11] == ["studium_contradiction_scan", "studium_book_review", "studium_render"]
+    reason = str(rendered_step["reason"])
+    assert reason == (
+        "Render the DRAFT once. Do not stop mid-book for a preview. Do not request release."
+    )
+    assert "hand" not in reason.lower()
+    rendered = dispatch("studium_render", {}, session=session)
+    assert rendered["released"] is False
+    assert rendered["project_state"] != "RELEASED"
+    assert json.loads((root / ".studium" / "state.json").read_text(encoding="utf-8"))["state"] != "RELEASED"
+    done = dispatch("studium_book_next", {}, session=session)
+    assert done["tool"] is None
+    assert done["released"] is False
+    assert done["reason"] == "The DRAFT was rendered once. Do not request release."
+    assert "preview" not in str(done["reason"]).lower()
+    assert "hand" not in str(done["reason"]).lower()
+    status = dispatch("studium_project_status", {}, session=session)
+    assert "render once" in str(status["next_action"])
+    assert "Do not stop mid-book for a preview." in str(status["next_action"])
+    assert status["state"] != "RELEASED"
+
+
+def _assert_writes_the_chapter(nxt: dict[str, object], title: str) -> None:
+    assert nxt["tool"] == "studium_paragraph_record"
+    assert nxt["tool"] != "studium_render"
+    assert nxt["released"] is False
+    reason = str(nxt["reason"])
+    assert title in reason
+    assert "Render the DRAFT" not in reason
+    assert "can be handed" not in reason.lower()
+    assert "leave the gap" not in reason.lower()
+    assert "preview" not in reason.lower()
+    assert "Empty sections stay gaps" not in reason
+    assert "you can stop" not in reason.lower()
+    blob = json.dumps(nxt).lower().replace("do not ask the user how to format the page.", "")
+    assert "ask the user" not in blob
+
+
+def _fill_contract(session, excerpts: list[str]) -> None:
+    sentence = "The chapter teaches this point from the opened page in the writer's own words."
+    explanation = " ".join([sentence] * 16)
+    lead = " ".join([sentence] * 4)
+    advice = " ".join(["Keep the later point tied to the opened page and write it in the chapter's own sentences."] * 3)
+    for index in range(1, 9):
+        section = f"tema-{index}"
+        dispatch(
+            "studium_paragraph_record",
+            {"section": section, "role": "purpose", "text": lead, "excerpts": [excerpts[0]]},
+            session=session,
+        )
+        dispatch(
+            "studium_paragraph_record",
+            {"section": section, "role": "explanation", "text": explanation, "excerpts": [excerpts[0]]},
+            session=session,
+        )
+        dispatch(
+            "studium_paragraph_record",
+            {"section": section, "role": "explanation", "text": explanation + " The next point follows.", "excerpts": [excerpts[1]]},
+            session=session,
+        )
+        dispatch(
+            "studium_paragraph_record",
+            {"section": section, "role": "consejo", "text": advice, "excerpts": [excerpts[0]]},
+            session=session,
+        )
+        dispatch(
+            "studium_paragraph_record",
+            {"section": section, "role": "self_check", "text": "Name the point the opened page supports in your own words.", "excerpts": [excerpts[0]]},
+            session=session,
+        )
+        witnessed = dispatch(
+            "studium_problem_record",
+            {
+                "section": section,
+                "prompt": "What do the two pages report?",
+                "expected": "4",
+                "excerpts": [excerpts[0], excerpts[1]],
+            },
+            session=session,
+        )
+        assert witnessed["problem"]["status"] == "two_witnesses"
+
+
+def _perform_next(session, nxt: dict[str, object], excerpts: list[str]) -> dict[str, object]:
+    tool = str(nxt["tool"])
+    arguments = dict(nxt["arguments"]) if isinstance(nxt["arguments"], dict) else {}
+    if tool == "studium_audit_record":
+        arguments["kind"] = "historical"
+        arguments["excerpts"] = excerpts[:2]
+    result = dispatch(tool, arguments, session=session)
+    if tool == "studium_audit_record":
+        assert result["status"] == "recorded", result
+    return result
+
+
 def test_client_instructions_draft_without_asking_or_releasing():
     instructions = handle({"jsonrpc": "2.0", "id": 1, "method": "initialize"})["result"]["instructions"]
     assert "Call studium_book_next and perform that tool call." in instructions
-    assert "or leave the gap." in instructions
+    assert "Do not leave a gap." in instructions
+    assert "or leave the gap." not in instructions
+    assert "do not block render" not in instructions.lower()
     assert "studium_computation_check" in instructions
     assert "Do not request release." in instructions
     assert "Refuse pirate copies and conflicting citations." in instructions
@@ -526,7 +701,7 @@ def test_client_instructions_draft_without_asking_or_releasing():
     assert "This version has no tool for that." not in instructions
 
 
-def _topic(tmp_path, slug: str, topic: str, language: str | None = None):
+def _topic(tmp_path, slug: str, topic: str, language: str | None = "en"):
     session = open_workspace(str(tmp_path))
     payload: dict[str, object] = {"slug": slug, "topic": topic}
     if language is not None:

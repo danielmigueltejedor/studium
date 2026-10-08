@@ -11,9 +11,15 @@ from pathlib import Path
 
 from studium.authoring.blueprint import current_sections
 from studium.authoring.excerpts import excerpts_by_id
-from studium.authoring.figures import figure_gap, figures_in_section
-from studium.authoring.paragraphs import GAP_LABEL, supported_paragraphs
-from studium.authoring.problems import problem_result_current
+from studium.authoring.figures import figures_in_section
+from studium.authoring.languages import (
+    INVALID_LANGUAGE,
+    BookLanguage,
+    book_language,
+    generic_section_titles,
+    messages,
+)
+from studium.authoring.paragraphs import supported_paragraphs
 from studium.authoring.support import corroboration_for_excerpts, supported_drafts
 from studium.domain.profiles import BOOK_TOPIC
 from studium.research.public_sources import bibliography_counts
@@ -23,7 +29,6 @@ from studium.storage.records import AUDITS, COMPUTATIONS, FIGURES, PROBLEMS, PUB
 
 _TEX_NAME = "draft.tex"
 _PDF_NAME = "draft.pdf"
-_EMPTY_PIECE = "Gap: this part of the draft has no stored material yet."
 _LATEX = {
     "\\": r"\textbackslash{}",
     "{": r"\{",
@@ -151,6 +156,8 @@ def render_draft(root: Path) -> dict[str, object]:
             tex_path, pdf_path = _outputs(root)
             if tex_path is None or pdf_path is None:
                 return _error("render.path_escaped", "draft path leaves the project")
+            if book_language(root) is None:
+                return _error("render.invalid_language", INVALID_LANGUAGE)
             document = _document(root)
             tex_path.parent.mkdir(parents=True, exist_ok=True)
             tex_path.write_text(document, encoding="utf-8")
@@ -848,139 +855,14 @@ _LEAD_KIND = {
     "Definicion": "definition",
     "Autoficha": "self_check",
 }
-_SPANISH_MARK = re.compile(
-    r"[ÁÉÍÓÚÜÑáéíóúüñ¿¡]"
-    r"|\b(?:el|la|los|las|del|una|unos|unas|para|como|esta|este|estos|estas|que|también|más|sección|capítulo|fluidos|ecuación|presión|cuando|donde|porque|desde|hasta)\b",
-    re.IGNORECASE,
-)
+_GENERIC_SECTION = generic_section_titles()
 
 
-def _language(root: Path) -> str:
-    """Book language. A missing language with Spanish prose is es."""
-
-    course = load_project_toml(root).get("course")
-    if isinstance(course, dict) and isinstance(course.get("language"), str):
-        stored = course["language"].strip().lower()
-        if stored:
-            return stored
-    if _prose_is_spanish(root):
-        return "es"
-    return ""
-
-
-def _prose_is_spanish(root: Path) -> bool:
-    """True when blueprint titles or draft prose are Spanish.
-
-    The course name is not enough: a Spanish course title can still hold English paragraphs.
-    """
-
-    chunks: list[str] = []
-    for section in current_sections(root):
-        title = section.get("title")
-        if isinstance(title, str):
-            chunks.append(title)
-    for paragraph in supported_paragraphs(root):
-        text = paragraph.get("text")
-        if isinstance(text, str):
-            chunks.append(text)
-    for claim in supported_drafts(root):
-        text = claim.get("text")
-        if isinstance(text, str):
-            chunks.append(text)
-    for record in fold_by_id(root / PROBLEMS):
-        prompt = record.get("prompt")
-        if isinstance(prompt, str):
-            chunks.append(prompt)
-    return _SPANISH_MARK.search("\n".join(chunks)) is not None
-
-
-def _copy(language: str) -> dict[str, str]:
-    """Generated headings. Spanish when the book language is es."""
-
-    if language == "es":
-        return {
-            "preface": "Prefacio",
-            "how": "Cómo usar este libro",
-            "audit": "Auditoría de fuentes",
-            "study": "Plan de estudio",
-            "notation": "Notación",
-            "formulas": "Hoja de fórmulas",
-            "solutions": "Soluciones",
-            "blueprint": "Esquema",
-            "footer": "Borrador",
-            "gap": "Esta sección está vacía.",
-            "unwritten": "todavía no está escrito",
-            "empty": "Esta parte del borrador aún no tiene material.",
-            "blocked": "Bloqueado: no hay un segundo extracto abierto independiente ni una comprobación rehecha.",
-            "purpose": "Consejo",
-            "explanation": "Definición",
-            "worked": "Problema resuelto",
-            "self_check": "Autoficha",
-            "figure_gap": "Esta figura no está comprobada. El dibujo se omite.",
-            "caption": "La cifra del pie sigue sin comprobar.",
-            "subtitle": "Apuntes de trabajo",
-            "status": "Borrador",
-            "unreleased": "No publicado",
-            "edition": "Edición",
-            "leftover": "Borrador antiguo.",
-            "note": (
-                "Este libro presenta el tema con el lenguaje del curso. "
-                "Cada capítulo abre con una entrada breve, sigue con la explicación "
-                "y cierra con un problema resuelto y una autoficha."
-            ),
-            "how_a": (
-                "Lee el capítulo seguido. El consejo, la definición, el problema resuelto "
-                "y la autoficha van en recuadros. La explicación es el cuerpo del texto."
-            ),
-            "how_b": "Un capítulo lleva una entrada en cursiva, la explicación en el cuerpo, como mucho un consejo, definiciones solo al introducir un término, un problema resuelto y una autoficha.",
-            "consejo": "Consejo",
-            "definition": "Definición",
-            "section": "Explicación",
-            "unwritten": "todavía no está escrito",
-            "enunciado": "Enunciado",
-            "resolucion": "Resolución",
-            "respuesta": "Respuesta",
-            "open_supplement": "Suplemento abierto:",
-            "not_guide": "No es la bibliografía de la guía.",
-        }
-    return {
-        "preface": "Preface",
-        "how": "How to use this book",
-        "audit": "Source audit",
-        "study": "Study plan",
-        "notation": "Notation",
-        "formulas": "Formula sheet",
-        "solutions": "Solutions",
-        "blueprint": "Blueprint",
-        "footer": "DRAFT",
-        "gap": GAP_LABEL,
-        "unwritten": "not written yet",
-        "empty": _EMPTY_PIECE,
-        "blocked": "Blocked: no second independent open excerpt and no replayed check.",
-        "purpose": "Tip",
-        "explanation": "Definition",
-        "worked": "Worked problem",
-        "self_check": "Self-check",
-        "figure_gap": figure_gap(""),
-        "caption": "The numeric claim in the caption is unchecked.",
-        "subtitle": "Working notes",
-        "status": "Draft",
-        "unreleased": "Not released",
-        "edition": "Edition",
-        "leftover": "Leftover draft.",
-        "note": "This file is a DRAFT. It is not RELEASED.",
-        "how_a": "A section may hold several paragraphs. Each substantive paragraph cites a stored excerpt.",
-            "how_b": "A chapter has an italic lead, the explanation as body text, at most one tip, definitions only when a term is introduced, one worked problem, and one self-check.",
-            "consejo": "Tip",
-            "definition": "Definition",
-            "section": "Explanation",
-            "unwritten": "not written yet",
-            "enunciado": "Statement",
-            "resolucion": "Solution",
-            "respuesta": "Answer",
-        "open_supplement": "Open supplement:",
-        "not_guide": "Not the guide bibliography.",
-    }
+def _require_language(root: Path) -> BookLanguage:
+    language = book_language(root)
+    if language is None:
+        raise ValueError(INVALID_LANGUAGE)
+    return language
 
 
 def _unwritten_lines(titles: list[str], copy: dict[str, str]) -> list[str]:
@@ -1071,7 +953,9 @@ def _textbook_packages() -> list[str]:
     ]
 
 
-def _preamble(footer: str, language: str, *, tikz: bool = False) -> list[str]:
+def _preamble(footer: str, language: BookLanguage, copy: dict[str, str], *, tikz: bool = False) -> list[str]:
+    """Load babel (polyglossia only when babel has no name) and the book layout."""
+
     mark = latex_escape(footer)
     lines = [
         r"\documentclass{book}",
@@ -1079,23 +963,33 @@ def _preamble(footer: str, language: str, *, tikz: bool = False) -> list[str]:
         r"\usepackage[T1]{fontenc}",
         r"\usepackage{lmodern}",
     ]
-    if language == "es":
+    if language.loader == "polyglossia":
         lines.extend(
             [
-                r"\usepackage[spanish]{babel}",
-                r"\addto\captionsspanish{\renewcommand{\contentsname}{Índice}}",
-                r"\AtBeginDocument{\spanishdeactivate{" + "\"~<>}}",
-                r"\usepackage[a4paper,margin=2.5cm]{geometry}",
-                r"\usepackage{titlesec}",
-                r"\titleformat{\chapter}[display]",
-                r"  {\normalfont\filright}{\large\scshape\chaptertitlename\ \thechapter}{1ex}{\huge\bfseries}",
-                r"\titlespacing*{\chapter}{0pt}{2.5ex plus 1ex minus .2ex}{2.3ex}",
-                r"\titleformat{name=\chapter,numberless}[display]",
-                r"  {\normalfont\filright}{}{0pt}{\huge\bfseries}",
+                r"\usepackage{polyglossia}",
+                r"\setmainlanguage{" + language.babel + "}",
             ]
         )
+    else:
+        lines.append(r"\usepackage[" + language.babel + "]{babel}")
+        lines.append(
+            r"\addto\captions"
+            + language.babel
+            + r"{\renewcommand{\contentsname}{"
+            + latex_escape(copy["contents"])
+            + "}}"
+        )
+    if language.babel == "spanish":
+        lines.append(r"\AtBeginDocument{\spanishdeactivate{" + "\"~<>}}")
     lines.extend(
         [
+            r"\usepackage[a4paper,margin=2.5cm]{geometry}",
+            r"\usepackage{titlesec}",
+            r"\titleformat{\chapter}[display]",
+            r"  {\normalfont\filright}{\large\scshape\chaptertitlename\ \thechapter}{1ex}{\huge\bfseries}",
+            r"\titlespacing*{\chapter}{0pt}{2.5ex plus 1ex minus .2ex}{2.3ex}",
+            r"\titleformat{name=\chapter,numberless}[display]",
+            r"  {\normalfont\filright}{}{0pt}{\huge\bfseries}",
             r"\usepackage{graphicx}",
             *( [r"\usepackage{tikz}"] if tikz else [] ),
             *_textbook_packages(),
@@ -1111,17 +1005,12 @@ def _preamble(footer: str, language: str, *, tikz: bool = False) -> list[str]:
             r"  \renewcommand{\headrulewidth}{0pt}",
             r"  \renewcommand{\footrulewidth}{0pt}",
             r"}",
+            r"\makeatletter",
+            r"\@openrightfalse",
+            r"\let\cleardoublepage\clearpage",
+            r"\makeatother",
         ]
     )
-    if language == "es":
-        lines.extend(
-            [
-                r"\makeatletter",
-                r"\@openrightfalse",
-                r"\let\cleardoublepage\clearpage",
-                r"\makeatother",
-            ]
-        )
     return lines
 
 
@@ -1177,8 +1066,8 @@ def _title_page(root: Path, book: str, copy: dict[str, str]) -> list[str]:
 
 def _document(root: Path) -> str:
     kind = book_kind(root)
-    language = _language(root)
-    copy = _copy(language)
+    language = _require_language(root)
+    copy = messages(language)
     sections = current_sections(root)
     claims = supported_drafts(root)
     paragraphs = supported_paragraphs(root)
@@ -1193,7 +1082,7 @@ def _document(root: Path) -> str:
         if isinstance(section, str):
             by_section.setdefault(section, []).append(paragraph)
     lines = [
-        *_preamble(copy["footer"], language, tikz=_checked_tikz(root)),
+        *_preamble(copy["footer"], language, copy, tikz=_checked_tikz(root)),
         r"\begin{document}",
         r"\frontmatter",
         *_title_page(root, book, copy),
@@ -1258,7 +1147,7 @@ def _chapter_lines(
     section_id: str,
     paragraphs: list[dict[str, object]],
     copy: dict[str, str],
-    language: str,
+    language: BookLanguage,
 ) -> list[str]:
     """Lead and explanation stay in the body. Only four kinds are boxes."""
 
@@ -1272,7 +1161,7 @@ def _chapter_lines(
         raw = record.get("text") if isinstance(record.get("text"), str) else ""
         if not raw.strip():
             continue
-        label, rest = _split_box_lead(raw) if language == "es" else (None, raw)
+        label, rest = _split_box_lead(raw) if language.babel == "spanish" else (None, raw)
         kind = _box_kind(role, label, language)
         if kind == "consejo":
             consejo.append(_box_body(raw, label, rest, kind, language))
@@ -1324,9 +1213,6 @@ def _body_chunks(body: list[str]) -> list[tuple[str, str]]:
     return chunks
 
 
-_GENERIC_SECTION = frozenset({"explicación", "explicacion", "explanation"})
-
-
 def _heading_from_paragraph(text: str) -> tuple[str | None, str]:
     """A title is the paragraph's own first line. The word Explicación is not a title."""
 
@@ -1350,16 +1236,16 @@ def _split_box_lead(text: str) -> tuple[str | None, str]:
     return match.group(1), stripped[match.end() :].strip()
 
 
-def _box_kind(role: object, label: str | None, language: str) -> str | None:
+def _box_kind(role: object, label: str | None, language: BookLanguage) -> str | None:
     if role in {"consejo", "definition", "self_check"}:
         return str(role)
-    if language == "es" and role != "purpose":
+    if language.babel == "spanish" and role != "purpose":
         return _LEAD_KIND.get(label or "")
     return None
 
 
-def _box_body(raw: str, label: str | None, rest: str, kind: str | None, language: str) -> str:
-    if language != "es" or not rest.strip():
+def _box_body(raw: str, label: str | None, rest: str, kind: str | None, language: BookLanguage) -> str:
+    if language.babel != "spanish" or not rest.strip():
         return raw
     if _LEAD_KIND.get(label or "") == kind:
         return rest
@@ -1703,13 +1589,11 @@ def _audit_lines(
 
 
 def _visible_label(copy: dict[str, str], label: str) -> str:
-    if copy["footer"] != "Borrador":
-        return label
     return {
-        "two_witnesses": "dos testimonios",
-        "replayed check": "comprobación rehecha",
-        "single excerpt": "un extracto",
-        "unchecked": "sin comprobar",
+        "two_witnesses": copy["two_witnesses"],
+        "replayed check": copy["replayed"],
+        "single excerpt": copy["single_excerpt"],
+        "unchecked": copy["unchecked"],
     }.get(label, label)
 
 
@@ -1734,28 +1618,13 @@ def _status_line(kind: str, counts: dict[str, int], copy: dict[str, str]) -> str
     pending = counts.get("pending", 0)
     conflicting = counts.get("conflicting", 0)
     not_cited = counts.get("not_cited", 0)
-    if copy["footer"] == "Borrador":
-        if kind == BOOK_TOPIC:
-            guide = "Un libro de tema no usa una guía universitaria, así que no citada no es una regla de apoyo."
-        else:
-            guide = "Las fuentes que la guía almacenada no cita quedan fuera."
-        return (
-            f"Estado de las fuentes: PENDING. "
-            f"{pending} pendientes. "
-            f"Los conflictos almacenados quedan fuera ({conflicting}). "
-            f"{guide} "
-            f"Recuento de no citadas: {not_cited}."
-        )
-    if kind == BOOK_TOPIC:
-        guide = "A topic book does not use a university guide, so not cited is not a support rule."
-    else:
-        guide = "Sources not cited by the stored course guide stay excluded."
+    guide = copy["guide_topic"] if kind == BOOK_TOPIC else copy["guide_course"]
     return (
-        f"Source status: PENDING. "
-        f"{pending} pending. "
-        f"Stored conflicts stay excluded ({conflicting}). "
+        f"{copy['status_head']} "
+        f"{pending} {copy['pending_word']}. "
+        f"{copy['conflicts'].format(n=conflicting)} "
         f"{guide} "
-        f"Not cited count: {not_cited}."
+        f"{copy['not_cited'].format(n=not_cited)}"
     )
 
 
@@ -1796,8 +1665,8 @@ def _source_notes(
             )
         else:
             excerpt_labels.append(f"{excerpt_id} {title} (PENDING)")
-    source_heading = "Fuentes" if copy["footer"] == "Borrador" else "Sources"
-    excerpt_heading = "Extractos" if copy["footer"] == "Borrador" else "Excerpts"
+    source_heading = copy["sources_heading"]
+    excerpt_heading = copy["excerpts_heading"]
     if labels:
         lines.extend(["", r"\noindent " + source_heading + ": " + latex_escape(", ".join(labels)) + "."])
     if excerpt_labels:
