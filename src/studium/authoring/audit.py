@@ -72,6 +72,7 @@ def record_audit(
     try:
         with project_lock(root):
             state = load_state_holding_lock(root)
+            passage_ids = [passage_id for passage_id, _text in _chapter_passages(root, target_id, target_kind)]
             record: dict[str, object] = {
                 "schema_version": "1.0.0",
                 "id": allocate_id(root, "REV"),
@@ -79,7 +80,8 @@ def record_audit(
                 "target_kind": target_kind,
                 "kind": check_kind,
                 "evidence": evidence,
-                "passages": [passage_id for passage_id, _text in _chapter_passages(root, target_id, target_kind)],
+                "passages": passage_ids,
+                "binding": _binding(root, passage_ids, evidence),
                 "prose_added": False,
                 "status": "recorded",
                 "classification": "PENDING",
@@ -246,19 +248,19 @@ def audited_targets(root: Path) -> set[str]:
 
 
 def audited_paragraph_ids(root: Path) -> set[str]:
-    """Paragraphs named by a recorded audit. A later paragraph is not covered."""
+    """Paragraphs whose audit still matches the current paragraph and excerpt text.
 
+    A later paragraph, a rewritten paragraph, or a changed excerpt is not covered.
+    """
+
+    paragraphs = supported_paragraphs(root)
+    excerpts = excerpts_by_id(root)
     covered: set[str] = set()
     for record in fold_by_id(root / AUDITS):
-        if record.get("status") != "recorded" or record.get("prose_added") is not False:
-            continue
-        passages = record.get("passages")
-        if isinstance(passages, list) and passages:
-            covered.update(item for item in passages if isinstance(item, str))
-            continue
-        target = record.get("target")
-        if isinstance(target, str):
-            covered.add(target)
+        for paragraph in paragraphs:
+            identifier = paragraph.get("id")
+            if isinstance(identifier, str) and _covers_paragraph(record, paragraph, excerpts):
+                covered.add(identifier)
     return covered
 
 
@@ -295,6 +297,8 @@ def _writer_material(root: Path) -> list[str]:
     lines = [f"section:{section['id']}" for section in current_sections(root)]
     for record in supported_paragraphs(root):
         lines.append(f"paragraph:{record.get('id')}:{record.get('text_sha256')}")
+    for record in excerpts_by_id(root).values():
+        lines.append(f"excerpt:{record.get('id')}:{record.get('text_sha256')}")
     for record in supported_drafts(root):
         lines.append(f"claim:{record.get('id')}:{record.get('text')}")
     for record in fold_by_id(root / PROBLEMS):
@@ -680,13 +684,16 @@ def _evidence(
     if isinstance(computation, str) and computation.strip():
         if _computation_passed(root, computation.strip()):
             evidence["computation"] = computation.strip()
-            evidence["computation_result"] = "replayed"
+            evidence["computation_result"] = "COMPUTATION_REPRODUCED"
+            evidence["mathematically_verified"] = False
+            evidence["academically_reviewed"] = False
         elif "excerpts" not in evidence and problem is None and figure is None:
             return None, _error("audit.tool_result_missing", "the computation was not replayed by the server")
     if isinstance(problem, str) and problem.strip():
         if _rust_passed(root, problem.strip()):
             evidence["problem"] = problem.strip()
-            evidence["problem_result"] = "checked"
+            evidence["problem_result"] = "reproducibility_check"
+            evidence["independent_proof"] = False
         elif "excerpts" not in evidence and "computation" not in evidence and figure is None:
             return None, _error("audit.tool_result_missing", "the Rust test has not passed 3 times")
     if isinstance(figure, str) and figure.strip():
@@ -761,6 +768,82 @@ def _contradiction_for(root: Path, quantity: str) -> dict[str, object] | None:
     if not found:
         return None
     return found[-1]
+
+
+def _binding(root: Path, passage_ids: list[str], evidence: dict[str, object]) -> dict[str, object]:
+    """Hashes the audit was allowed to cite. A later change makes the audit stale."""
+
+    paragraphs = {record.get("id"): record for record in supported_paragraphs(root)}
+    excerpts = excerpts_by_id(root)
+    passage_hashes: dict[str, str] = {}
+    excerpt_hashes: dict[str, str] = {}
+    for passage_id in passage_ids:
+        paragraph = paragraphs.get(passage_id)
+        if isinstance(paragraph, dict):
+            _bind_paragraph(paragraph, excerpts, passage_hashes, excerpt_hashes)
+    _bind_excerpt_ids(evidence.get("excerpts"), excerpts, excerpt_hashes)
+    return {"passages": passage_hashes, "excerpts": excerpt_hashes}
+
+
+def _bind_paragraph(
+    paragraph: dict[str, object],
+    excerpts: dict[str, dict[str, object]],
+    passage_hashes: dict[str, str],
+    excerpt_hashes: dict[str, str],
+) -> None:
+    identifier = paragraph.get("id")
+    digest = paragraph.get("text_sha256")
+    if isinstance(identifier, str) and isinstance(digest, str):
+        passage_hashes[identifier] = digest
+    _bind_excerpt_ids(paragraph.get("excerpts"), excerpts, excerpt_hashes)
+
+
+def _bind_excerpt_ids(
+    raw: object,
+    excerpts: dict[str, dict[str, object]],
+    excerpt_hashes: dict[str, str],
+) -> None:
+    if not isinstance(raw, list):
+        return
+    for excerpt_id in raw:
+        if not isinstance(excerpt_id, str):
+            continue
+        excerpt = excerpts.get(excerpt_id)
+        digest = excerpt.get("text_sha256") if isinstance(excerpt, dict) else None
+        if isinstance(digest, str):
+            excerpt_hashes[excerpt_id] = digest
+
+
+def _covers_paragraph(
+    record: dict[str, object],
+    paragraph: dict[str, object],
+    excerpts: dict[str, dict[str, object]],
+) -> bool:
+    if record.get("status") != "recorded" or record.get("prose_added") is not False:
+        return False
+    binding = record.get("binding")
+    if not isinstance(binding, dict):
+        return False
+    passage_hashes = binding.get("passages")
+    excerpt_hashes = binding.get("excerpts")
+    if not isinstance(passage_hashes, dict) or not isinstance(excerpt_hashes, dict):
+        return False
+    identifier = paragraph.get("id")
+    if not isinstance(identifier, str) or passage_hashes.get(identifier) != paragraph.get("text_sha256"):
+        return False
+    for excerpt_id, digest in excerpt_hashes.items():
+        current = excerpts.get(str(excerpt_id))
+        current_digest = current.get("text_sha256") if isinstance(current, dict) else None
+        if current_digest != digest:
+            return False
+    raw = paragraph.get("excerpts")
+    cited = [item for item in raw if isinstance(item, str)] if isinstance(raw, list) else []
+    for excerpt_id in cited:
+        current = excerpts.get(excerpt_id)
+        current_digest = current.get("text_sha256") if isinstance(current, dict) else None
+        if excerpt_hashes.get(excerpt_id) != current_digest:
+            return False
+    return True
 
 
 def _public_audit(record: dict[str, object]) -> dict[str, object]:

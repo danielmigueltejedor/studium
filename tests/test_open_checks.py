@@ -33,6 +33,13 @@ def test_rust_test_is_checked_only_after_three_passes(tmp_path, monkeypatch):
     assert checked["problem"]["correct"] is True
     assert "verified" not in checked["problem"]
     assert checked["problem"]["status"] == "checked"
+    assert checked["message"] == (
+        "Three identical rustc runs are a reproducibility check, not an independent proof."
+    )
+    assert checked["problem"]["status_text"] == checked["message"]
+    assert checked["problem"]["check_kind"] == "reproducibility"
+    assert "three methods" not in json.dumps(checked).lower()
+    assert "methods" not in checked["problem"]
     assert (root / ".studium" / "state.json").read_bytes() == state_before
     verify = dispatch("studium_verify", {"mode": "full"}, session=session)
     assert verify["released"] is False
