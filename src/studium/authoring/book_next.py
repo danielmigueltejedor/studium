@@ -20,9 +20,9 @@ from studium.authoring.audit import (
 )
 from studium.authoring.blueprint import current_sections
 from studium.authoring.computation import list_computations
-from studium.authoring.problems import REPRODUCIBILITY_TEXT, RUST_NOT_WORKED_PROBLEM
 from studium.authoring.excerpts import excerpts_by_id
 from studium.authoring.paragraphs import supported_paragraphs, supported_section_ids
+from studium.authoring.problems import REPRODUCIBILITY_TEXT, RUST_NOT_WORKED_PROBLEM, problem_result_current
 from studium.authoring.section_blocks import blocked_ids, blocked_sections, mark_blocked, offers_for, remember_offer
 from studium.authoring.support import draft_source_usable
 from studium.domain.profiles import BOOK_TOPIC
@@ -867,6 +867,8 @@ def _worked_ok(root: Path, section_id: str) -> bool:
             return True
     for record in fold_by_id(root / PROBLEMS):
         if record.get("section") != section_id or record.get("kind") != "numeric":
+            continue
+        if not problem_result_current(root, record):
             continue
         if record.get("corroboration") == "two_witnesses" or record.get("status") == "two_witnesses":
             return True

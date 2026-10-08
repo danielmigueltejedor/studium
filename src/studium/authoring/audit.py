@@ -10,8 +10,10 @@ import re
 from pathlib import Path
 
 from studium.authoring.blueprint import current_sections
+from studium.authoring.computation import computation_fingerprint
 from studium.authoring.excerpts import excerpts_by_id
 from studium.authoring.paragraphs import supported_paragraphs
+from studium.authoring.problems import problem_input_sha256, problem_result_current
 from studium.authoring.section_blocks import blocked_ids
 from studium.authoring.support import corroboration_for_excerpts, supported_drafts
 from studium.storage.init_project import load_state_holding_lock
@@ -23,6 +25,7 @@ from studium.storage.records import (
     CONTRADICTIONS,
     FIGURES,
     PROBLEMS,
+    PUBLIC_BIBLIOGRAPHY,
     REVIEWS,
     allocate_id,
     append_jsonl,
@@ -259,7 +262,7 @@ def audited_paragraph_ids(root: Path) -> set[str]:
     for record in fold_by_id(root / AUDITS):
         for paragraph in paragraphs:
             identifier = paragraph.get("id")
-            if isinstance(identifier, str) and _covers_paragraph(record, paragraph, excerpts):
+            if isinstance(identifier, str) and _covers_paragraph(root, record, paragraph, excerpts):
                 covered.add(identifier)
     return covered
 
@@ -301,11 +304,21 @@ def _writer_material(root: Path) -> list[str]:
         lines.append(f"excerpt:{record.get('id')}:{record.get('text_sha256')}")
     for record in supported_drafts(root):
         lines.append(f"claim:{record.get('id')}:{record.get('text')}")
+    seen_sources: set[str] = set()
+    for record in excerpts_by_id(root).values():
+        source_id = record.get("source_id")
+        if isinstance(source_id, str) and source_id not in seen_sources:
+            seen_sources.add(source_id)
+            lines.append(f"source:{source_id}:{_source_fingerprint(root, source_id)}")
     for record in fold_by_id(root / PROBLEMS):
-        lines.append(f"problem:{record.get('id')}:{record.get('status')}:{record.get('correct')}")
+        lines.append(
+            f"problem:{record.get('id')}:{record.get('status')}:{record.get('correct')}:"
+            f"{problem_input_sha256(root, record)}:{problem_result_current(root, record)}"
+        )
     for record in fold_by_id(root / COMPUTATIONS):
         lines.append(
-            f"computation:{record.get('id')}:{record.get('status')}:{record.get('server_result')}:{record.get('expression')}"
+            f"computation:{record.get('id')}:{record.get('status')}:{record.get('server_result')}:"
+            f"{record.get('expression')}:{computation_fingerprint(record)}"
         )
     for record in fold_by_id(root / FIGURES):
         lines.append(f"figure:{record.get('id')}:{record.get('status')}:{record.get('correct')}")
@@ -735,6 +748,8 @@ def _rust_passed(root: Path, identifier: str) -> bool:
         if record.get("id") != identifier or record.get("kind") != "rust":
             continue
         runs = record.get("runs")
+        if not problem_result_current(root, record):
+            return False
         if record.get("status") != "checked" or record.get("correct") is not True or not isinstance(runs, list):
             return False
         passed = [run for run in runs if isinstance(run, dict) and run.get("passed") is True]
@@ -770,6 +785,91 @@ def _contradiction_for(root: Path, quantity: str) -> dict[str, object] | None:
     return found[-1]
 
 
+def _source_fingerprint(root: Path, source_id: str) -> str | None:
+    for record in fold_by_id(root / PUBLIC_BIBLIOGRAPHY):
+        if record.get("id") != source_id:
+            continue
+        payload = f"public:{source_id}:{record.get('text_sha256')}:{record.get('url')}"
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+    for record in fold_by_id(root / "sources" / "registry.jsonl"):
+        if record.get("id") != source_id:
+            continue
+        payload = f"local:{source_id}:{record.get('sha256')}"
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+    return None
+
+
+def _dependency_entries(
+    root: Path,
+    evidence: dict[str, object],
+    excerpt_hashes: dict[str, str],
+) -> list[dict[str, str]]:
+    entries: list[dict[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+
+    def add(kind: str, identifier: str, digest: str | None) -> None:
+        if digest is None or (kind, identifier) in seen:
+            return
+        seen.add((kind, identifier))
+        entries.append({"kind": kind, "id": identifier, "sha256": digest})
+
+    computation = evidence.get("computation")
+    if isinstance(computation, str):
+        record = next((item for item in fold_by_id(root / COMPUTATIONS) if item.get("id") == computation), None)
+        if isinstance(record, dict):
+            add("computation", computation, computation_fingerprint(record))
+    problem = evidence.get("problem")
+    if isinstance(problem, str):
+        record = next((item for item in fold_by_id(root / PROBLEMS) if item.get("id") == problem), None)
+        if isinstance(record, dict):
+            add("problem", problem, problem_input_sha256(root, record))
+    figure = evidence.get("figure")
+    if isinstance(figure, str):
+        record = next((item for item in fold_by_id(root / FIGURES) if item.get("id") == figure), None)
+        if isinstance(record, dict):
+            payload = f"{record.get('source_sha256')}:{record.get('status')}:{record.get('correct')}"
+            add("figure", figure, hashlib.sha256(payload.encode("utf-8")).hexdigest())
+    excerpts = excerpts_by_id(root)
+    for excerpt_id in excerpt_hashes:
+        excerpt = excerpts.get(excerpt_id)
+        source_id = excerpt.get("source_id") if isinstance(excerpt, dict) else None
+        if isinstance(source_id, str):
+            add("source", source_id, _source_fingerprint(root, source_id))
+    return entries
+
+
+def _dependencies_current(root: Path, entries: list[object]) -> bool:
+    for entry in entries:
+        if not isinstance(entry, dict):
+            return False
+        kind = entry.get("kind")
+        identifier = entry.get("id")
+        digest = entry.get("sha256")
+        if not isinstance(kind, str) or not isinstance(identifier, str) or not isinstance(digest, str):
+            return False
+        if _current_dependency(root, kind, identifier) != digest:
+            return False
+    return True
+
+
+def _current_dependency(root: Path, kind: str, identifier: str) -> str | None:
+    if kind == "computation":
+        record = next((item for item in fold_by_id(root / COMPUTATIONS) if item.get("id") == identifier), None)
+        return computation_fingerprint(record) if isinstance(record, dict) else None
+    if kind == "problem":
+        record = next((item for item in fold_by_id(root / PROBLEMS) if item.get("id") == identifier), None)
+        return problem_input_sha256(root, record) if isinstance(record, dict) else None
+    if kind == "figure":
+        record = next((item for item in fold_by_id(root / FIGURES) if item.get("id") == identifier), None)
+        if not isinstance(record, dict):
+            return None
+        payload = f"{record.get('source_sha256')}:{record.get('status')}:{record.get('correct')}"
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+    if kind == "source":
+        return _source_fingerprint(root, identifier)
+    return None
+
+
 def _binding(root: Path, passage_ids: list[str], evidence: dict[str, object]) -> dict[str, object]:
     """Hashes the audit was allowed to cite. A later change makes the audit stale."""
 
@@ -782,7 +882,11 @@ def _binding(root: Path, passage_ids: list[str], evidence: dict[str, object]) ->
         if isinstance(paragraph, dict):
             _bind_paragraph(paragraph, excerpts, passage_hashes, excerpt_hashes)
     _bind_excerpt_ids(evidence.get("excerpts"), excerpts, excerpt_hashes)
-    return {"passages": passage_hashes, "excerpts": excerpt_hashes}
+    return {
+        "passages": passage_hashes,
+        "excerpts": excerpt_hashes,
+        "dependencies": _dependency_entries(root, evidence, excerpt_hashes),
+    }
 
 
 def _bind_paragraph(
@@ -815,6 +919,7 @@ def _bind_excerpt_ids(
 
 
 def _covers_paragraph(
+    root: Path,
     record: dict[str, object],
     paragraph: dict[str, object],
     excerpts: dict[str, dict[str, object]],
@@ -843,6 +948,9 @@ def _covers_paragraph(
         current_digest = current.get("text_sha256") if isinstance(current, dict) else None
         if excerpt_hashes.get(excerpt_id) != current_digest:
             return False
+    dependencies = binding.get("dependencies")
+    if isinstance(dependencies, list) and not _dependencies_current(root, dependencies):
+        return False
     return True
 
 

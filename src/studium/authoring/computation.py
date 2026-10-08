@@ -169,6 +169,7 @@ def _store(
                 record["corroboration"] = "replayed"
             if section_id is not None:
                 record["section"] = section_id
+            record["input_sha256"] = computation_fingerprint(record)
             append_jsonl(root / COMPUTATIONS, record)
             _audit(root, record=record, actor=actor)
             fresh = load_state_holding_lock(root)
@@ -339,6 +340,20 @@ def _fraction(value: str) -> Fraction | None:
         return Fraction(value)
     except (ValueError, ZeroDivisionError):
         return None
+
+
+def computation_fingerprint(record: dict[str, object]) -> str:
+    """Fingerprint of the expression and the result an audit is allowed to cite."""
+
+    payload = "\n".join(
+        [
+            str(record.get("expression") or ""),
+            str(record.get("server_result") or ""),
+            str(record.get("status") or ""),
+            str(record.get("correct")),
+        ]
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def _canonical(value: Fraction) -> str:

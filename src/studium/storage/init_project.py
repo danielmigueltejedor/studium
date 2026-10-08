@@ -15,6 +15,7 @@ from studium.state.gates import PROJECT_TOML, Blocker, gate_for
 from studium.state.machine import HistoryEntry, apply
 from studium.storage.locking import ProjectLocked, project_lock
 from studium.storage.migrate import initial_local_sources, migrate_state, utc_now
+from studium.storage.records import atomic_write_text, read_jsonl
 
 _SLUG = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 _PROFILES = frozenset(PROFILES)
@@ -254,7 +255,7 @@ def _read_state(root: Path) -> dict[str, object]:
 
 
 def _write_state(root: Path, document: dict[str, object]) -> None:
-    (root / ".studium" / "state.json").write_text(_dump(document), encoding="utf-8")
+    atomic_write_text(root / ".studium" / "state.json", _dump(document))
 
 
 def _sources_labeled(root: Path) -> bool:
@@ -288,15 +289,10 @@ def book_kind(root: Path) -> str:
 
 def load_tasks(root: Path) -> list[dict[str, object]]:
     path = root / "tasks" / "tasks.jsonl"
-    if not path.is_file():
-        return []
     folded: dict[str, dict[str, object]] = {}
     order: list[str] = []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        if not line.strip():
-            continue
-        record = json.loads(line)
-        if not isinstance(record, dict) or "id" not in record:
+    for record in read_jsonl(path):
+        if "id" not in record:
             continue
         identifier = str(record["id"])
         if identifier not in folded:
