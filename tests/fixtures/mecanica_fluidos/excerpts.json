@@ -1,0 +1,12 @@
+{
+  "left": {
+    "title": "Studium fixture: hydrostatic difference",
+    "url": "https://fixture.studium.test/mecanica-fluidos/hydrostatic",
+    "text": "Fixture excerpt, not a university document. The relation is dp = rho * g * h. rho is 1000, the gravity fraction uses 981 and 100, and h is 2. The worked difference uses 1000 * 981 * 2 / 100."
+  },
+  "right": {
+    "title": "Studium fixture: same hydrostatic difference",
+    "url": "https://fixture.studium.test/mecanica-fluidos/hydrostatic-second",
+    "text": "Second fixture excerpt, written for the offline test. It repeats dp = rho * g * h with rho 1000, gravity parts 981 and 100, and depth 2. The same product is 1000 * 981 * 2 / 100."
+  }
+}
