@@ -912,7 +912,18 @@ def serve(
     if session is None:
         return 3
     while True:
-        message = read_message(stdin)
+        try:
+            message = read_message(stdin)
+        except (ValueError, UnicodeError, json.JSONDecodeError):
+            write_message(
+                stdout,
+                {
+                    "jsonrpc": "2.0",
+                    "id": None,
+                    "error": {"code": -32700, "message": "parse error"},
+                },
+            )
+            return 1
         if message is None:
             return 0
         response = handle(message, session=session)
@@ -926,7 +937,12 @@ def read_message(stream: BinaryIO) -> dict[str, object] | None:
         return None
     lowered = first.lower()
     if lowered.startswith(b"content-length:"):
-        length = int(first.split(b":", 1)[1].strip())
+        try:
+            length = int(first.split(b":", 1)[1].strip())
+        except ValueError as exc:
+            raise ValueError("bad content length") from exc
+        if length < 0 or length > 32 * 1024 * 1024:
+            raise ValueError("body too large")
         while True:
             line = stream.readline()
             if line in (b"\r\n", b"\n", b""):

@@ -6,6 +6,7 @@ publishes that endpoint with a Cloudflare quick tunnel, which does not need an
 account.
 """
 
+import hashlib
 import hmac
 import json
 import os
@@ -14,6 +15,7 @@ import re
 import secrets
 import shutil
 import signal
+import socket
 import subprocess
 import sys
 import threading
@@ -33,18 +35,71 @@ from studium.mcp.server import (
 )
 
 _MAX_BODY = 32 * 1024 * 1024
+_SESSION_TTL = 60 * 60
+_REQUEST_TIMEOUT = 30.0
+_PUBLIC_TOKEN_REQUIRED = "public MCP requires a bearer token. Pass --token. The token is not printed."
 _TUNNEL_URL = re.compile(r"https://[A-Za-z0-9-]+\.trycloudflare\.com")
 _ALLOWED_ORIGIN_SUFFIXES = (".chatgpt.com", ".openai.com")
 _ALLOWED_ORIGIN_HOSTS = {"chatgpt.com", "openai.com", "chat.openai.com", "localhost", "127.0.0.1", "::1"}
+
+
+def token_configured(token: str | None) -> bool:
+    """A public server needs a non-empty bearer token. The value is never logged."""
+
+    return isinstance(token, str) and token != ""
+
+
+def tokens_equal(presented: str, expected: str) -> bool:
+    """Compare tokens without leaking the secret through an early length check."""
+
+    left = hashlib.sha256(presented.encode("utf-8")).digest()
+    right = hashlib.sha256(expected.encode("utf-8")).digest()
+    return hmac.compare_digest(left, right)
 
 
 @dataclass
 class HttpState:
     session: McpSession
     token: str | None
+    public: bool = False
     stop: threading.Event = field(default_factory=threading.Event)
-    session_ids: set[str] = field(default_factory=set)
+    sessions: dict[str, float] = field(default_factory=dict)
     events: int = 0
+    lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
+    session_ttl: float = _SESSION_TTL
+    request_timeout: float = _REQUEST_TIMEOUT
+
+    def remember_session(self, identifier: str) -> None:
+        with self.lock:
+            self.sessions[identifier] = time.monotonic() + self.session_ttl
+
+    def session_status(self, identifier: str | None) -> str:
+        """Return ``missing``, ``invalid``, ``expired``, or ``ok``."""
+
+        if identifier is None:
+            return "missing"
+        now = time.monotonic()
+        with self.lock:
+            expiry = self.sessions.get(identifier)
+            if expiry is None:
+                return "invalid"
+            if now >= expiry:
+                self.sessions.pop(identifier, None)
+                return "expired"
+            return "ok"
+
+    def drop_session(self, identifier: str) -> str:
+        status = self.session_status(identifier)
+        if status != "ok":
+            return status
+        with self.lock:
+            self.sessions.pop(identifier, None)
+        return "ok"
+
+    def next_event(self) -> int:
+        with self.lock:
+            self.events += 1
+            return self.events
 
 
 class HttpEndpoint:
@@ -131,11 +186,14 @@ def start_http_server(
     default_project: str | None = None,
     port: int = 8765,
     token: str | None = None,
+    public: bool = False,
 ) -> HttpEndpoint | None:
+    if public and not token_configured(token):
+        return None
     session = open_workspace(workspace, default_project)
     if session is None:
         return None
-    state = HttpState(session=session, token=token or None)
+    state = HttpState(session=session, token=token if token_configured(token) else None, public=public)
     httpd = ThreadingHTTPServer(("127.0.0.1", port), _handler(state))
     httpd.daemon_threads = True
     thread = threading.Thread(target=httpd.serve_forever, name="studium-mcp-http", daemon=True)
@@ -152,6 +210,9 @@ def serve_http(
     token: str | None = None,
     public: bool = False,
 ) -> int:
+    if public and not token_configured(token):
+        print(_PUBLIC_TOKEN_REQUIRED, file=sys.stderr)
+        return 1
     binary = shutil.which("cloudflared") if public else None
     if public and binary is None:
         print(missing_cloudflared_text(port), flush=True)
@@ -162,6 +223,7 @@ def serve_http(
             default_project=default_project,
             port=port,
             token=token,
+            public=public,
         )
     except OSError as exc:
         print(f"could not listen on 127.0.0.1:{port}: {exc}", file=sys.stderr)
@@ -332,7 +394,7 @@ def _guard(handler: BaseHTTPRequestHandler, state: HttpState) -> bool:
     if not _origin_allowed(handler.headers.get("Origin")):
         _send_json(handler, 403, {"jsonrpc": "2.0", "id": None, "error": {"code": -32003, "message": "origin rejected"}})
         return False
-    if not _bearer_ok(handler.headers.get("Authorization"), state.token):
+    if not _bearer_ok(handler.headers.get("Authorization"), state):
         handler.send_response(401)
         handler.send_header("WWW-Authenticate", "Bearer")
         handler.send_header("Content-Type", "application/json")
@@ -361,29 +423,41 @@ def _origin_allowed(origin: str | None) -> bool:
     return any(host.endswith(suffix) for suffix in _ALLOWED_ORIGIN_SUFFIXES)
 
 
-def _bearer_ok(header: str | None, token: str | None) -> bool:
-    if not token:
+def _bearer_ok(header: str | None, state: HttpState) -> bool:
+    if state.public and not token_configured(state.token):
+        return False
+    if not token_configured(state.token):
         return True
     if header is None:
         return False
     scheme, separator, rest = header.partition(" ")
     if scheme != "Bearer" or separator != " " or not rest or rest != rest.strip():
         return False
-    return hmac.compare_digest(rest, token)
+    assert state.token is not None
+    return tokens_equal(rest, state.token)
 
 
-def _session_rejected(handler: BaseHTTPRequestHandler, state: HttpState) -> bool:
+def _session_rejected(handler: BaseHTTPRequestHandler, state: HttpState, *, required: bool) -> bool:
     raw = handler.headers.get("Mcp-Session-Id")
-    if raw is None:
+    status = state.session_status(raw)
+    if status == "ok":
         return False
-    if raw in state.session_ids:
+    if status == "missing" and not required:
         return False
-    _send_json(handler, 404, {"jsonrpc": "2.0", "id": None, "error": {"code": -32004, "message": "session not found"}})
+    if status == "missing":
+        _send_json(
+            handler,
+            400,
+            {"jsonrpc": "2.0", "id": None, "error": {"code": -32600, "message": "session id required"}},
+        )
+        return True
+    message = "session expired" if status == "expired" else "session not found"
+    _send_json(handler, 404, {"jsonrpc": "2.0", "id": None, "error": {"code": -32004, "message": message}})
     return True
 
 
 def _get(handler: BaseHTTPRequestHandler, state: HttpState) -> None:
-    if not _guard(handler, state) or _session_rejected(handler, state):
+    if not _guard(handler, state) or _session_rejected(handler, state, required=token_configured(state.token)):
         return
     accept = handler.headers.get("Accept", "")
     if "text/event-stream" not in accept.lower():
@@ -411,13 +485,14 @@ def _delete(handler: BaseHTTPRequestHandler, state: HttpState) -> None:
     if not _guard(handler, state):
         return
     raw = handler.headers.get("Mcp-Session-Id")
-    if raw is None:
+    status = state.drop_session(raw) if raw is not None else "missing"
+    if status == "missing":
         _send_json(handler, 400, {"jsonrpc": "2.0", "id": None, "error": {"code": -32600, "message": "session id required"}})
         return
-    if raw not in state.session_ids:
-        _send_json(handler, 404, {"jsonrpc": "2.0", "id": None, "error": {"code": -32004, "message": "session not found"}})
+    if status != "ok":
+        message = "session expired" if status == "expired" else "session not found"
+        _send_json(handler, 404, {"jsonrpc": "2.0", "id": None, "error": {"code": -32004, "message": message}})
         return
-    state.session_ids.discard(raw)
     handler.send_response(204)
     handler.send_header("Content-Length", "0")
     handler.end_headers()
@@ -450,7 +525,12 @@ def _post(handler: BaseHTTPRequestHandler, state: HttpState) -> None:
     if length < 0 or length > _MAX_BODY:
         _send_json(handler, 413, {"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "body too large"}})
         return
-    body = handler.rfile.read(length) if length else b""
+    try:
+        handler.connection.settimeout(state.request_timeout)
+        body = handler.rfile.read(length) if length else b""
+    except (TimeoutError, socket.timeout):
+        _send_json(handler, 408, {"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "request timeout"}})
+        return
     try:
         loaded = json.loads(body.decode("utf-8"))
     except (UnicodeError, json.JSONDecodeError):
@@ -464,7 +544,7 @@ def _post(handler: BaseHTTPRequestHandler, state: HttpState) -> None:
     initialize_only = bool(messages) and all(
         _is_request(item) and item.get("method") == "initialize" for item in messages
     )
-    if not initialize_only and _session_rejected(handler, state):
+    if not initialize_only and _session_rejected(handler, state, required=token_configured(state.token)):
         return
     if any(item.get("method") != "initialize" for item in requests):
         version = handler.headers.get("MCP-Protocol-Version")
@@ -488,7 +568,7 @@ def _post(handler: BaseHTTPRequestHandler, state: HttpState) -> None:
                 responses.append(response)
                 if message.get("method") == "initialize":
                     new_session = secrets.token_hex(16)
-                    state.session_ids.add(new_session)
+                    state.remember_session(new_session)
             elif _is_notification(message):
                 handle(message, session=state.session)
             elif not _is_client_response(message):
@@ -566,9 +646,9 @@ def _send_sse(
     messages = payload if isinstance(payload, list) else [payload]
     chunks: list[bytes] = []
     for message in messages:
-        state.events += 1
+        event_id = state.next_event()
         encoded = json.dumps(message, ensure_ascii=False)
-        lines = [f"id: {state.events}", "event: message"]
+        lines = [f"id: {event_id}", "event: message"]
         lines.extend(f"data: {line}" for line in encoded.split("\n"))
         lines.append("")
         lines.append("")

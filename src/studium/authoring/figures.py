@@ -71,12 +71,19 @@ import socket
 import subprocess
 import sys
 
-root = pathlib.Path(os.environ["STUDIUM_BOOK"]).resolve()
+work = pathlib.Path.cwd().resolve()
 program = sys.stdin.read()
 
 def _deny(*_args, **_kwargs):
     raise OSError("network is disabled")
 
+for _name in (
+    "system", "popen", "execv", "execve", "execl", "execlp", "execvp", "execvpe", "execlpe",
+    "spawnv", "spawnve", "spawnl", "spawnle", "spawnlp", "spawnlpe", "spawnvp", "spawnvpe",
+    "fork", "forkpty", "posix_spawn", "posix_spawnp",
+):
+    if hasattr(os, _name):
+        setattr(os, _name, _deny)
 socket.socket = _deny
 socket.create_connection = _deny
 socket.getaddrinfo = _deny
@@ -85,16 +92,14 @@ subprocess.run = _deny
 subprocess.call = _deny
 subprocess.check_call = _deny
 subprocess.check_output = _deny
-os.system = _deny
-os.popen = _deny
 
 def _contained(file):
     path = pathlib.Path(file)
     if not path.is_absolute():
-        path = pathlib.Path.cwd() / path
+        path = work / path
     resolved = path.resolve()
     try:
-        resolved.relative_to(root)
+        resolved.relative_to(work)
     except ValueError:
         raise OSError("path leaves the book") from None
     return resolved
@@ -103,26 +108,46 @@ _io_open = io.open
 
 def _open(file, mode="r", *args, **kwargs):
     if isinstance(file, int):
-        return _io_open(file, mode, *args, **kwargs)
-    text_mode = mode if isinstance(mode, str) else "r"
-    target = _contained(file) if any(flag in text_mode for flag in "wax+") else file
-    return _io_open(target, mode, *args, **kwargs)
+        raise OSError("path leaves the book")
+    return _io_open(_contained(file), mode, *args, **kwargs)
 
 io.open = _open
 builtins.open = _open
 _os_open = os.open
-_write_flags = os.O_WRONLY | os.O_RDWR | os.O_APPEND | os.O_CREAT
 
 def _open_os(path, flags, mode=0o777, *, dir_fd=None):
     if dir_fd is not None:
         raise OSError("path leaves the book")
-    target = _contained(path) if flags & _write_flags else path
-    return _os_open(target, flags, mode)
+    return _os_open(_contained(path), flags, mode)
 
 os.open = _open_os
+_blocked_imports = {
+    "_io", "ctypes", "importlib", "multiprocessing", "pty", "pickle", "marshal",
+    "runpy", "shutil", "socket", "subprocess",
+}
+_real_import = builtins.__import__
+
+def _import(name, globals=None, locals=None, fromlist=(), level=0):
+    root_name = name.split(".", 1)[0]
+    if root_name in _blocked_imports:
+        raise ImportError("import is disabled")
+    return _real_import(name, globals, locals, fromlist, level)
+
+_compile = builtins.compile
+_exec = builtins.exec
+builtins.__import__ = _import
+builtins.eval = _deny
+builtins.exec = _deny
+builtins.compile = _deny
+builtins.breakpoint = _deny
 sys.stdin = _io_open(os.devnull)
-code = compile(program, "plot.py", "exec")
-exec(code, {"__name__": "__main__", "__file__": "plot.py"})
+code = _compile(program, "plot.py", "exec")
+safe_builtins = dict(vars(builtins))
+safe_builtins["open"] = _open
+safe_builtins["__import__"] = _import
+for _banned in ("eval", "exec", "compile", "breakpoint"):
+    safe_builtins.pop(_banned, None)
+_exec(code, {"__name__": "__main__", "__file__": "plot.py", "__builtins__": safe_builtins})
 """
 
 

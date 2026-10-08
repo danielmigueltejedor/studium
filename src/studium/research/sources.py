@@ -711,12 +711,7 @@ def _prepare_path(raw: str) -> dict[str, object]:
     if _sensitive(candidate):
         return _error("security.credentials_forbidden", "refusing a credential path")
     if candidate.is_symlink():
-        try:
-            resolved = candidate.resolve()
-        except OSError:
-            return _error("security.symlink_escape", "symlink could not be resolved")
-        if _sensitive(resolved):
-            return _error("security.symlink_escape", "symlink leaves the authorized file")
+        return _error("security.symlink_escape", "intake does not follow symlinks")
     if not candidate.exists():
         return _error("sources.path_not_found", "file does not exist")
     if not candidate.is_file():
