@@ -33,6 +33,13 @@ def test_rust_test_is_checked_only_after_three_passes(tmp_path, monkeypatch):
     assert checked["problem"]["correct"] is True
     assert "verified" not in checked["problem"]
     assert checked["problem"]["status"] == "checked"
+    assert checked["message"] == (
+        "Three identical rustc runs are a reproducibility check, not an independent proof."
+    )
+    assert checked["problem"]["status_text"] == checked["message"]
+    assert checked["problem"]["check_kind"] == "reproducibility"
+    assert "three methods" not in json.dumps(checked).lower()
+    assert "methods" not in checked["problem"]
     assert (root / ".studium" / "state.json").read_bytes() == state_before
     verify = dispatch("studium_verify", {"mode": "full"}, session=session)
     assert verify["released"] is False
@@ -56,6 +63,45 @@ def test_failing_rust_test_stays_unchecked(tmp_path, monkeypatch):
     assert all(run["passed"] is not True or checked["checked"] is False for run in checked["runs"])
     assert "verified" not in checked["problem"]
     assert checked["released"] is False
+    assert (root / ".studium" / "state.json").read_bytes() == state_before
+
+
+def test_comment_only_rust_stays_unchecked_and_assert_eq_can_pass(tmp_path, monkeypatch):
+    session, root = _rust_book(tmp_path)
+    monkeypatch.setattr("urllib.request.urlopen", _explode)
+    comments = (
+        "// The force is mass times acceleration.\n"
+        "// fn main() { assert_eq!(1, 1); }\n"
+        "/* #[test]\nfn hidden() { assert_ne!(1, 2); } */\n"
+    )
+    recorded = _rust_problem(session, "ownership", "Comments are not a calculation.", comments)
+    assert recorded["problem"]["status"] == "unchecked"
+    state_before = (root / ".studium" / "state.json").read_bytes()
+    refused = dispatch("studium_problem_check", {"id": recorded["problem"]["id"]}, session=session)
+    assert refused["status"] == "unchecked"
+    assert refused["checked"] is False
+    assert refused["problem"]["correct"] is False
+    assert refused["problem"]["status"] == "unchecked"
+    assert refused["runs"] == []
+    assert "no test" in refused["message"]
+    assert "only comments" in refused["message"]
+    assert refused["released"] is False
+    assert "verified" not in json.dumps(refused)
+    stored = (root / "problems" / "problems.jsonl").read_text(encoding="utf-8")
+    assert stored.count('"passed":true') == 0
+    assert (root / ".studium" / "state.json").read_bytes() == state_before
+    assert json.loads(state_before)["state"] != "RELEASED"
+
+    passing = "#[test]\nfn holds() {\n    assert_eq!(2 + 2, 4);\n}\n"
+    second = _rust_problem(session, "ownership", "One equality the server can run.", passing)
+    checked = dispatch("studium_problem_check", {"id": second["problem"]["id"]}, session=session)
+    assert checked["status"] == "checked"
+    assert checked["checked"] is True
+    assert checked["problem"]["correct"] is True
+    assert [run["passed"] for run in checked["runs"]] == [True, True, True]
+    assert checked["released"] is False
+    assert checked["project_state"] != "RELEASED"
+    assert "verified" not in json.dumps(checked)
     assert (root / ".studium" / "state.json").read_bytes() == state_before
 
 

@@ -77,14 +77,16 @@ def test_full_outline_renders_in_order_and_labels_a_gap(tmp_path, monkeypatch):
     assert mass_at < first_at < second_at < energy_at < energy_text < study_at < unwritten
     assert r"\chapter{Momentum}" not in tex
     assert GAP_LABEL not in tex
+    assert rendered["status"] == "incomplete"
+    assert rendered["message"] == "The book is incomplete. Write the next unwritten chapter: Momentum."
     assert "This sentence has no opened excerpt." not in tex
     assert rendered["released"] is False
     assert rendered["project_state"] == "SOURCE_DISCOVERY"
     assert rendered["draft_paragraphs"] == ["PAR-0001", "PAR-0002", "PAR-0003"]
-    if rendered["status"] == "rendered":
+    if rendered.get("compile_status") == "rendered":
         assert (root / "latex" / "draft.pdf").read_bytes().startswith(b"%PDF-")
     else:
-        assert rendered["status"] == "compiler_missing"
+        assert rendered.get("compile_status") == "compiler_missing"
         assert not (root / "latex" / "draft.pdf").exists()
     assert (root / ".studium" / "state.json").read_bytes() == state_before
     assert json.loads(state_before)["state"] != "RELEASED"

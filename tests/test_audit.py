@@ -67,13 +67,89 @@ def test_replayed_computation_can_be_audited(tmp_path, monkeypatch):
     assert audited["status"] == "recorded"
     assert audited["prose_added"] is False
     assert audited["audit"]["prose_added"] is False
-    assert audited["audit"]["evidence"]["computation_result"] == "replayed"
+    evidence = audited["audit"]["evidence"]
+    assert evidence["computation_result"] == "COMPUTATION_REPRODUCED"
+    assert evidence["mathematically_verified"] is False
+    assert evidence["academically_reviewed"] is False
+    assert evidence["computation_result"] not in {"mathematically_verified", "academically_reviewed"}
     assert audited["released"] is False
     assert audited["applied"] is False
-    assert "verified" not in json.dumps(audited)
+    assert '"mathematically_verified": true' not in json.dumps(audited)
+    assert '"academically_reviewed": true' not in json.dumps(audited)
     assert text in (root / "draft" / "paragraphs.jsonl").read_text(encoding="utf-8")
     assert (root / ".studium" / "state.json").read_bytes() == state_before
     assert json.loads(state_before)["state"] != "RELEASED"
+
+
+def test_changed_paragraph_or_excerpt_drops_the_audit(tmp_path, monkeypatch):
+    import hashlib
+
+    from studium.authoring.audit import audited_paragraph_ids
+    from studium.storage.records import EXCERPTS, append_jsonl, read_jsonl
+
+    monkeypatch.setattr("urllib.request.urlopen", _explode)
+    session, root = _topic(tmp_path, "historia", "Historia medieval")
+    _section(session)
+    left, right = _two_excerpts(session)
+    first = f"The density is 2. {_TEACH}"
+    second = f"The density equals 2. {_TEACH}"
+    paragraph = _paragraph(session, "tema-1", first, [left, right])
+    other = _paragraph(session, "tema-1", second, [left, right])
+    audited = dispatch(
+        "studium_audit_record",
+        {"target": "tema-1", "kind": "scientific", "excerpts": [left, right]},
+        session=session,
+    )
+    assert audited["status"] == "recorded"
+    assert {paragraph, other} <= audited_paragraph_ids(root)
+    state_before = (root / ".studium" / "state.json").read_bytes()
+    replaced = dispatch(
+        "studium_paragraph_replace",
+        {
+            "id": paragraph,
+            "text": f"The density is 2. {_TEACH} The later sentence still uses the stored quantity.",
+            "excerpts": [left, right],
+        },
+        session=session,
+    )
+    assert replaced["status"] == "replaced"
+    assert replaced["paragraph"]["id"] == paragraph
+    assert paragraph not in audited_paragraph_ids(root)
+    assert other in audited_paragraph_ids(root)
+    reviewed = dispatch("studium_book_review", {}, session=session)
+    assert reviewed["audit_passed"] is False
+    assert reviewed["released"] is False
+    assert any(paragraph in reason for reason in reviewed["reasons"])
+    assert (root / ".studium" / "state.json").read_bytes() == state_before
+    assert json.loads(state_before)["state"] != "RELEASED"
+
+    session_b, root_b = _topic(tmp_path, "historia-b", "Historia medieval")
+    _section(session_b)
+    left_b, right_b = _two_excerpts(session_b)
+    kept = _paragraph(session_b, "tema-1", first, [left_b, right_b])
+    _paragraph(session_b, "tema-1", second, [left_b, right_b])
+    assert (
+        dispatch(
+            "studium_audit_record",
+            {"target": "tema-1", "kind": "scientific", "excerpts": [left_b, right_b]},
+            session=session_b,
+        )["status"]
+        == "recorded"
+    )
+    assert kept in audited_paragraph_ids(root_b)
+    state_b = (root_b / ".studium" / "state.json").read_bytes()
+    current = next(row for row in read_jsonl(root_b / EXCERPTS) if row.get("id") == left_b)
+    changed = dict(current)
+    changed["text"] = str(current.get("text")) + " The opened page now adds another sentence."
+    changed["text_sha256"] = hashlib.sha256(b"excerpt-changed").hexdigest()
+    append_jsonl(root_b / EXCERPTS, changed)
+    assert kept not in audited_paragraph_ids(root_b)
+    reviewed_b = dispatch("studium_book_review", {}, session=session_b)
+    assert reviewed_b["audit_passed"] is False
+    assert reviewed_b["released"] is False
+    assert any(kept in reason for reason in reviewed_b["reasons"])
+    assert (root_b / ".studium" / "state.json").read_bytes() == state_b
+    assert json.loads(state_b)["state"] != "RELEASED"
 
 
 def test_chapter_that_contradicts_a_stored_number_is_rejected(tmp_path, monkeypatch):

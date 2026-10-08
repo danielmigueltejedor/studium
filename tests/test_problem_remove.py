@@ -11,7 +11,7 @@ _PROMPT = "Compute the mass from the stored density."
 
 def test_problem_remove_drops_the_problem_and_leaves_sources(tmp_path, monkeypatch):
     monkeypatch.setattr("urllib.request.urlopen", _explode)
-    session, root = _topic(tmp_path, "fluidos", "Mecánica de fluidos")
+    session, root = _topic(tmp_path, "programacion", "Programación")
     source_id = _source(session, "https://open.example/fluidos")
     excerpt_id = _excerpt(session, source_id, "https://open.example/fluidos", "La página abierta describe la masa.")
     dispatch(

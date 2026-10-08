@@ -1,8 +1,10 @@
+import argparse
 import json
+import re
 
 import pytest
 
-from studium.cli.app import main
+from studium.cli.app import _build_parser, main
 
 _COURSE = [
     "--course",
@@ -66,6 +68,27 @@ def test_blocked_human_exits_2(tmp_path, monkeypatch, capsys):
     assert "state: COURSE_DISCOVERY" in captured.out
     assert "task: TSK-0001 course_discovery" in captured.out
     assert "blocked: yes" in captured.out
+
+
+def test_help_advertises_only_registered_commands(capsys, monkeypatch):
+    registered: set[str] = set()
+    for action in _build_parser()._actions:
+        if isinstance(action, argparse._SubParsersAction):
+            registered = set(action.choices)
+    assert main(["--help"]) == 0
+    default = capsys.readouterr().out
+    monkeypatch.setenv("STUDIUM_ADVANCED", "1")
+    assert main(["--help"]) == 0
+    advanced = capsys.readouterr().out
+    advertised: set[str] = set()
+    for text in (default, advanced):
+        advertised.update(re.findall(r"(?m)^  studium ([a-z][a-z0-9-]*)\b", text))
+    assert advertised
+    assert advertised <= registered
+    for hidden in ("run", "build", "release"):
+        assert hidden not in advertised
+        assert f"studium {hidden}" not in default
+        assert f"studium {hidden}" not in advanced
 
 
 @pytest.mark.parametrize(

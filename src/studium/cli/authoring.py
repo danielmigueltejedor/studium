@@ -377,7 +377,7 @@ def _code(payload: dict[str, object]) -> int:
         return 0
     if status == "gate":
         return EXIT_GATE
-    if status == "compiler_missing":
+    if status == "compiler_missing" or payload.get("compile_status") == "compiler_missing":
         return EXIT_COMPILER
     if status == "project.not_found":
         return 3
