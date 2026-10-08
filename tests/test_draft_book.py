@@ -154,7 +154,7 @@ def test_spanish_draft_uses_boxes_without_internal_ids(tmp_path, monkeypatch):
     assert created["status"] == "created"
     root = tmp_path / "fluidos"
     source_id = _source(session, "https://open.example/fluidos")
-    excerpt_id = _excerpt(session, source_id, "https://open.example/fluidos", "La página abierta describe los fluidos.")
+    excerpt_id = _excerpt(session, source_id, "https://open.example/fluidos", "La página abierta describe los fluidos. 2")
     dispatch(
         "studium_blueprint_store",
         {
@@ -383,7 +383,7 @@ def test_explanation_stays_outside_the_one_worked_problem_box(tmp_path, monkeypa
     assert created["status"] == "created"
     root = tmp_path / "fluidos"
     source_id = _source(session, "https://open.example/fluidos")
-    excerpt_id = _excerpt(session, source_id, "https://open.example/fluidos", "La página abierta describe el balance.")
+    excerpt_id = _excerpt(session, source_id, "https://open.example/fluidos", "La página abierta describe el balance. 2")
     dispatch(
         "studium_blueprint_store",
         {"sections": [{"id": "tema-1", "title": "Continuidad"}]},
@@ -435,7 +435,7 @@ def test_consejo_paragraph_becomes_a_tcolorbox_with_babel_spanish(tmp_path, monk
     assert created["status"] == "created"
     root = tmp_path / "fluidos"
     source_id = _source(session, "https://open.example/fluidos")
-    excerpt_id = _excerpt(session, source_id, "https://open.example/fluidos", "La página abierta describe el balance.")
+    excerpt_id = _excerpt(session, source_id, "https://open.example/fluidos", "La página abierta describe el balance. 2")
     dispatch(
         "studium_blueprint_store",
         {"sections": [{"id": "tema-1", "title": "Continuidad"}]},
@@ -540,7 +540,7 @@ def test_draft_cover_math_code_boxes_and_figure_caption(tmp_path, monkeypatch):
     assert created["status"] == "created"
     root = tmp_path / "programacion"
     source_id = _source(session, "https://open.example/c")
-    excerpt_id = _excerpt(session, source_id, "https://open.example/c", "La página abierta describe el bucle.")
+    excerpt_id = _excerpt(session, source_id, "https://open.example/c", "La página abierta describe el bucle y el caso 2.")
     dispatch(
         "studium_blueprint_store",
         {

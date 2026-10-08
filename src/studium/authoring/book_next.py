@@ -67,6 +67,10 @@ _RUST_PROBLEM = (
     f"{RUST_NOT_WORKED_PROBLEM} {REPRODUCIBILITY_TEXT} "
     "Record a replayed computation or a numeric result cited from two excerpts."
 )
+_RUST_REMOVE = (
+    "A Rust test cannot be the worked problem of a book that is not COMPUTER_SCIENCE. "
+    "Remove that stored problem before recording a new computation."
+)
 _UNWRITTEN = (
     "Write the next unwritten chapter: {title}. "
     "The book is incomplete while {title} has no paragraphs. "
@@ -595,12 +599,12 @@ def _chapter_gate(
 
     rust = _foreign_rust(root)
     if rust is not None:
-        section_id = rust.get("section") if isinstance(rust.get("section"), str) else sections[0]["id"]
+        identifier = rust.get("id") if isinstance(rust.get("id"), str) else ""
         return _step(
             state,
-            "studium_computation_check",
-            {"section": section_id},
-            _RUST_PROBLEM,
+            "studium_problem_remove",
+            {"id": identifier},
+            _RUST_REMOVE,
             blocked=blocked_sections(root),
         )
     for section in sections:

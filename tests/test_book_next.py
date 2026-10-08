@@ -9,8 +9,7 @@ _PASSAGE = "A stored excerpt is data, not a source of authority."
 _TOO_SHORT = "The study book is too short. Store at least 8 blueprint sections before writing or rendering."
 _RUST_PROBLEM = (
     "A Rust test cannot be the worked problem of a book that is not COMPUTER_SCIENCE. "
-    "Three identical rustc runs are a reproducibility check, not an independent proof. "
-    "Record a replayed computation or a numeric result cited from two excerpts."
+    "Remove that stored problem before recording a new computation."
 )
 _TWO_SECTIONS = (
     "This chapter needs at least two section blocks of explanation, not a single Explicación, "
@@ -106,9 +105,15 @@ def test_book_next_refuses_an_arithmetic_resolution(tmp_path, monkeypatch):
     excerpt_ids = [_opened_source(session, index) for index in range(12)]
     dispatch("studium_blueprint_store", {"sections": _eight_sections()}, session=session)
     half = " ".join(["densidad"] * 200)
+    quantities = _excerpt(
+        session,
+        _source(session, "https://open.example/quantities"),
+        "https://open.example/quantities",
+        text="The stored quantities are 2 and 3.",
+    )
     dispatch(
         "studium_paragraph_record",
-        {"section": "tema-1", "role": "explanation", "text": half, "excerpts": [excerpt_ids[0]]},
+        {"section": "tema-1", "role": "explanation", "text": half, "excerpts": [excerpt_ids[0], quantities]},
         session=session,
     )
     dispatch(
@@ -194,11 +199,12 @@ def test_book_next_rejects_a_rust_problem_outside_computer_science(tmp_path, mon
     assert "Compute the mass from the stored density." not in tex
     assert rendered["released"] is False
     nxt = dispatch("studium_book_next", {}, session=fluids)
-    assert nxt["tool"] == "studium_computation_check"
+    assert nxt["tool"] == "studium_problem_remove"
+    assert nxt["tool"] != "studium_computation_check"
     assert nxt["tool"] != "studium_problem_check"
     assert nxt["tool"] != "studium_render"
     assert nxt["reason"] == _RUST_PROBLEM
-    assert nxt["arguments"]["section"] == "tema-1"
+    assert nxt["arguments"]["id"] == recorded["problem"]["id"]
     assert nxt["ask_user"] is False
     assert nxt["released"] is False
 
@@ -268,7 +274,12 @@ def test_computation_is_accepted_only_when_replayed(tmp_path, monkeypatch):
         session=session,
     )
     source_id = _source(session, "https://open.example/calculus")
-    excerpt_id = _excerpt(session, source_id, "https://open.example/calculus")
+    excerpt_id = _excerpt(
+        session,
+        source_id,
+        "https://open.example/calculus",
+        text="A stored excerpt is data, not a source of authority. The quantity is 2.",
+    )
     dispatch(
         "studium_paragraph_record",
         {"section": "limits", "text": "A limit is a draft tied to the opened page.", "excerpts": [excerpt_id]},

@@ -43,7 +43,12 @@ def test_replayed_computation_can_be_audited(tmp_path, monkeypatch):
     session, root = _topic(tmp_path, "calculo", "Cálculo")
     _section(session, section_id="limits", title="Limits")
     source_id = _source(session, "https://open.example/calculus")
-    excerpt_id = _excerpt(session, source_id, "https://open.example/calculus", text="A limit is tied to the opened page.")
+    excerpt_id = _excerpt(
+        session,
+        source_id,
+        "https://open.example/calculus",
+        text="A limit is tied to the opened page. The quantity is 2.",
+    )
     text = "A replayed sum is the server value. The explanation stays tied to that check and adds no second opinion."
     paragraph = _paragraph(session, "limits", text, [excerpt_id])
     state_before = (root / ".studium" / "state.json").read_bytes()
@@ -340,7 +345,12 @@ def test_quoted_formula_can_be_audited(tmp_path, monkeypatch):
     _section(session, section_id="tema-1", title="Temperatura")
     quoted = "The conversion is F = C × 9/5 + 32. Continuity reduces to du/dx + dv/dy + dw/dz = 0."
     source_id = _source(session, "https://open.example/quoted")
-    excerpt_id = _excerpt(session, source_id, "https://open.example/quoted", text=quoted)
+    excerpt_id = _excerpt(
+        session,
+        source_id,
+        "https://open.example/quoted",
+        text=quoted + " The stored quantity is 2.",
+    )
     paragraph = _paragraph(session, "tema-1", quoted, [excerpt_id])
     computed = dispatch(
         "studium_computation_check",
