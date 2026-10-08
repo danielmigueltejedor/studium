@@ -60,9 +60,12 @@ draft PDF
 
 - fewer than 8 blueprint sections
 - fewer than 12 distinct sources (user-provided local files and recorded open-web sources both count; pirate copies and licenses that forbid this use do not)
+- any planned section that is still unwritten or short of the chapter contract
 - a written chapter with fewer than two explanation sections, under 400 words of explanation, or without the lead, one consejo, one worked problem, and one autoficha
 - a worked problem whose resolution is only an arithmetic expression
 - a Rust test used as the worked problem of a book whose profile is not `COMPUTER_SCIENCE`
+
+While one of those is open, the next action is to write that chapter. The reason names the chapter and the missing contract pieces. A partial PDF is not a reason to stop. Render once only after every planned chapter meets the contract. The book stays unreleased.
 
 ## Chapter shape
 
