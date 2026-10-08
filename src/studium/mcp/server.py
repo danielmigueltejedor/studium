@@ -364,6 +364,8 @@ _TOOLS: tuple[dict[str, object], ...] = (
         "description": (
             "Run a stored Rust test 3 times with a timeout and no network. "
             "Record each pass or fail. The problem is checked only when all 3 runs pass. "
+            "A file of only comments is not a test and stays unchecked. "
+            "The source must contain a #[test] function or an assert, assert_eq, or assert_ne. "
             "A numeric problem stays two_witnesses only when the excerpts are independent, and it is not verified. "
             "If rustc or cargo is missing, return compiler_missing and do not pretend the test passed. "
             "Does not fetch URLs and does not move the book to RELEASED."
@@ -654,7 +656,8 @@ _INSTRUCTIONS = (
             "When a blueprint exists, next_action names the empty sections, tells the client to fill them from opened open-licensed text, and tells the client to add checked problems. "
             "Call studium_problem_record with a prompt and either a Rust test or a numeric answer tied to two stored excerpt ids. "
             "studium_problem_check runs a Rust test 3 times with a timeout and no network. "
-            "The problem is checked only when all 3 runs pass. "
+            "The problem is checked only when all 3 runs pass and the source has a #[test] function or an assert, assert_eq, or assert_ne. "
+            "A file of only comments stays unchecked. Three runs of an empty file do not count. "
             "A numeric problem is two_witnesses only when the two excerpts come from different public sources, and it is not verified. "
             "Two excerpts that agree are two_witnesses, not verified and not absolute truth. "
             "A model-written solution is not correct until the check passes. "
