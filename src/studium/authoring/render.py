@@ -13,7 +13,6 @@ from studium.authoring.blueprint import current_sections
 from studium.authoring.excerpts import excerpts_by_id
 from studium.authoring.figures import figure_gap, figures_in_section
 from studium.authoring.paragraphs import GAP_LABEL, supported_paragraphs
-from studium.authoring.section_blocks import blocked_ids
 from studium.authoring.support import corroboration_for_excerpts, supported_drafts
 from studium.domain.profiles import BOOK_TOPIC
 from studium.research.public_sources import bibliography_counts
@@ -166,6 +165,7 @@ def render_draft(root: Path) -> dict[str, object]:
 
     engine = find_engine()
     relative_tex = _relative(root, tex_path)
+    unwritten = _first_unwritten_title(root)
     body = {
         "tex": relative_tex,
         "pdf": None,
@@ -178,24 +178,46 @@ def render_draft(root: Path) -> dict[str, object]:
         ],
     }
     if engine is None:
-        return {
-            "status": "compiler_missing",
-            "message": (
-                "no LaTeX engine on PATH (tectonic or pdflatex). "
-                "Wrote the .tex draft. No PDF was created."
-            ),
-            **body,
-        }
+        message = (
+            "no LaTeX engine on PATH (tectonic or pdflatex). "
+            "Wrote the .tex draft. No PDF was created."
+        )
+        return _render_status(body, status="compiler_missing", message=message, unwritten=unwritten)
     compiled, detail = _compile(engine, tex_path, tex_path.parent)
     if compiled and _is_pdf(pdf_path):
         body["pdf"] = _relative(root, pdf_path)
-        return {"status": "rendered", "message": "compiled a DRAFT PDF", **body}
+        return _render_status(body, status="rendered", message="compiled a DRAFT PDF", unwritten=unwritten)
     if pdf_path.exists():
         pdf_path.unlink()
     message = "the LaTeX engine failed. Wrote the .tex draft. No PDF was created."
     if detail:
         message = f"{message} {detail}"
-    return {"status": "render.compile_failed", "message": message, **body}
+    return _render_status(body, status="render.compile_failed", message=message, unwritten=unwritten)
+
+
+def _render_status(
+    body: dict[str, object],
+    *,
+    status: str,
+    message: str,
+    unwritten: str | None,
+) -> dict[str, object]:
+    """A compiled draft with an unwritten chapter is incomplete, not finished."""
+
+    if unwritten is None:
+        return {"status": status, "message": message, **body}
+    note = f"The book is incomplete. Write the next unwritten chapter: {unwritten}."
+    if status != "rendered":
+        note = f"{note} {message}"
+    return {"status": "incomplete", "message": note, "compile_status": status, **body}
+
+
+def _first_unwritten_title(root: Path) -> str | None:
+    covered = {record.get("section") for record in supported_paragraphs(root)}
+    for section in current_sections(root):
+        if section["id"] not in covered:
+            return _display_title(section["title"])
+    return None
 
 
 def find_engine() -> str | None:
@@ -309,6 +331,7 @@ def _copy(language: str) -> dict[str, str]:
             "blueprint": "Esquema",
             "footer": "Borrador",
             "gap": "Esta sección está vacía.",
+            "unwritten": "todavía no está escrito",
             "empty": "Esta parte del borrador aún no tiene material.",
             "blocked": "Bloqueado: no hay un segundo extracto abierto independiente ni una comprobación rehecha.",
             "purpose": "Consejo",
@@ -349,6 +372,7 @@ def _copy(language: str) -> dict[str, str]:
         "blueprint": "Blueprint",
         "footer": "DRAFT",
         "gap": GAP_LABEL,
+        "unwritten": "not written yet",
         "empty": _EMPTY_PIECE,
         "blocked": "Blocked: no second independent open excerpt and no replayed check.",
         "purpose": "Tip",
@@ -371,6 +395,15 @@ def _copy(language: str) -> dict[str, str]:
         "open_supplement": "Open supplement:",
         "not_guide": "Not the guide bibliography.",
     }
+
+
+def _unwritten_lines(titles: list[str], copy: dict[str, str]) -> list[str]:
+    if not titles:
+        return ["", r"\noindent " + latex_escape(copy["empty"])]
+    lines: list[str] = []
+    for title in titles:
+        lines.extend(["", r"\noindent " + latex_escape(f"{title}: {copy['unwritten']}")])
+    return lines
 
 
 def _display_title(title: str) -> str:
@@ -445,7 +478,6 @@ def _document(root: Path) -> str:
     excerpts = excerpts_by_id(root)
     counts = bibliography_counts(root)
     book = _book_name(root)
-    blocked = blocked_ids(root)
     by_section: dict[str, list[dict[str, object]]] = {}
     for paragraph in paragraphs:
         section = paragraph.get("section")
@@ -476,16 +508,15 @@ def _document(root: Path) -> str:
                 r"\noindent " + latex_escape(copy["empty"]),
             ]
         )
+    unwritten: list[str] = []
     for section in sections:
-        lines.extend(["", r"\chapter{" + latex_escape(_display_title(section["title"])) + "}"])
         section_paragraphs = by_section.get(section["id"], [])
+        title = _display_title(section["title"])
         if not section_paragraphs:
-            lines.extend(["", r"\noindent " + latex_escape(copy["gap"])])
-            if section["id"] in blocked:
-                lines.extend(["", r"\noindent " + latex_escape(copy["blocked"])])
-            lines.extend(_figure_lines(root, section["id"], copy))
-        else:
-            lines.extend(_chapter_lines(root, section["id"], section_paragraphs, copy, language))
+            unwritten.append(title)
+            continue
+        lines.extend(["", r"\chapter{" + latex_escape(title) + "}"])
+        lines.extend(_chapter_lines(root, section["id"], section_paragraphs, copy, language))
     lines.extend(
         [
             r"\appendix",
@@ -502,7 +533,11 @@ def _document(root: Path) -> str:
     lines.extend(
         [
             r"\chapter{" + latex_escape(copy["study"]) + "}",
-            r"\noindent " + latex_escape(copy["empty"]),
+        ]
+    )
+    lines.extend(_unwritten_lines(unwritten, copy))
+    lines.extend(
+        [
             r"\backmatter",
             r"\begin{thebibliography}{99}",
         ]

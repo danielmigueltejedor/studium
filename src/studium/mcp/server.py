@@ -128,6 +128,8 @@ _TOOLS: tuple[dict[str, object], ...] = (
             "under 400 words of explanation, a missing lead, consejo, worked problem, or autoficha, "
             "a worked problem's resolution is only an arithmetic expression, or a Rust test is the worked problem "
             "of a book that is not COMPUTER_SCIENCE. "
+            "Do not return render as completion while any blueprint chapter has no paragraphs. "
+            "The next action is to write that unwritten chapter by name. "
             "User-provided local sources and open-web sources both count. Pirate copies and forbidden licenses do not. "
             "The order is write, then audit, then contradiction scan, then review, then render. "
             "Each chapter is a short lead, several paragraphs of explanation as body text, at most one consejo, "
