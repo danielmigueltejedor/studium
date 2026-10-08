@@ -424,6 +424,79 @@ def test_verify_still_refuses_release(tmp_path, monkeypatch):
     assert (root / ".studium" / "state.json").read_bytes() == state_before
 
 
+def test_one_written_chapter_and_one_empty_chapter_is_not_render(tmp_path, monkeypatch):
+    monkeypatch.setattr("urllib.request.urlopen", _explode)
+    session, root = _topic(tmp_path, "historia", "Historia medieval")
+    excerpts = [_opened_source(session, index) for index in range(12)]
+    sections = [
+        {"id": "historia", "title": "Historia"},
+        {"id": "sql", "title": "SQL"},
+        *[{"id": f"tema-{index}", "title": f"Tema {index}"} for index in range(3, 9)],
+    ]
+    dispatch("studium_blueprint_store", {"sections": sections}, session=session)
+    half = " ".join(["density"] * 200)
+    dispatch(
+        "studium_paragraph_record",
+        {"section": "historia", "role": "purpose", "text": "This chapter opens the history.", "excerpts": [excerpts[0]]},
+        session=session,
+    )
+    dispatch(
+        "studium_paragraph_record",
+        {"section": "historia", "role": "explanation", "text": half, "excerpts": [excerpts[0]]},
+        session=session,
+    )
+    dispatch(
+        "studium_paragraph_record",
+        {"section": "historia", "role": "explanation", "text": half + " continued", "excerpts": [excerpts[1]]},
+        session=session,
+    )
+    dispatch(
+        "studium_paragraph_record",
+        {"section": "historia", "role": "consejo", "text": "Keep the later chapters in the plan.", "excerpts": [excerpts[0]]},
+        session=session,
+    )
+    dispatch(
+        "studium_paragraph_record",
+        {"section": "historia", "role": "self_check", "text": "Name the next unwritten chapter.", "excerpts": [excerpts[0]]},
+        session=session,
+    )
+    witnessed = dispatch(
+        "studium_problem_record",
+        {
+            "section": "historia",
+            "prompt": "What do the two pages report?",
+            "expected": "4",
+            "excerpts": [excerpts[2], excerpts[3]],
+        },
+        session=session,
+    )
+    assert witnessed["problem"]["status"] == "two_witnesses"
+    nxt = dispatch("studium_book_next", {}, session=session)
+    assert nxt["tool"] == "studium_paragraph_record"
+    assert nxt["tool"] != "studium_render"
+    assert nxt["arguments"]["section"] == "sql"
+    assert nxt["reason"] == (
+        "Write the next unwritten chapter: SQL. "
+        "The book is incomplete while SQL has no paragraphs. "
+        "Do not render it as finished."
+    )
+    assert nxt["released"] is False
+    rendered = dispatch("studium_render", {}, session=session)
+    tex = (root / "latex" / "draft.tex").read_text(encoding="utf-8")
+    body = tex.split(r"\appendix", 1)[0]
+    assert r"\chapter{SQL}" not in tex
+    assert "SQL" not in body
+    assert "SQL: not written yet" in tex
+    assert tex.index("Study plan") < tex.index("SQL: not written yet")
+    assert rendered["status"] == "incomplete"
+    assert rendered["message"] == "The book is incomplete. Write the next unwritten chapter: SQL."
+    assert rendered["released"] is False
+    assert rendered["project_state"] != "RELEASED"
+    again = dispatch("studium_book_next", {}, session=session)
+    assert again["tool"] != "studium_render"
+    assert again["reason"] == nxt["reason"]
+
+
 def test_client_instructions_draft_without_asking_or_releasing():
     instructions = handle({"jsonrpc": "2.0", "id": 1, "method": "initialize"})["result"]["instructions"]
     assert "Call studium_book_next and perform that tool call." in instructions

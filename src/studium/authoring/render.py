@@ -13,7 +13,6 @@ from studium.authoring.blueprint import current_sections
 from studium.authoring.excerpts import excerpts_by_id
 from studium.authoring.figures import figure_gap, figures_in_section
 from studium.authoring.paragraphs import GAP_LABEL, supported_paragraphs
-from studium.authoring.section_blocks import blocked_ids
 from studium.authoring.support import corroboration_for_excerpts, supported_drafts
 from studium.domain.profiles import BOOK_TOPIC
 from studium.research.public_sources import bibliography_counts
@@ -166,6 +165,7 @@ def render_draft(root: Path) -> dict[str, object]:
 
     engine = find_engine()
     relative_tex = _relative(root, tex_path)
+    unwritten = _first_unwritten_title(root)
     body = {
         "tex": relative_tex,
         "pdf": None,
@@ -178,24 +178,46 @@ def render_draft(root: Path) -> dict[str, object]:
         ],
     }
     if engine is None:
-        return {
-            "status": "compiler_missing",
-            "message": (
-                "no LaTeX engine on PATH (tectonic or pdflatex). "
-                "Wrote the .tex draft. No PDF was created."
-            ),
-            **body,
-        }
+        message = (
+            "no LaTeX engine on PATH (tectonic or pdflatex). "
+            "Wrote the .tex draft. No PDF was created."
+        )
+        return _render_status(body, status="compiler_missing", message=message, unwritten=unwritten)
     compiled, detail = _compile(engine, tex_path, tex_path.parent)
     if compiled and _is_pdf(pdf_path):
         body["pdf"] = _relative(root, pdf_path)
-        return {"status": "rendered", "message": "compiled a DRAFT PDF", **body}
+        return _render_status(body, status="rendered", message="compiled a DRAFT PDF", unwritten=unwritten)
     if pdf_path.exists():
         pdf_path.unlink()
     message = "the LaTeX engine failed. Wrote the .tex draft. No PDF was created."
     if detail:
         message = f"{message} {detail}"
-    return {"status": "render.compile_failed", "message": message, **body}
+    return _render_status(body, status="render.compile_failed", message=message, unwritten=unwritten)
+
+
+def _render_status(
+    body: dict[str, object],
+    *,
+    status: str,
+    message: str,
+    unwritten: str | None,
+) -> dict[str, object]:
+    """A compiled draft with an unwritten chapter is incomplete, not finished."""
+
+    if unwritten is None:
+        return {"status": status, "message": message, **body}
+    note = f"The book is incomplete. Write the next unwritten chapter: {unwritten}."
+    if status != "rendered":
+        note = f"{note} {message}"
+    return {"status": "incomplete", "message": note, "compile_status": status, **body}
+
+
+def _first_unwritten_title(root: Path) -> str | None:
+    covered = {record.get("section") for record in supported_paragraphs(root)}
+    for section in current_sections(root):
+        if section["id"] not in covered:
+            return _display_title(section["title"])
+    return None
 
 
 def find_engine() -> str | None:
@@ -238,6 +260,583 @@ def latex_escape(value: str) -> str:
             parts.append(character)
     flush_math()
     return "".join(parts)
+
+
+_ASCII_OPERATORS = set("=+-*/<>()[]{}^_|")
+_STOP_LETTERS = set("yao")
+_LISTINGS_LANGUAGE = {
+    "python": "Python",
+    "py": "Python",
+    "c": "C",
+    "h": "C",
+    "cpp": "C++",
+    "c++": "C++",
+    "cc": "C++",
+    "cxx": "C++",
+    "java": "Java",
+    "sql": "SQL",
+    "html": "HTML",
+    "xml": "XML",
+    "tex": "TeX",
+    "latex": "TeX",
+    "bash": "bash",
+    "sh": "sh",
+    "shell": "bash",
+    "r": "R",
+    "ruby": "Ruby",
+    "rb": "Ruby",
+    "perl": "Perl",
+    "php": "PHP",
+    "lua": "Lua",
+    "haskell": "Haskell",
+    "hs": "Haskell",
+    "matlab": "Matlab",
+    "rust": "Rust",
+    "rs": "Rust",
+    "go": "Go",
+    "golang": "Go",
+    "js": "JavaScript",
+    "javascript": "JavaScript",
+    "typescript": "JavaScript",
+    "ts": "JavaScript",
+}
+_PASS_ENVS = (
+    "equation*",
+    "align*",
+    "gather*",
+    "multline*",
+    "flalign*",
+    "eqnarray*",
+    "equation",
+    "align",
+    "gather",
+    "multline",
+    "flalign",
+    "eqnarray",
+    "lstlisting",
+    "verbatim",
+    "Verbatim",
+    "minted",
+)
+_MATH_ENVS = frozenset(
+    {
+        "equation*",
+        "align*",
+        "gather*",
+        "multline*",
+        "flalign*",
+        "eqnarray*",
+        "equation",
+        "align",
+        "gather",
+        "multline",
+        "flalign",
+        "eqnarray",
+    }
+)
+_FENCE_OPEN = re.compile(r"^[ ]{0,3}(`{3,}|~{3,})[ \t]*([A-Za-z0-9_+#.\-]*)[ \t]*$")
+_ACCENTS = {
+    "á": r"\'a",
+    "é": r"\'e",
+    "í": r"\'i",
+    "ó": r"\'o",
+    "ú": r"\'u",
+    "à": r"\`a",
+    "è": r"\`e",
+    "ì": r"\`i",
+    "ò": r"\`o",
+    "ù": r"\`u",
+    "ä": r"\"a",
+    "ë": r"\"e",
+    "ï": r"\"i",
+    "ö": r"\"o",
+    "ü": r"\"u",
+    "ñ": r"\~n",
+    "Ñ": r"\~N",
+    "Á": r"\'A",
+    "É": r"\'E",
+    "Í": r"\'I",
+    "Ó": r"\'O",
+    "Ú": r"\'U",
+    "Ü": r"\"U",
+    "ç": r"\c{c}",
+    "Ç": r"\c{C}",
+    "¿": "?`",
+    "¡": "!`",
+}
+_ESCAPE_DELIMS = (("(*@", "@*)"), ("(#@", "@#)"), ("(|@", "@|)"), ("[<@", "@>]"))
+_BOX_STYLE = {
+    "consejo": "studiumtip",
+    "definition": "studiumdef",
+    "worked": "studiumworked",
+    "self_check": "studiumcheck",
+}
+_FUNC_WORDS = frozenset(
+    {"sin", "cos", "tan", "log", "ln", "exp", "sqrt", "lim", "max", "min", "sum", "det", "gcd"}
+)
+
+
+def render_text_run(value: str) -> str:
+    """Escape prose, keep explicit math, and wrap Unicode formulas in math mode."""
+
+    text = value.replace("\r\n", "\n").replace("\r", "\n")
+    explicit = _explicit_spans(text)
+    formulas = _formula_spans(text, explicit)
+    events = [(start, end, tex) for start, end, tex in explicit]
+    events.extend((start, end, _formula_tex(text[start:end])) for start, end in formulas)
+    events.sort()
+    parts: list[str] = []
+    cursor = 0
+    for start, end, tex in events:
+        if start < cursor:
+            continue
+        if start > cursor:
+            parts.append(latex_escape(text[cursor:start]))
+        parts.append(tex)
+        cursor = end
+    if cursor < len(text):
+        parts.append(latex_escape(text[cursor:]))
+    return "".join(parts)
+
+
+def emit_prose(value: str, *, italic: bool = False) -> list[str]:
+    """Turn stored paragraphs into paragraphs, display math, and listings."""
+
+    text = value.replace("\r\n", "\n").replace("\r", "\n")
+    lines: list[str] = []
+    text_buf: list[str] = []
+
+    def flush() -> None:
+        if not text_buf:
+            return
+        chunk = "".join(text_buf)
+        text_buf.clear()
+        paragraphs = [part.strip() for part in re.split(r"\n\s*\n", chunk) if part.strip()]
+        for paragraph in paragraphs:
+            rendered = render_text_run(paragraph)
+            if _pure_inline_formula(paragraph, rendered):
+                inner = rendered.strip()[2:-2].strip()
+                lines.append("\\[\n" + inner + "\n\\]")
+                continue
+            if italic:
+                lines.append(r"\noindent\textit{" + rendered + "}")
+            else:
+                lines.append(rendered)
+
+    for kind, payload, extra in _split_blocks(text):
+        if kind == "text":
+            text_buf.append(payload)
+            continue
+        flush()
+        if kind == "code":
+            lines.extend(_listing_lines(payload, extra))
+        else:
+            lines.append(payload)
+    flush()
+    return lines
+
+
+def _pure_inline_formula(original: str, rendered: str) -> bool:
+    if re.search(r"\\\(|\\\[|(?<!\\)\$", original):
+        return False
+    return re.fullmatch(r"\\\(.+\\\)", rendered.strip(), flags=re.DOTALL) is not None
+
+
+def _explicit_spans(text: str) -> list[tuple[int, int, str]]:
+    spans: list[tuple[int, int, str]] = []
+    index = 0
+    while index < len(text):
+        found = _match_explicit(text, index)
+        if found is None:
+            index += 1
+            continue
+        spans.append(found)
+        index = found[1]
+    return spans
+
+
+def _match_explicit(text: str, index: int) -> tuple[int, int, str] | None:
+    if text.startswith("\\(", index):
+        close = text.find("\\)", index + 2)
+        if close != -1:
+            inner = _math_chars(text[index + 2 : close])
+            return index, close + 2, "\\(" + inner + "\\)"
+    if text.startswith("\\[", index):
+        close = text.find("\\]", index + 2)
+        if close != -1:
+            inner = _math_chars(text[index + 2 : close]).strip()
+            return index, close + 2, "\\[\n" + inner + "\n\\]"
+    if text.startswith("$$", index):
+        close = text.find("$$", index + 2)
+        if close != -1:
+            inner = _math_chars(text[index + 2 : close]).strip()
+            return index, close + 2, "\\[\n" + inner + "\n\\]"
+    if text[index] == "`":
+        close = text.find("`", index + 1)
+        if close > index + 1 and "\n" not in text[index + 1 : close]:
+            return index, close + 1, _inline_code(text[index + 1 : close])
+    if text[index] == "$" and not text.startswith("$$", index):
+        close = text.find("$", index + 1)
+        if close != -1 and _dollar_ok(text[index + 1 : close]):
+            inner = _math_chars(text[index + 1 : close])
+            return index, close + 1, "\\(" + inner + "\\)"
+    return None
+
+
+def _dollar_ok(inner: str) -> bool:
+    if not inner.strip() or "\n" in inner or len(inner) > 300:
+        return False
+    if inner.lstrip()[:1].isdigit() and "=" not in inner and "\\" not in inner:
+        return False
+    if any(character in _MATH for character in inner) or re.search(r"[=^_\\]", inner):
+        return True
+    if re.search(r"[A-Za-z]{3,}", inner):
+        return False
+    return re.fullmatch(r"[A-Za-z0-9 +\-*/().,^_]+", inner) is not None and bool(
+        re.search(r"[A-Za-z0-9]", inner)
+    )
+
+
+def _math_chars(text: str) -> str:
+    return "".join(_MATH.get(character, character) for character in text)
+
+
+def _formula_tex(span: str) -> str:
+    parts: list[str] = []
+    for character in span:
+        mapped = _MATH.get(character)
+        if mapped is not None:
+            parts.append(mapped)
+            continue
+        if character == "%":
+            parts.append(r"\%")
+        elif character == "#":
+            parts.append(r"\#")
+        elif character == "&":
+            parts.append(r"\&")
+        elif character == "\\":
+            parts.append(r"\backslash ")
+        else:
+            parts.append(character)
+    return "\\(" + "".join(parts) + "\\)"
+
+
+def _formula_spans(text: str, blocked: list[tuple[int, int, str]]) -> list[tuple[int, int]]:
+    tokens = _tokenize(text)
+    if not tokens:
+        return []
+    include = [False] * len(tokens)
+
+    def blocked_token(token_index: int) -> bool:
+        start, end, _kind = tokens[token_index]
+        return any(start < stop and end > begin for begin, stop, _tex in blocked)
+
+    def takeable(token_index: int, formula_side: tuple[int, int, str] | None, *, adjacent: bool) -> bool:
+        if blocked_token(token_index):
+            return False
+        start, end, kind = tokens[token_index]
+        if kind in {"math", "op", "num"}:
+            return True
+        if kind != "word" or end - start != 1:
+            return False
+        if adjacent or (formula_side is not None and formula_side[2] == "op"):
+            return True
+        return text[start] not in _STOP_LETTERS
+
+    def next_index(current: int, direction: int) -> int | None:
+        nxt = current + direction
+        if nxt < 0 or nxt >= len(tokens):
+            return None
+        _start, _end, kind = tokens[nxt]
+        if kind == "space":
+            if not _one_space(text, tokens[nxt]):
+                return None
+            beyond = nxt + direction
+            if beyond < 0 or beyond >= len(tokens):
+                return None
+            if takeable(beyond, tokens[current], adjacent=False):
+                return beyond
+            return None
+        if takeable(nxt, tokens[current], adjacent=True):
+            return nxt
+        return None
+
+    for seed, token in enumerate(tokens):
+        if token[2] != "math" or blocked_token(seed):
+            continue
+        include[seed] = True
+        left = seed
+        while True:
+            nxt = next_index(left, -1)
+            if nxt is None:
+                break
+            for cursor in range(nxt, left + 1):
+                include[cursor] = True
+            left = nxt
+        right = seed
+        while True:
+            nxt = next_index(right, 1)
+            if nxt is None:
+                break
+            for cursor in range(right, nxt + 1):
+                include[cursor] = True
+            right = nxt
+    spans: list[tuple[int, int]] = []
+    index = 0
+    while index < len(tokens):
+        if not include[index]:
+            index += 1
+            continue
+        start = tokens[index][0]
+        end = tokens[index][1]
+        cursor = index + 1
+        while cursor < len(tokens) and include[cursor]:
+            end = tokens[cursor][1]
+            cursor += 1
+        if any(tokens[item][2] == "math" for item in range(index, cursor)):
+            spans.append((start, end))
+        index = cursor
+    return spans
+
+
+def _tokenize(text: str) -> list[tuple[int, int, str]]:
+    tokens: list[tuple[int, int, str]] = []
+    index = 0
+    while index < len(text):
+        character = text[index]
+        if character.isascii() and character.isalpha():
+            end = index + 1
+            while end < len(text) and text[end].isascii() and text[end].isalpha():
+                end += 1
+            tokens.append((index, end, "word"))
+            index = end
+            continue
+        if character.isdigit():
+            end = index + 1
+            while end < len(text) and text[end].isdigit():
+                end += 1
+            if end < len(text) and text[end] == "." and end + 1 < len(text) and text[end + 1].isdigit():
+                end += 1
+                while end < len(text) and text[end].isdigit():
+                    end += 1
+            tokens.append((index, end, "num"))
+            index = end
+            continue
+        if character in " \t":
+            end = index + 1
+            while end < len(text) and text[end] in " \t":
+                end += 1
+            tokens.append((index, end, "space"))
+            index = end
+            continue
+        if character in _MATH:
+            tokens.append((index, index + 1, "math"))
+            index += 1
+            continue
+        if character in _ASCII_OPERATORS:
+            tokens.append((index, index + 1, "op"))
+            index += 1
+            continue
+        tokens.append((index, index + 1, "other"))
+        index += 1
+    return tokens
+
+
+def _one_space(text: str, token: tuple[int, int, str]) -> bool:
+    start, end, kind = token
+    return kind == "space" and end == start + 1 and text[start] == " "
+
+
+def _split_blocks(text: str) -> list[tuple[str, str, str]]:
+    blocks: list[tuple[str, str, str]] = []
+    buf: list[str] = []
+    index = 0
+
+    def flush() -> None:
+        if buf:
+            blocks.append(("text", "".join(buf), ""))
+            buf.clear()
+
+    while index < len(text):
+        if _line_start(text, index):
+            fence = _read_fence(text, index)
+            if fence is not None:
+                flush()
+                code, language, index = fence
+                blocks.append(("code", code, language))
+                continue
+        env = _read_env(text, index)
+        if env is not None:
+            flush()
+            kind, payload, index = env
+            blocks.append((kind, payload, ""))
+            continue
+        if text.startswith("\\[", index):
+            close = text.find("\\]", index + 2)
+            if close != -1:
+                flush()
+                inner = _math_chars(text[index + 2 : close]).strip()
+                blocks.append(("display", "\\[\n" + inner + "\n\\]", ""))
+                index = close + 2
+                continue
+        if text.startswith("$$", index):
+            close = text.find("$$", index + 2)
+            if close != -1:
+                flush()
+                inner = _math_chars(text[index + 2 : close]).strip()
+                blocks.append(("display", "\\[\n" + inner + "\n\\]", ""))
+                index = close + 2
+                continue
+        buf.append(text[index])
+        index += 1
+    flush()
+    return blocks
+
+
+def _line_start(text: str, index: int) -> bool:
+    return index == 0 or text[index - 1] == "\n"
+
+
+def _read_fence(text: str, index: int) -> tuple[str, str, int] | None:
+    line_end = text.find("\n", index)
+    if line_end == -1:
+        line = text[index:]
+        line_end = len(text)
+    else:
+        line = text[index:line_end]
+    match = _FENCE_OPEN.match(line)
+    if match is None:
+        return None
+    marker = match.group(1)
+    language = match.group(2)
+    close_pattern = re.compile(r"^[ ]{0,3}" + re.escape(marker[0]) + "{" + str(len(marker)) + r",}[ \t]*$")
+    cursor = line_end + 1
+    while cursor <= len(text):
+        next_end = text.find("\n", cursor)
+        if next_end == -1:
+            closing = text[cursor:]
+            next_end = len(text)
+            newline = 0
+        else:
+            closing = text[cursor:next_end]
+            newline = 1
+        if close_pattern.match(closing):
+            return text[line_end + 1 : cursor], language, next_end + newline
+        if next_end >= len(text):
+            break
+        cursor = next_end + 1
+    return None
+
+
+def _read_env(text: str, index: int) -> tuple[str, str, int] | None:
+    if not text.startswith("\\begin{", index):
+        return None
+    for name in _PASS_ENVS:
+        token = "\\begin{" + name + "}"
+        if not text.startswith(token, index):
+            continue
+        end_token = "\\end{" + name + "}"
+        close = text.find(end_token, index + len(token))
+        if close == -1:
+            return None
+        end = close + len(end_token)
+        raw = text[index:end]
+        if name in _MATH_ENVS:
+            return "display", _math_chars(raw), end
+        return "display", raw, end
+    return None
+
+
+def _inline_code(code: str) -> str:
+    return r"\texttt{" + _texttt(code) + "}"
+
+
+def _texttt(code: str) -> str:
+    parts: list[str] = []
+    for character in code:
+        if character in _LATEX:
+            parts.append(_LATEX[character])
+        elif character in _ACCENTS:
+            parts.append("{" + _ACCENTS[character] + "}")
+        elif character in _MATH:
+            parts.append(r"\ensuremath{" + _MATH[character] + "}")
+        elif ord(character) < 32 and character != "\t":
+            continue
+        elif ord(character) > 255:
+            parts.append(f"{{U+{ord(character):04X}}}")
+        else:
+            parts.append(character)
+    return "".join(parts)
+
+
+def _listing_lines(code: str, language: str) -> list[str]:
+    body, escape = _listing_body(code)
+    options = ["style=studium"]
+    mapped = _LISTINGS_LANGUAGE.get(language.strip().lower())
+    if mapped:
+        options.append("language={" + mapped + "}")
+    if escape is not None:
+        begin, end = escape
+        options.append("escapeinside={" + begin + "}{" + end + "}")
+    return [
+        r"\begin{lstlisting}[" + ",".join(options) + "]",
+        body,
+        r"\end{lstlisting}",
+    ]
+
+
+def _listing_body(code: str) -> tuple[str, tuple[str, str] | None]:
+    normalized = code.replace("\r\n", "\n").replace("\r", "\n")
+    if normalized.endswith("\n"):
+        normalized = normalized[:-1]
+    needs_escape = any(ord(character) > 127 for character in normalized) or r"\end{lstlisting}" in normalized
+    if not needs_escape:
+        return normalized, None
+    begin, end = _escape_delimiters(normalized)
+    parts: list[str] = []
+    for character in normalized:
+        if character == "\n" or character == "\t" or 32 <= ord(character) < 127:
+            parts.append(character)
+            continue
+        parts.append(begin + _listing_token(character) + end)
+    body = "".join(parts).replace(
+        r"\end{lstlisting}",
+        begin + r"\textbackslash{}end\{lstlisting\}" + end,
+    )
+    return body, (begin, end)
+
+
+def _escape_delimiters(code: str) -> tuple[str, str]:
+    for begin, end in _ESCAPE_DELIMS:
+        if begin not in code and end not in code:
+            return begin, end
+    return _ESCAPE_DELIMS[-1]
+
+
+def _listing_token(character: str) -> str:
+    accent = _ACCENTS.get(character)
+    if accent is not None:
+        return "{" + accent + "}"
+    mapped = _MATH.get(character)
+    if mapped is not None:
+        return r"\ensuremath{" + mapped + "}"
+    return f"{{U+{ord(character):04X}}}"
+
+
+def _formula_line(text: str) -> str:
+    stripped = text.strip()
+    if not stripped:
+        return ""
+    if re.search(r"\\\(|\\\[|\\begin\{", stripped):
+        return render_text_run(stripped)
+    return _formula_tex(stripped)
+
+
+def _looks_like_expression(text: str) -> bool:
+    for word in re.findall(r"[A-Za-z]+", text):
+        if len(word) >= 3 and word.lower() not in _FUNC_WORDS:
+            return False
+    return bool(re.search(r"[=+\-*/^_\\0-9]", text) or any(character in _MATH for character in text))
 
 
 _TEMA_PREFIX = re.compile(r"(?i)^(?:tema\s+\d+\s*:\s*)+")
@@ -309,6 +908,7 @@ def _copy(language: str) -> dict[str, str]:
             "blueprint": "Esquema",
             "footer": "Borrador",
             "gap": "Esta sección está vacía.",
+            "unwritten": "todavía no está escrito",
             "empty": "Esta parte del borrador aún no tiene material.",
             "blocked": "Bloqueado: no hay un segundo extracto abierto independiente ni una comprobación rehecha.",
             "purpose": "Consejo",
@@ -316,8 +916,11 @@ def _copy(language: str) -> dict[str, str]:
             "worked": "Problema resuelto",
             "self_check": "Autoficha",
             "figure_gap": "Esta figura no está comprobada. El dibujo se omite.",
-            "science": "Una figura no demuestra la ciencia.",
             "caption": "La cifra del pie sigue sin comprobar.",
+            "subtitle": "Apuntes de trabajo",
+            "status": "Borrador",
+            "unreleased": "No publicado",
+            "edition": "Edición",
             "leftover": "Borrador antiguo.",
             "note": (
                 "Este libro presenta el tema con el lenguaje del curso. "
@@ -349,6 +952,7 @@ def _copy(language: str) -> dict[str, str]:
         "blueprint": "Blueprint",
         "footer": "DRAFT",
         "gap": GAP_LABEL,
+        "unwritten": "not written yet",
         "empty": _EMPTY_PIECE,
         "blocked": "Blocked: no second independent open excerpt and no replayed check.",
         "purpose": "Tip",
@@ -356,8 +960,11 @@ def _copy(language: str) -> dict[str, str]:
         "worked": "Worked problem",
         "self_check": "Self-check",
         "figure_gap": figure_gap(""),
-        "science": "A figure does not prove the science.",
         "caption": "The numeric claim in the caption is unchecked.",
+        "subtitle": "Working notes",
+        "status": "Draft",
+        "unreleased": "Not released",
+        "edition": "Edition",
         "leftover": "Leftover draft.",
         "note": "This file is a DRAFT. It is not RELEASED.",
         "how_a": "A section may hold several paragraphs. Each substantive paragraph cites a stored excerpt.",
@@ -373,11 +980,92 @@ def _copy(language: str) -> dict[str, str]:
     }
 
 
+def _unwritten_lines(titles: list[str], copy: dict[str, str]) -> list[str]:
+    if not titles:
+        return ["", r"\noindent " + latex_escape(copy["empty"])]
+    lines: list[str] = []
+    for title in titles:
+        lines.extend(["", r"\noindent " + latex_escape(f"{title}: {copy['unwritten']}")])
+    return lines
+
+
 def _display_title(title: str) -> str:
     """Blueprint title without a repeated ``Tema N:`` prefix."""
 
     stripped = _TEMA_PREFIX.sub("", title).strip()
     return stripped or title.strip()
+
+
+def _textbook_packages() -> list[str]:
+    """Color, math, listings, and one tcolorbox style per box kind."""
+
+    return [
+        r"\usepackage{xcolor}",
+        r"\usepackage{amsmath}",
+        r"\definecolor{studiumInk}{RGB}{28,40,58}",
+        r"\definecolor{studiumRule}{RGB}{28,40,58}",
+        r"\definecolor{studiumTipBack}{RGB}{232,244,236}",
+        r"\definecolor{studiumTipFrame}{RGB}{27,107,58}",
+        r"\definecolor{studiumDefBack}{RGB}{232,240,250}",
+        r"\definecolor{studiumDefFrame}{RGB}{24,74,130}",
+        r"\definecolor{studiumWorkedBack}{RGB}{255,244,230}",
+        r"\definecolor{studiumWorkedFrame}{RGB}{138,78,12}",
+        r"\definecolor{studiumCheckBack}{RGB}{243,236,248}",
+        r"\definecolor{studiumCheckFrame}{RGB}{96,48,130}",
+        r"\definecolor{studiumCodeBack}{RGB}{245,245,242}",
+        r"\definecolor{studiumCodeRule}{RGB}{48,48,52}",
+        r"\usepackage{listings}",
+        r"\lstdefinelanguage{Rust}{",
+        r"  morekeywords={as,async,await,break,const,continue,crate,dyn,else,enum,extern,false,fn,for,if,impl,in,let,loop,match,mod,move,mut,pub,ref,return,self,Self,static,struct,super,trait,true,type,unsafe,use,where,while},",
+        r"  sensitive=true,",
+        r"  morecomment=[l]{//},",
+        r"  morecomment=[s]{/*}{*/},",
+        r"  morestring=[b]{" + "\"" + "}",
+        r"}",
+        r"\lstdefinelanguage{Go}{",
+        r"  morekeywords={break,case,chan,const,continue,default,defer,else,fallthrough,for,func,go,goto,if,import,interface,map,package,range,return,select,struct,switch,type,var},",
+        r"  sensitive=true,",
+        r"  morecomment=[l]{//},",
+        r"  morecomment=[s]{/*}{*/},",
+        r"  morestring=[b]{" + "\"" + "}",
+        r"}",
+        r"\lstdefinelanguage{JavaScript}{",
+        r"  morekeywords={break,case,catch,class,const,continue,debugger,default,delete,do,else,export,extends,finally,for,function,if,import,in,instanceof,let,new,return,super,switch,this,throw,try,typeof,var,void,while,with,yield},",
+        r"  sensitive=true,",
+        r"  morecomment=[l]{//},",
+        r"  morecomment=[s]{/*}{*/},",
+        r"  morestring=[b]{" + "\"" + "},",
+        r"  morestring=[b]{'},",
+        r"}",
+        r"\lstdefinestyle{studium}{",
+        r"  basicstyle=\ttfamily\small,",
+        r"  columns=fullflexible,",
+        r"  keepspaces=true,",
+        r"  showstringspaces=false,",
+        r"  breaklines=true,",
+        r"  breakatwhitespace=false,",
+        r"  frame=leftline,",
+        r"  framerule=1.15pt,",
+        r"  rulecolor=\color{studiumCodeRule},",
+        r"  backgroundcolor=\color{studiumCodeBack},",
+        r"  xleftmargin=1.15em,",
+        r"  framexleftmargin=0.75em,",
+        r"  aboveskip=0.9em,",
+        r"  belowskip=0.7em,",
+        r"  tabsize=4,",
+        r"  keywordstyle=\ttfamily\bfseries,",
+        r"  commentstyle=\ttfamily\itshape,",
+        r"  stringstyle=\ttfamily",
+        r"}",
+        r"\lstset{style=studium}",
+        r"\usepackage[breakable,skins]{tcolorbox}",
+        r"\tcbset{",
+        r"  studiumtip/.style={colback=studiumTipBack,colframe=studiumTipFrame,colbacktitle=studiumTipFrame,coltitle=white,coltext=black,fonttitle=\bfseries,boxrule=0.65pt,arc=0.7pt,left=1.7mm,right=1.7mm,top=1.3mm,bottom=1.3mm,before skip=10pt,after skip=10pt},",
+        r"  studiumdef/.style={colback=studiumDefBack,colframe=studiumDefFrame,colbacktitle=studiumDefFrame,coltitle=white,coltext=black,fonttitle=\bfseries,boxrule=0.65pt,arc=0.7pt,left=1.7mm,right=1.7mm,top=1.3mm,bottom=1.3mm,before skip=10pt,after skip=10pt},",
+        r"  studiumworked/.style={colback=studiumWorkedBack,colframe=studiumWorkedFrame,colbacktitle=studiumWorkedFrame,coltitle=white,coltext=black,fonttitle=\bfseries,boxrule=0.65pt,arc=0.7pt,left=1.7mm,right=1.7mm,top=1.3mm,bottom=1.3mm,before skip=10pt,after skip=10pt},",
+        r"  studiumcheck/.style={colback=studiumCheckBack,colframe=studiumCheckFrame,colbacktitle=studiumCheckFrame,coltitle=white,coltext=black,fonttitle=\bfseries,boxrule=0.65pt,arc=0.7pt,left=1.7mm,right=1.7mm,top=1.3mm,bottom=1.3mm,before skip=10pt,after skip=10pt}",
+        r"}",
+    ]
 
 
 def _preamble(footer: str, language: str, *, tikz: bool = False) -> list[str]:
@@ -393,6 +1081,7 @@ def _preamble(footer: str, language: str, *, tikz: bool = False) -> list[str]:
             [
                 r"\usepackage[spanish]{babel}",
                 r"\addto\captionsspanish{\renewcommand{\contentsname}{Índice}}",
+                r"\AtBeginDocument{\spanishdeactivate{" + "\"~<>}}",
                 r"\usepackage[a4paper,margin=2.5cm]{geometry}",
                 r"\usepackage{titlesec}",
                 r"\titleformat{\chapter}[display]",
@@ -406,7 +1095,7 @@ def _preamble(footer: str, language: str, *, tikz: bool = False) -> list[str]:
         [
             r"\usepackage{graphicx}",
             *( [r"\usepackage{tikz}"] if tikz else [] ),
-            r"\usepackage[breakable]{tcolorbox}",
+            *_textbook_packages(),
             r"\usepackage{fancyhdr}",
             r"\pagestyle{fancy}",
             r"\fancyhf{}",
@@ -433,6 +1122,56 @@ def _preamble(footer: str, language: str, *, tikz: bool = False) -> list[str]:
     return lines
 
 
+def _title_page(root: Path, book: str, copy: dict[str, str]) -> list[str]:
+    """Academic draft cover: series, title, subtitle, edition, and date."""
+
+    document = load_project_toml(root)
+    edition = document.get("edition")
+    edition_text = edition.strip() if isinstance(edition, str) and edition.strip() else "0.1.0"
+    course = document.get("course") if isinstance(document.get("course"), dict) else {}
+    degree = course.get("degree") if isinstance(course, dict) else None
+    university = course.get("university") if isinstance(course, dict) else None
+    degree_text = degree.strip() if isinstance(degree, str) else ""
+    university_text = university.strip() if isinstance(university, str) else ""
+    if degree_text:
+        subtitle = degree_text
+    elif university_text:
+        subtitle = university_text
+    else:
+        subtitle = copy["subtitle"]
+    imprint = university_text if degree_text and university_text else ""
+    edition_line = f"{copy['edition']} {edition_text} --- {copy['unreleased']}"
+    lines = [
+        r"\thispagestyle{empty}",
+        r"\setlength{\parindent}{0pt}",
+        r"\vspace*{0.08\textheight}",
+        r"{\normalsize\scshape\color{studiumInk} Studium\par}",
+    ]
+    if imprint:
+        lines.append(r"{\small " + latex_escape(imprint) + r"\par}")
+    lines.extend(
+        [
+            r"\vspace{0.55em}",
+            r"{\color{studiumRule}\rule{\linewidth}{0.9pt}\par}",
+            r"\vspace{0.16\textheight}",
+            r"{\raggedright\Huge\bfseries " + latex_escape(book) + r"\par}",
+            r"\vspace{0.9em}",
+            r"{\raggedright\Large\color{studiumInk} " + latex_escape(subtitle) + r"\par}",
+            r"\vfill",
+            r"{\color{studiumRule}\rule{0.36\linewidth}{0.45pt}\par}",
+            r"\vspace{1.05em}",
+            r"{\large\scshape " + latex_escape(copy["status"]) + r"\par}",
+            r"\vspace{0.45em}",
+            r"{\normalsize " + latex_escape(edition_line) + r"\par}",
+            r"\vspace{0.4em}",
+            r"{\normalsize\today\par}",
+            r"\vspace*{0.08\textheight}",
+            r"\clearpage",
+        ]
+    )
+    return lines
+
+
 def _document(root: Path) -> str:
     kind = book_kind(root)
     language = _language(root)
@@ -445,7 +1184,6 @@ def _document(root: Path) -> str:
     excerpts = excerpts_by_id(root)
     counts = bibliography_counts(root)
     book = _book_name(root)
-    blocked = blocked_ids(root)
     by_section: dict[str, list[dict[str, object]]] = {}
     for paragraph in paragraphs:
         section = paragraph.get("section")
@@ -455,10 +1193,7 @@ def _document(root: Path) -> str:
         *_preamble(copy["footer"], language, tikz=_checked_tikz(root)),
         r"\begin{document}",
         r"\frontmatter",
-        r"\title{" + latex_escape(book) + "}",
-        r"\author{}",
-        r"\date{}",
-        r"\maketitle",
+        *_title_page(root, book, copy),
         r"\chapter{" + latex_escape(copy["preface"]) + "}",
         r"\noindent " + latex_escape(copy["note"]),
         r"\chapter{" + latex_escape(copy["how"]) + "}",
@@ -476,16 +1211,15 @@ def _document(root: Path) -> str:
                 r"\noindent " + latex_escape(copy["empty"]),
             ]
         )
+    unwritten: list[str] = []
     for section in sections:
-        lines.extend(["", r"\chapter{" + latex_escape(_display_title(section["title"])) + "}"])
         section_paragraphs = by_section.get(section["id"], [])
+        title = _display_title(section["title"])
         if not section_paragraphs:
-            lines.extend(["", r"\noindent " + latex_escape(copy["gap"])])
-            if section["id"] in blocked:
-                lines.extend(["", r"\noindent " + latex_escape(copy["blocked"])])
-            lines.extend(_figure_lines(root, section["id"], copy))
-        else:
-            lines.extend(_chapter_lines(root, section["id"], section_paragraphs, copy, language))
+            unwritten.append(title)
+            continue
+        lines.extend(["", r"\chapter{" + latex_escape(title) + "}"])
+        lines.extend(_chapter_lines(root, section["id"], section_paragraphs, copy, language))
     lines.extend(
         [
             r"\appendix",
@@ -502,7 +1236,11 @@ def _document(root: Path) -> str:
     lines.extend(
         [
             r"\chapter{" + latex_escape(copy["study"]) + "}",
-            r"\noindent " + latex_escape(copy["empty"]),
+        ]
+    )
+    lines.extend(_unwritten_lines(unwritten, copy))
+    lines.extend(
+        [
             r"\backmatter",
             r"\begin{thebibliography}{99}",
         ]
@@ -554,11 +1292,11 @@ def _chapter_lines(
             lines.extend(_plain([text]))
     else:
         lines.extend(_figure_lines(root, section_id, copy))
-    lines.extend(_box(copy["consejo"], _plain(consejo)))
+    lines.extend(_box(copy["consejo"], _plain(consejo), "consejo"))
     for text in definitions:
-        lines.extend(_box(copy["definition"], _plain([text])))
+        lines.extend(_box(copy["definition"], _plain([text]), "definition"))
     lines.extend(_worked_box(root, section_id, copy))
-    lines.extend(_box(copy["self_check"], _plain(self_check)))
+    lines.extend(_box(copy["self_check"], _plain(self_check), "self_check"))
     return lines
 
 
@@ -589,23 +1327,30 @@ def _box_body(raw: str, label: str | None, rest: str, kind: str | None, language
 def _italic(chunks: list[str]) -> list[str]:
     lines: list[str] = []
     for text in chunks:
-        lines.extend(["", r"\noindent\textit{" + latex_escape(text) + "}"])
+        emitted = emit_prose(text, italic=True)
+        if emitted:
+            lines.extend(["", *emitted])
     return lines
 
 
 def _plain(chunks: list[str]) -> list[str]:
     lines: list[str] = []
     for text in chunks:
-        lines.extend(["", latex_escape(text)])
+        emitted = emit_prose(text)
+        if emitted:
+            lines.extend(["", *emitted])
     return lines
 
 
-def _box(title: str, body: list[str]) -> list[str]:
+def _box(title: str, body: list[str], kind: str) -> list[str]:
     if not body:
         return []
+    style = _BOX_STYLE.get(kind, "studiumdef")
+    holds_listing = any(r"\begin{lstlisting}" in line or r"\begin{verbatim}" in line for line in body)
+    breaking = "" if holds_listing else ", breakable"
     return [
         "",
-        r"\begin{tcolorbox}[title={" + latex_escape(title) + "}, breakable]",
+        r"\begin{tcolorbox}[title={" + latex_escape(title) + "}, " + style + breaking + "]",
         *body,
         r"\end{tcolorbox}",
     ]
@@ -658,22 +1403,35 @@ def _worked_box(root: Path, section_id: str, copy: dict[str, str]) -> list[str]:
     if not working and expression.strip():
         working = expression.strip()
     answer = result.strip() or expected.strip()
+    rust = problem.get("kind") == "rust" and bool(source.strip()) and working == source.strip()
     body = [
-        *_labeled(copy["enunciado"], statement),
-        *_labeled(copy["resolucion"], working),
-        *_labeled(copy["respuesta"], answer),
+        *_labeled(copy["enunciado"], statement, expression=not prompt.strip() and bool(expression.strip())),
+        *_labeled(
+            copy["resolucion"],
+            working,
+            expression=bool(expression.strip()) and working == expression.strip(),
+            language="rust" if rust else "",
+        ),
+        *_labeled(copy["respuesta"], answer, expression=bool(result.strip()) and answer == result.strip()),
     ]
-    return _box(copy["worked"], body)
+    return _box(copy["worked"], body, "worked")
 
 
-def _labeled(label: str, text: str) -> list[str]:
+def _labeled(label: str, text: str, *, expression: bool = False, language: str = "") -> list[str]:
     lines = ["", r"\noindent\textbf{" + latex_escape(label) + "}"]
-    if text.strip():
-        lines.extend(["", latex_escape(text)])
+    if not text.strip():
+        return lines
+    if language:
+        lines.extend(_listing_lines(text, language))
+        return lines
+    if expression or _looks_like_expression(text):
+        lines.extend(["", _formula_line(text)])
+        return lines
+    lines.extend(emit_prose(text))
     return lines
 
 
-def _figure_lines(root: Path, section_id: str, copy: dict[str, str]) -> list[str]:
+def _figure_lines(root: Path, section_id: str, _copy: dict[str, str]) -> list[str]:
     """Checked drawings inline. No float, so a short drawing does not take a page."""
 
     lines: list[str] = []
@@ -696,10 +1454,8 @@ def _figure_lines(root: Path, section_id: str, copy: dict[str, str]) -> list[str
         lines.extend(["", r"\noindent\begin{minipage}{\linewidth}", r"\centering"])
         lines.extend(fitted)
         if caption.strip():
-            lines.extend([r"\par\nopagebreak", r"{\small " + latex_escape(caption) + r"\par}"])
-        lines.extend([r"\end{minipage}", "", r"\noindent " + latex_escape(copy["science"])])
-        if record.get("caption_corroboration") == "unchecked":
-            lines.extend(["", r"\noindent " + latex_escape(copy["caption"])])
+            lines.extend([r"\par\nopagebreak", r"{\small " + render_text_run(caption) + r"\par}"])
+        lines.append(r"\end{minipage}")
     return lines
 
 
@@ -824,13 +1580,13 @@ def _solution_lines(root: Path, copy: dict[str, str]) -> list[str]:
             continue
         prompt = record.get("prompt") if isinstance(record.get("prompt"), str) else ""
         if prompt.strip():
-            lines.extend(["", latex_escape(prompt)])
+            lines.extend(["", *emit_prose(prompt)])
     for record in fold_by_id(root / COMPUTATIONS):
         if record.get("status") != "replayed" or record.get("correct") is not True:
             continue
         expression = record.get("expression") if isinstance(record.get("expression"), str) else ""
         result = record.get("server_result") if isinstance(record.get("server_result"), str) else ""
-        lines.extend(["", latex_escape(f"{expression} = {result}")])
+        lines.extend(["", _formula_line(f"{expression} = {result}")])
     if not lines:
         lines.extend(["", r"\noindent " + latex_escape(copy["empty"])])
     return lines
@@ -870,10 +1626,12 @@ def _audit_lines(
         check_kind = record.get("kind") if isinstance(record.get("kind"), str) else ""
         lines.extend(["", r"\noindent " + latex_escape(f"{identifier}: {target} {check_kind}".strip())])
     for record in fold_by_id(root / FIGURES):
-        if _checked_output(root, record) is not None:
-            continue
         identifier = record.get("id") if isinstance(record.get("id"), str) else "figure"
-        lines.extend(["", r"\noindent " + latex_escape(f"{identifier}: {copy['figure_gap']}")])
+        if _checked_output(root, record) is None:
+            lines.extend(["", r"\noindent " + latex_escape(f"{identifier}: {copy['figure_gap']}")])
+            continue
+        if record.get("caption_corroboration") == "unchecked":
+            lines.extend(["", r"\noindent " + latex_escape(f"{identifier}: {copy['caption']}")])
     return lines
 
 
@@ -949,7 +1707,7 @@ def _source_notes(
     if include_text:
         text = record.get("text") if isinstance(record.get("text"), str) else ""
         if text.strip():
-            lines.extend(["", latex_escape(text)])
+            lines.extend(["", *emit_prose(text)])
     cited_sources = record.get("sources") if isinstance(record.get("sources"), list) else []
     excerpt_ids = record.get("excerpts") if isinstance(record.get("excerpts"), list) else []
     labels: list[str] = []
