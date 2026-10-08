@@ -183,7 +183,8 @@ def test_draft_omits_an_unchecked_figure(tmp_path, monkeypatch):
     assert r"\includegraphics" in tex
     assert checked["figure"]["id"] in tex
     assert tex.count(r"\includegraphics") == 1
-    assert "A figure does not prove the science." in tex
+    assert "A figure does not prove the science." not in chapter
+    assert "A figure does not prove the science." not in tex
     assert rendered["released"] is False
     assert rendered["project_state"] != "RELEASED"
     if find_engine() is not None:
@@ -253,6 +254,8 @@ def test_removed_figure_is_absent_and_the_warning_stays_in_the_audit(tmp_path, m
     assert omitted["figure"]["id"] not in chapter
     assert _CHECKED_CAPTION in chapter
     assert r"\includegraphics" in chapter
+    assert "Una figura no demuestra la ciencia." not in chapter
+    assert "Una figura no demuestra la ciencia." not in tex
     assert rendered["released"] is False
     assert rendered["project_state"] != "RELEASED"
 
