@@ -271,7 +271,8 @@ def test_chatgpt_readme_points_at_the_public_url_form():
     assert "Studium" in text
     assert "URL del servidor" in text
     assert "studium mcp --public" in text
-    assert "sin autenticación" in text
+    assert "--token" in text
+    assert "sin autenticación" not in text
     assert "OAuth" in text
     assert "https://github.com/danielmigueltejedor/studium" not in text
     assert "--project" not in text

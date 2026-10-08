@@ -1500,7 +1500,12 @@ def _audit_label(root: Path, record: dict[str, object]) -> str:
 
 def _section_has_replay(root: Path, section_id: str) -> bool:
     for record in _worked_problem_records(root, section_id):
-        if record.get("kind") == "rust" and record.get("status") == "checked" and record.get("correct") is True:
+        if (
+            record.get("kind") == "rust"
+            and record.get("status") == "checked"
+            and record.get("correct") is True
+            and problem_result_current(root, record)
+        ):
             return True
     for record in fold_by_id(root / COMPUTATIONS):
         if record.get("section") == section_id and record.get("status") == "replayed" and record.get("correct") is True:
@@ -1514,8 +1519,16 @@ def _solution_lines(root: Path, copy: dict[str, str]) -> list[str]:
     for record in fold_by_id(root / PROBLEMS):
         if record.get("kind") == "rust" and profile != "COMPUTER_SCIENCE":
             continue
-        checked = record.get("kind") == "rust" and record.get("status") == "checked" and record.get("correct") is True
-        witnessed = record.get("status") == "two_witnesses" or record.get("corroboration") == "two_witnesses"
+        current = problem_result_current(root, record)
+        checked = (
+            current
+            and record.get("kind") == "rust"
+            and record.get("status") == "checked"
+            and record.get("correct") is True
+        )
+        witnessed = current and (
+            record.get("status") == "two_witnesses" or record.get("corroboration") == "two_witnesses"
+        )
         if not checked and not witnessed:
             continue
         prompt = record.get("prompt") if isinstance(record.get("prompt"), str) else ""

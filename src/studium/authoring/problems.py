@@ -113,6 +113,7 @@ def record_problem(
                 if corroboration_for_excerpts(root, numeric["excerpts"]) == "two_witnesses":
                     record["status"] = "two_witnesses"
                     record["corroboration"] = "two_witnesses"
+            _stamp_inputs(root, record)
             append_jsonl(root / PROBLEMS, record)
             _audit(root, record=record, actor=actor, operation="record_problem")
             fresh_state = load_state_holding_lock(root)
@@ -124,7 +125,7 @@ def record_problem(
 def list_problems(root: Path) -> dict[str, object]:
     """List stored problems. Text is untrusted data. Nothing here is verified."""
 
-    return {"status": "ok", "problems": [_public(record) for record in fold_by_id(root / PROBLEMS)]}
+    return {"status": "ok", "problems": [_public(record, root) for record in fold_by_id(root / PROBLEMS)]}
 
 
 def check_problem(root: Path, problem_id: object) -> dict[str, object]:
@@ -207,6 +208,7 @@ def _check_numeric(root: Path, record: dict[str, object]) -> dict[str, object]:
         updated["corroboration"] = "two_witnesses"
     else:
         updated.pop("corroboration", None)
+    _stamp_inputs(root, updated)
     if updated != record:
         try:
             with project_lock(root):
@@ -264,6 +266,7 @@ def _check_rust(root: Path, record: dict[str, object]) -> dict[str, object]:
     updated["checked_at"] = utc_now()
     updated["status_text"] = _rust_status_text(root)
     updated["check_kind"] = "reproducibility" if checked else None
+    _stamp_inputs(root, updated)
     try:
         with project_lock(root):
             append_jsonl(root / PROBLEMS, updated)
@@ -329,6 +332,7 @@ def _refuse_empty_rust(root: Path, record: dict[str, object], message: str) -> d
     updated["classification"] = "PENDING"
     updated["runs"] = []
     updated["checked_at"] = utc_now()
+    _stamp_inputs(root, updated)
     try:
         with project_lock(root):
             append_jsonl(root / PROBLEMS, updated)
@@ -543,7 +547,42 @@ def _rust_status_text(root: Path) -> str:
     return f"{RUST_NOT_WORKED_PROBLEM} {REPRODUCIBILITY_TEXT}"
 
 
-def _public(record: dict[str, object]) -> dict[str, object]:
+def problem_input_sha256(root: Path, record: dict[str, object]) -> str:
+    """Fingerprint of the inputs a stored result depends on."""
+
+    parts = [
+        str(record.get("prompt") or ""),
+        str(record.get("expected") or ""),
+        str(record.get("source_text") or ""),
+    ]
+    stored = excerpts_by_id(root)
+    raw = record.get("excerpts") if isinstance(record.get("excerpts"), list) else []
+    for excerpt_id in raw:
+        if not isinstance(excerpt_id, str):
+            continue
+        excerpt = stored.get(excerpt_id)
+        digest = excerpt.get("text_sha256") if isinstance(excerpt, dict) else ""
+        parts.append(f"{excerpt_id}:{digest}")
+    return hashlib.sha256("\n".join(parts).encode("utf-8")).hexdigest()
+
+
+def problem_result_current(root: Path, record: dict[str, object]) -> bool:
+    """False when a stored result no longer matches the exercise or its excerpts.
+
+    Records written before this fingerprint existed still load.
+    """
+
+    stored = record.get("input_sha256")
+    if not isinstance(stored, str):
+        return True
+    return stored == problem_input_sha256(root, record)
+
+
+def _stamp_inputs(root: Path, record: dict[str, object]) -> None:
+    record["input_sha256"] = problem_input_sha256(root, record)
+
+
+def _public(record: dict[str, object], root: Path | None = None) -> dict[str, object]:
     visible = {
         "id": record.get("id"),
         "section": record.get("section"),
@@ -567,6 +606,11 @@ def _public(record: dict[str, object]) -> dict[str, object]:
         visible["status"] = "two_witnesses" if record.get("status") == "two_witnesses" else record.get("status")
         if record.get("corroboration") == "two_witnesses" and visible["status"] == "two_witnesses":
             visible["corroboration"] = "two_witnesses"
+    if root is not None and not problem_result_current(root, record):
+        visible["status"] = "stale"
+        visible["correct"] = False
+        visible.pop("corroboration", None)
+        visible["current"] = False
     return visible
 
 

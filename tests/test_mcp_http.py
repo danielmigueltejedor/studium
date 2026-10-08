@@ -170,9 +170,11 @@ def test_stdio_still_answers_initialize(tmp_path):
 def test_public_without_cloudflared_exits_nonzero(tmp_path, monkeypatch, capsys):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("studium.mcp.http_server.shutil.which", lambda _name: None)
-    assert main(["mcp", "--public"]) == 1
+    assert main(["mcp", "--public", "--token", "local-only-secret"]) == 1
     captured = capsys.readouterr()
     text = captured.out
+    assert "local-only-secret" not in text
+    assert "local-only-secret" not in captured.err
     assert "http://127.0.0.1:8765/mcp" in text
     assert "cloudflared tunnel --url http://127.0.0.1:8765 --protocol http2 --no-autoupdate" in text
     assert "login" not in run_command(8765)
@@ -201,11 +203,13 @@ def test_public_prints_one_https_line(tmp_path, monkeypatch, capsys):
     binary.write_text("#!/bin/sh\necho 'https://demo-book.trycloudflare.com' >&2\n", encoding="utf-8")
     binary.chmod(0o755)
     monkeypatch.setenv("PATH", str(tmp_path))
-    code = serve_http(workspace=str(tmp_path), port=0, public=True)
+    code = serve_http(workspace=str(tmp_path), port=0, public=True, token="tunnel-secret")
     captured = capsys.readouterr()
     assert code == 0
     assert captured.out.strip() == "https://demo-book.trycloudflare.com/mcp"
     assert "\n" not in captured.out.strip()
+    assert "tunnel-secret" not in captured.out
+    assert "tunnel-secret" not in captured.err
 
 
 def _post(url, payload, *, accept="application/json, text/event-stream", token=None, session=None, protocol=None, origin=None):
