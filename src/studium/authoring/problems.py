@@ -8,6 +8,7 @@ solution is not correct until the check passes.
 
 import hashlib
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -28,6 +29,12 @@ _TIMEOUT = 20
 _RUNS = 3
 _FORBIDDEN_CHARS = set(";|&$`\n\r")
 _FORBIDDEN_FLAGS = frozenset({"-L", "--extern", "--sysroot", "--config", "-Z"})
+_RUST_TEST = re.compile(r"#\s*\[\s*test\s*\]|\bassert_eq\s*!|\bassert_ne\s*!|\bassert\s*!")
+_NO_TEST = (
+    "The Rust source has no test. A file of only comments stays unchecked. "
+    "It is checked only when the source has a #[test] function or an assert, assert_eq, or assert_ne. "
+    "Three runs of an empty file do not count."
+)
 REPRODUCIBILITY_TEXT = (
     "Three identical rustc runs are a reproducibility check, not an independent proof."
 )
@@ -173,6 +180,8 @@ def _check_rust(root: Path, record: dict[str, object]) -> dict[str, object]:
         return _error("problem.invocation_invalid", "the stored Rust invocation is not usable")
     if not isinstance(source_text, str):
         return _error("problem.invocation_invalid", "the stored Rust source is missing")
+    if not _has_real_rust_test(source_text):
+        return _refuse_empty_rust(root, record, _NO_TEST)
     tool = invocation[0] if isinstance(invocation[0], str) else ""
     compiler = shutil.which(tool)
     state = _read_state(root)
@@ -219,6 +228,71 @@ def _check_rust(root: Path, record: dict[str, object]) -> dict[str, object]:
     body["checked"] = checked
     body["runs"] = runs
     body["message"] = str(updated["status_text"])
+    return body
+
+
+def _has_real_rust_test(source: str) -> bool:
+    """True when the source has a #[test] function or an assert outside comments."""
+
+    return _RUST_TEST.search(_rust_code(source)) is not None
+
+
+def _rust_code(source: str) -> str:
+    """Drop comments and string contents so a commented assert is not a test."""
+
+    kept: list[str] = []
+    index = 0
+    length = len(source)
+    while index < length:
+        if source.startswith("//", index):
+            newline = source.find("\n", index)
+            if newline < 0:
+                break
+            kept.append("\n")
+            index = newline + 1
+            continue
+        if source.startswith("/*", index):
+            end = source.find("*/", index + 2)
+            kept.append(" ")
+            index = length if end < 0 else end + 2
+            continue
+        if source[index] == '"':
+            index += 1
+            while index < length:
+                if source[index] == "\\" and index + 1 < length:
+                    index += 2
+                    continue
+                if source[index] == '"':
+                    index += 1
+                    break
+                index += 1
+            kept.append('""')
+            continue
+        kept.append(source[index])
+        index += 1
+    return "".join(kept)
+
+
+def _refuse_empty_rust(root: Path, record: dict[str, object], message: str) -> dict[str, object]:
+    """A compile of comments is not three passing runs and is not checked."""
+
+    updated = dict(record)
+    updated["status"] = "unchecked"
+    updated["correct"] = False
+    updated["classification"] = "PENDING"
+    updated["runs"] = []
+    updated["checked_at"] = utc_now()
+    try:
+        with project_lock(root):
+            append_jsonl(root / PROBLEMS, updated)
+            _audit(root, record=updated, actor={"kind": "mcp"}, operation="check_problem")
+            fresh = load_state_holding_lock(root)
+    except ProjectLocked:
+        return _error("storage.locked", "project is locked")
+    body = _body(fresh, updated, status="unchecked")
+    body["checked"] = False
+    body["runs"] = []
+    body["message"] = message
     return body
 
 
