@@ -201,7 +201,7 @@ def test_topic_book_excerpt_does_not_need_a_guide(tmp_path):
 
 def _fluidos(tmp_path):
     session = open_workspace(str(tmp_path))
-    assert dispatch("studium_project_create", {"slug": "fluidos", **_COURSE}, session=session)["status"] == "created"
+    assert dispatch("studium_project_create", {"slug": "fluidos", **_COURSE, "language": "en"}, session=session)["status"] == "created"
     assert dispatch("studium_source_register", {"decision": "none"}, session=session)["local_sources"]["status"] == "NONE"
     assert (
         dispatch(

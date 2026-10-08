@@ -6,6 +6,7 @@ given, and it does not release the book.
 """
 
 import re
+from contextvars import ContextVar
 from pathlib import Path
 
 from studium.authoring.audit import (
@@ -19,6 +20,17 @@ from studium.authoring.audit import (
     writer_edition,
 )
 from studium.authoring.blueprint import current_sections
+from studium.authoring.languages import (
+    BookLanguage,
+    active_language,
+    chapter_contract,
+    messages,
+    resolution_labels,
+    self_check_word,
+    tip_word,
+    two_sections_line,
+    writing_name,
+)
 from studium.authoring.computation import list_computations
 from studium.authoring.problems import REPRODUCIBILITY_TEXT, RUST_NOT_WORKED_PROBLEM
 from studium.authoring.excerpts import excerpts_by_id
@@ -76,22 +88,7 @@ _UNWRITTEN = (
     "The book is incomplete while {title} has no paragraphs. "
     "Do not render it as finished."
 )
-_TWO_SECTIONS = (
-    "This chapter needs at least two section blocks of explanation, not a single Explicación, "
-    "plus the lead, one consejo, one worked problem, and one autoficha."
-)
-_CHAPTER = (
-    "Write a full chapter in Spanish, several paragraphs of explanation as body text, not a summary and not a sentence. "
-    "The explanation needs at least two section blocks and 400 words. "
-    "Use the same shape every chapter: a short lead, the explanation, at most one consejo, "
-    "definitions only for new terms, one worked problem with enunciado, resolución, and respuesta, "
-    "and one autoficha. "
-    "Boxes are only those four. Cite stored excerpts. "
-    "A formula must be quoted in an excerpt or replayed. "
-    "A worked problem in a book that is not COMPUTER_SCIENCE is a replayed computation or a numeric result cited from two excerpts. "
-    "Code behavior needs two sources or a test that passed 3 times. "
-    "Do not ask the user how to format the page. The renderer owns the boxes."
-)
+_BOOK_LANGUAGE: ContextVar[BookLanguage] = ContextVar("studium_book_language")
 _ARITHMETIC = re.compile(r"^[0-9+\-*/×÷·().=]+$")
 _BODY_SKIP = frozenset({"purpose", "consejo", "definition", "self_check"})
 _CODE_OR_CALCULATION = frozenset({"COMPUTER_SCIENCE", "STEM"})
@@ -116,6 +113,14 @@ _NO_REPLAY = "no replayed check"
 def book_next(root: Path) -> dict[str, object]:
     """Return the next concrete tool call. Does not write and does not fetch."""
 
+    token = _BOOK_LANGUAGE.set(active_language(root))
+    try:
+        return _book_next(root)
+    finally:
+        _BOOK_LANGUAGE.reset(token)
+
+
+def _book_next(root: Path) -> dict[str, object]:
     state = load_state(root)
     if book_kind(root) != BOOK_TOPIC and not _course_documents(root):
         return _step(
@@ -195,15 +200,11 @@ def book_next(root: Path) -> dict[str, object]:
                 state,
                 "studium_paragraph_replace",
                 {"id": paragraph_id, "excerpts": [excerpt_id]},
-                _named(
-                    root,
-                    section,
-                    (
-                        f"Rewrite {paragraph_id} in {section['id']} ({section['title']}) into teaching prose. "
-                        "A section of one short paragraph does not count as written. "
-                        "A one-sentence section is too short to teach. Attach the sources you used. "
-                        + _CHAPTER
-                    ),
+                (
+                    f"Rewrite {paragraph_id} in {section['id']} ({section['title']}) into teaching prose. "
+                    "A section of one short paragraph does not count as written. "
+                    "A one-sentence section is too short to teach. Attach the sources you used. "
+                    + _chapter()
                 ),
                 blocked=blocked_sections(root),
             )
@@ -211,15 +212,11 @@ def book_next(root: Path) -> dict[str, object]:
             state,
             "studium_paragraph_record",
             {"section": section["id"], "excerpts": [excerpt_id], "role": "explanation"},
-            _named(
-                root,
-                section,
-                (
-                    f"Write another explanatory paragraph for {section['id']} ({section['title']}). "
-                    "A section of one short paragraph does not count as written. "
-                    "A one-sentence section is too short to teach. "
-                    + _CHAPTER
-                ),
+            (
+                f"Write another explanatory paragraph for {section['id']} ({section['title']}). "
+                "A section of one short paragraph does not count as written. "
+                "A one-sentence section is too short to teach. "
+                + _chapter()
             ),
             blocked=blocked_sections(root),
         )
@@ -230,14 +227,10 @@ def book_next(root: Path) -> dict[str, object]:
             state,
             "studium_paragraph_record",
             {"section": section["id"], "excerpts": [excerpt_id], "role": "self_check"},
-            _named(
-                root,
-                section,
-                (
-                    f"Add one autoficha for {section['id']} ({section['title']}). "
-                    "The explanation above must still teach from the excerpts. "
-                    + _CHAPTER
-                ),
+            (
+                f"Add one {_self_check_word()} for {section['id']} ({section['title']}). "
+                "The explanation above must still teach from the excerpts. "
+                + _chapter()
             ),
             blocked=blocked_sections(root),
         )
@@ -729,14 +722,10 @@ def _chapter_gate(
             state,
             "studium_problem_record",
             {"section": section["id"]},
-            _named(
-                root,
-                section,
-                (
-                    f"The worked problem for {section['id']} ({section['title']}) is only an arithmetic expression "
-                    f"({shown}). Record a resolution with enunciado, resolución, and respuesta. "
-                    "An arithmetic expression is not that resolution."
-                ),
+            (
+                f"The worked problem for {section['id']} ({section['title']}) is only an arithmetic expression "
+                f"({shown}). Record a resolution with {_resolution_labels()}. "
+                "An arithmetic expression is not that resolution."
             ),
             blocked=blocked_sections(root),
         )
@@ -764,16 +753,16 @@ def _explanation_step(
     if two_sections:
         reason = (
             f"Write another explanation section for {section['id']} ({section['title']}). "
-            + _TWO_SECTIONS
+            + _two_sections()
             + " "
-            + _CHAPTER
+            + _chapter()
         )
     else:
         reason = (
             f"Write the explanation for {section['id']} ({section['title']}) as body text. "
             "This chapter is too short. It needs at least 400 words of explanation. "
             "Search open sources before writing. Cite a stored excerpt. "
-            + _CHAPTER
+            + _chapter()
         )
     return _step(
         state,
@@ -790,9 +779,9 @@ def _shape_gap(
     section: dict[str, str],
 ) -> dict[str, object] | None:
     if not _has_role(root, section["id"], "purpose"):
-        return _role_step(state, root, section, "purpose", f"Write the lead for {section['id']} ({section['title']}). {_TWO_SECTIONS}")
+        return _role_step(state, root, section, "purpose", f"Write the lead for {section['id']} ({section['title']}). {_two_sections()}")
     if not _has_role(root, section["id"], "consejo"):
-        return _role_step(state, root, section, "consejo", f"Add one consejo for {section['id']} ({section['title']}). {_TWO_SECTIONS}")
+        return _role_step(state, root, section, "consejo", f"Add one {_tip_word()} for {section['id']} ({section['title']}). {_two_sections()}")
     if _profile(root) != "COMPUTER_SCIENCE" and not _worked_ok(root, section["id"]):
         return _step(
             state,
@@ -816,9 +805,9 @@ def _shape_gap(
             section,
             "self_check",
             (
-                f"Add one autoficha for {section['id']} ({section['title']}). "
+                f"Add one {_self_check_word()} for {section['id']} ({section['title']}). "
                 "The explanation above must still teach from the excerpts. "
-                + _CHAPTER
+                + _chapter()
             ),
         )
     return None
@@ -988,7 +977,9 @@ def _has_autoficha(root: Path, section_id: str) -> bool:
         if record.get("role") == "self_check":
             return True
         text = record.get("text") if isinstance(record.get("text"), str) else ""
-        if text.strip().startswith("Autoficha"):
+        title = messages(_current_language())["self_check"]
+        stripped = text.strip()
+        if stripped.startswith("Autoficha") or stripped.startswith(title):
             return True
     return False
 
@@ -1069,6 +1060,30 @@ def _excerpt_on(paragraph: dict[str, object]) -> str | None:
     return None
 
 
+def _current_language() -> BookLanguage:
+    return _BOOK_LANGUAGE.get()
+
+
+def _chapter() -> str:
+    return chapter_contract(_current_language())
+
+
+def _two_sections() -> str:
+    return two_sections_line(_current_language())
+
+
+def _resolution_labels() -> str:
+    return resolution_labels(_current_language())
+
+
+def _tip_word() -> str:
+    return tip_word(_current_language())
+
+
+def _self_check_word() -> str:
+    return self_check_word(_current_language())
+
+
 def _step(
     state: dict[str, object],
     tool: str | None,
@@ -1079,11 +1094,14 @@ def _step(
     if _ASK in reason.lower().replace(_FORMAT, ""):
         raise ValueError("book_next reason asked the user")
     local = state.get("local_sources")
+    language = _current_language()
     return {
         "status": "ok",
         "tool": tool,
         "arguments": arguments,
         "reason": reason,
+        "language": language.tag,
+        "write_in": writing_name(language),
         "ask_user": False,
         "released": state.get("state") == "RELEASED",
         "project_state": state.get("state"),

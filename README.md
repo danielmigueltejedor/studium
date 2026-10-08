@@ -60,8 +60,7 @@ draft PDF
 
 - fewer than 8 blueprint sections
 - fewer than 12 distinct sources (user-provided local files and recorded open-web sources both count; pirate copies and licenses that forbid this use do not)
-- any planned section that is still unwritten or short of the chapter contract
-- a written chapter with fewer than two explanation sections, under 400 words of explanation, or without the lead, one consejo, one worked problem, and one autoficha
+- a written chapter with fewer than two explanation sections, under 400 words of explanation, or without the lead, one tip, one worked problem, and one self-check
 - a worked problem whose resolution is only an arithmetic expression
 - a Rust test used as the worked problem of a book whose profile is not `COMPUTER_SCIENCE`
 
@@ -72,21 +71,21 @@ While one of those is open, the next action is to write that chapter. The reason
 Every chapter uses the same shape:
 
 - a short lead
-- at least two `\section` blocks of explanation, as body text, not one section titled Explicación
-- at most one consejo
+- at least two blocks of explanation, as body text, not one section titled with the framework word for explanation
+- at most one tip
 - definitions only when a term is introduced
-- one worked problem with enunciado, resolución, and respuesta
-- one autoficha
+- one worked problem with a statement, a solution, and an answer
+- one self-check
 
-Boxes are only Consejo, Definición, Problema resuelto, and Autoficha. Explanation stays body text.
+The visible titles follow the book language. A Spanish book uses Consejo, Definición, Problema resuelto, Autoficha, Enunciado, Resolución, and Respuesta. Explanation stays body text.
 
 A worked problem in a STEM or general book is a replayed computation or a numeric result cited from two excerpts. A book whose profile is not `COMPUTER_SCIENCE` must not use a Rust test as that worked problem. A programming book may keep a Rust test. Three identical `rustc` runs are a reproducibility check, not an independent proof, and not three methods. A computation replayed by the same expression is `COMPUTATION_REPRODUCED` in the audit record. That is not mathematically verified and not academically reviewed. Two excerpts that agree are `two_witnesses`, not verified and not absolute truth.
 
-Unchecked figures stay out of the chapter. `studium_figure_remove` deletes one figure by id. A checked figure stays inline, capped, with the caption under the image. When the book language is Spanish, the draft uses Índice, Consejo, Definición, Problema resuelto, and Autoficha. Explanation is body text. Boxes are only those four.
+Unchecked figures stay out of the chapter. `studium_figure_remove` deletes one figure by id. A checked figure stays inline, capped, with the caption under the image. Boxes are only the tip, the definition, the worked problem, and the self-check. Explanation is body text.
 
 Without a course guide, the blueprint is a study book: roadmap, foundations, the topic chapters, worked problems, self-check, a formula or concept sheet, and the source audit. With a guide, chapters follow the guide and the same chapter contract applies.
 
-When the book language is `es`, or the language is missing and the prose is Spanish, the draft uses Spanish headings, babel Índice, and a Borrador footer.
+Set `--language` at creation for a course book or a topic book. A BCP 47 tag (`es`, `en`, `fr`, `de`, `pt`, `it`, `ca`, `gl`, `pt-BR`) or a TeX babel name (`spanish`, `dutch`) is stored on the project. An empty or unknown code is rejected. A project with no language stays Spanish, so an old `programacion`, `fluidos`, or `rust` book does not change. The draft loads that babel language. Hyphenation, captions, and `\today` follow it. Chrome (cover draft status, box titles, problem labels, contents title, and audit headings) is translated for Spanish, English, French, German, Portuguese, Italian, Catalan, and Galician. A babel language with no catalog entry uses English chrome. Chapter prose is not translated. `studium_book_next` tells the writer to draft in the book's language.
 
 ## What the client runs
 

@@ -421,7 +421,10 @@ def test_topic_book_without_a_guide_builds_a_study_outline(tmp_path, monkeypatch
 
 def _topic(tmp_path, slug: str, topic: str):
     session = open_workspace(str(tmp_path))
-    assert dispatch("studium_project_create", {"slug": slug, "topic": topic}, session=session)["status"] == "created"
+    assert (
+        dispatch("studium_project_create", {"slug": slug, "topic": topic, "language": "en"}, session=session)["status"]
+        == "created"
+    )
     return session, tmp_path / slug
 
 

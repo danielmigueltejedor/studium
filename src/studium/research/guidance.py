@@ -1,5 +1,7 @@
 """Ask-once copy for local sources. This is not an autopilot pack."""
 
+from studium.domain.languages import is_spanish_tag
+
 QUESTION_EN = (
     "Do you have your own course materials? You can provide lecture notes, "
     "Moodle PDFs, slides, problem sheets, previous exams, formula sheets, "
@@ -23,7 +25,7 @@ def local_source_guidance(
     should_ask = local.get("status") == "UNKNOWN" and local.get("prompted") is not True
     question: str | None = None
     if should_ask:
-        question = QUESTION_ES if language == "es" else QUESTION_EN
+        question = QUESTION_ES if is_spanish_tag(language) else QUESTION_EN
     visible: list[dict[str, object]] = []
     if local.get("status") == "IMPORTED":
         for source in sources:
