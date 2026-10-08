@@ -248,10 +248,24 @@ def annotate_next_action(root: Path, payload: dict[str, object]) -> dict[str, ob
             " Every blueprint section has a supported paragraph. "
             "Add checked problems. Do not mark the book released."
         )
-    suffix += (
-        " Write teaching prose from the excerpts, then studium_audit_record, "
-        "studium_contradiction_scan, and studium_book_review, then render."
-    )
+    from studium.authoring.book_next import unfinished_chapter
+
+    unfinished = unfinished_chapter(root)
+    if unfinished is not None:
+        section, missing = unfinished
+        title = section["title"].strip() or section["id"]
+        suffix += (
+            f" Write the next unfinished chapter: {title}. "
+            f"Missing contract pieces: {', '.join(missing)}. "
+            "Do not render. Do not hand the draft over. "
+            "A partial PDF is not a reason to stop."
+        )
+    else:
+        suffix += (
+            " Then studium_audit_record, studium_contradiction_scan, and studium_book_review, "
+            "then render once. Do not stop mid-book for a preview. "
+            "Do not mark the book released."
+        )
     if suffix.strip() in action:
         return payload
     updated = dict(payload)

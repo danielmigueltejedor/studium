@@ -276,22 +276,109 @@ def _book_next(root: Path) -> dict[str, object]:
     quality = _chapter_gate(state, root, sections)
     if quality is not None:
         return quality
-    unwritten = _first_unwritten(root, sections)
-    if unwritten is not None:
-        return _unwritten_step(state, root, unwritten, _excerpt_for_section(root, unwritten["id"]))
+    unfinished = _unfinished_step(state, root, sections)
+    if unfinished is not None:
+        return unfinished
     if not _draft_is_current(root):
         return _render_step(state, root, sections)
-    return _step(state, None, {}, "The DRAFT is rendered. Do not request release.", blocked=blocked_sections(root))
+    return _step(
+        state,
+        None,
+        {},
+        "The DRAFT was rendered once. Do not request release.",
+        blocked=blocked_sections(root),
+    )
+
+
+def unfinished_chapter(root: Path) -> tuple[dict[str, str], list[str]] | None:
+    """The first planned section that is missing or short of the draft contract."""
+
+    for section in current_sections(root):
+        missing = _missing_pieces(root, section)
+        if missing:
+            return section, missing
+    return None
+
+
+def _unfinished_step(
+    state: dict[str, object],
+    root: Path,
+    sections: list[dict[str, str]],
+) -> dict[str, object] | None:
+    """Write the next unfinished chapter. Rendering and stopping stay closed."""
+
+    for section in sections:
+        if not _missing_pieces(root, section):
+            continue
+        if not _is_written(root, section["id"]):
+            return _unwritten_step(state, root, section, _excerpt_for_section(root, section["id"]))
+        if _explanation_count(root, section["id"]) < _MIN_EXPLANATION_SECTIONS:
+            return _explanation_step(state, root, section, two_sections=True)
+        if _explanation_words(root, section["id"]) < _MIN_EXPLANATION_WORDS:
+            return _explanation_step(state, root, section)
+        shown = _arithmetic_resolution(root, section["id"])
+        if shown is not None:
+            return _step(
+                state,
+                "studium_problem_record",
+                {"section": section["id"]},
+                _named(
+                    root,
+                    section,
+                    (
+                        f"The worked problem for {section['id']} ({section['title']}) is only an arithmetic expression "
+                        f"({shown}). Record a resolution with enunciado, resolución, and respuesta. "
+                        "An arithmetic expression is not that resolution."
+                    ),
+                ),
+                blocked=blocked_sections(root),
+            )
+        gap = _shape_gap(state, root, section)
+        if gap is not None:
+            return gap
+        return _explanation_step(state, root, section)
+    return None
+
+
+def _missing_pieces(root: Path, section: dict[str, str]) -> list[str]:
+    """Contract pieces still absent from one planned section."""
+
+    section_id = section["id"]
+    missing: list[str] = []
+    if not _is_written(root, section_id):
+        missing.append("paragraphs")
+    if _explanation_count(root, section_id) < _MIN_EXPLANATION_SECTIONS:
+        missing.append("two explanation sections")
+    if _explanation_words(root, section_id) < _MIN_EXPLANATION_WORDS:
+        missing.append("400 words of explanation")
+    if _arithmetic_resolution(root, section_id) is not None:
+        missing.append("a resolution beyond an arithmetic expression")
+    if not _has_role(root, section_id, "purpose"):
+        missing.append("lead")
+    if not _has_role(root, section_id, "consejo"):
+        missing.append("consejo")
+    if not _worked_ok(root, section_id):
+        missing.append("worked problem")
+    if not _has_autoficha(root, section_id):
+        missing.append("autoficha")
+    return missing
+
+
+def _named(root: Path, section: dict[str, str], reason: str) -> str:
+    missing = _missing_pieces(root, section)
+    if not missing or "Missing contract pieces:" in reason:
+        return reason
+    listing = ", ".join(missing)
+    return (
+        f"{reason} Missing contract pieces: {listing}. "
+        "Do not render. Do not hand the draft over. "
+        "A partial PDF is not a reason to stop."
+    )
 
 
 def _unwritten_reason(section: dict[str, str]) -> str:
     title = section["title"].strip() or section["id"]
     return _UNWRITTEN.format(title=title)
-
-
-def _first_unwritten(root: Path, sections: list[dict[str, str]]) -> dict[str, str] | None:
-    covered = supported_section_ids(root)
-    return next((section for section in sections if section["id"] not in covered), None)
 
 
 def _paragraph_count(root: Path, section_id: str) -> int:
@@ -312,7 +399,7 @@ def _unwritten_step(
         state,
         "studium_paragraph_record",
         {"section": section["id"], "excerpts": [excerpt_id], "role": "explanation"},
-        _unwritten_reason(section),
+        _named(root, section, _unwritten_reason(section)),
         blocked=blocked_sections(root),
     )
 
@@ -322,17 +409,18 @@ def _render_step(
     root: Path,
     sections: list[dict[str, str]],
 ) -> dict[str, object]:
-    empty = _empty_sections(sections, supported_section_ids(root))
-    blocked = blocked_sections(root)
-    parts: list[str] = []
-    if blocked:
-        names = ", ".join(f"{item['id']} ({item['title']})" if item["title"] else str(item["id"]) for item in blocked)
-        parts.append(f"Blocked sections: {names}.")
-    if empty:
-        names = ", ".join(f"{section['id']} ({section['title']})" for section in empty)
-        parts.append(f"Empty sections stay gaps: {names}.")
-    parts.append("Render the DRAFT. Do not request release.")
-    return _step(state, "studium_render", {}, " ".join(parts), blocked=blocked)
+    """One render after every planned chapter meets the contract. The book stays unreleased."""
+
+    unfinished = _unfinished_step(state, root, sections)
+    if unfinished is not None:
+        return unfinished
+    return _step(
+        state,
+        "studium_render",
+        {},
+        "Render the DRAFT once. Do not stop mid-book for a preview. Do not request release.",
+        blocked=blocked_sections(root),
+    )
 
 
 def _pending_problem(root: Path, sections: list[dict[str, str]]) -> dict[str, object] | None:
@@ -680,7 +768,7 @@ def _explanation_step(
         state,
         "studium_paragraph_record",
         {"section": section["id"], "excerpts": [excerpt_id], "role": "explanation"},
-        reason,
+        _named(root, section, reason),
         blocked=blocked_sections(root),
     )
 
@@ -699,10 +787,14 @@ def _shape_gap(
             state,
             "studium_computation_check",
             {"section": section["id"]},
-            (
-                f"Record a worked problem for {section['id']} ({section['title']}): "
-                "a replayed computation or a numeric result cited from two excerpts. "
-                + _RUST_PROBLEM
+            _named(
+                root,
+                section,
+                (
+                    f"Record a worked problem for {section['id']} ({section['title']}): "
+                    "a replayed computation or a numeric result cited from two excerpts. "
+                    + _RUST_PROBLEM
+                ),
             ),
             blocked=blocked_sections(root),
         )
@@ -735,7 +827,7 @@ def _role_step(
         state,
         "studium_paragraph_record",
         {"section": section["id"], "excerpts": [excerpt_id], "role": role},
-        reason,
+        _named(root, section, reason),
         blocked=blocked_sections(root),
     )
 

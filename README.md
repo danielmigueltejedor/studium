@@ -64,6 +64,8 @@ draft PDF
 - a worked problem whose resolution is only an arithmetic expression
 - a Rust test used as the worked problem of a book whose profile is not `COMPUTER_SCIENCE`
 
+While one of those is open, the next action is to write that chapter. The reason names the chapter and the missing contract pieces. A partial PDF is not a reason to stop. Render once only after every planned chapter meets the contract. The book stays unreleased.
+
 ## Chapter shape
 
 Every chapter uses the same shape:
