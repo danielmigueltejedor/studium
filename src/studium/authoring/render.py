@@ -1356,10 +1356,34 @@ def _box(title: str, body: list[str], kind: str) -> list[str]:
     ]
 
 
+def _domain_profile(root: Path) -> str:
+    course = load_project_toml(root).get("course")
+    if isinstance(course, dict) and isinstance(course.get("domain_profile"), str):
+        return str(course["domain_profile"])
+    return "GENERAL"
+
+
+def _worked_problem_records(root: Path, section_id: str) -> list[dict[str, object]]:
+    """Problems that may appear as the chapter's worked problem.
+
+    A Rust test is not the worked problem of a book that is not computer science.
+    """
+
+    profile = _domain_profile(root)
+    found: list[dict[str, object]] = []
+    for record in fold_by_id(root / PROBLEMS):
+        if record.get("section") != section_id:
+            continue
+        if record.get("kind") == "rust" and profile != "COMPUTER_SCIENCE":
+            continue
+        found.append(record)
+    return found
+
+
 def _worked_box(root: Path, section_id: str, copy: dict[str, str]) -> list[str]:
     """One worked problem per chapter, with the statement, the working, and the answer."""
 
-    problems = [record for record in fold_by_id(root / PROBLEMS) if record.get("section") == section_id]
+    problems = _worked_problem_records(root, section_id)
     computations = [
         record
         for record in fold_by_id(root / COMPUTATIONS)
@@ -1535,9 +1559,7 @@ def _audit_label(root: Path, record: dict[str, object]) -> str:
 
 
 def _section_has_replay(root: Path, section_id: str) -> bool:
-    for record in fold_by_id(root / PROBLEMS):
-        if record.get("section") != section_id:
-            continue
+    for record in _worked_problem_records(root, section_id):
         if record.get("kind") == "rust" and record.get("status") == "checked" and record.get("correct") is True:
             return True
     for record in fold_by_id(root / COMPUTATIONS):
@@ -1548,7 +1570,10 @@ def _section_has_replay(root: Path, section_id: str) -> bool:
 
 def _solution_lines(root: Path, copy: dict[str, str]) -> list[str]:
     lines: list[str] = []
+    profile = _domain_profile(root)
     for record in fold_by_id(root / PROBLEMS):
+        if record.get("kind") == "rust" and profile != "COMPUTER_SCIENCE":
+            continue
         checked = record.get("kind") == "rust" and record.get("status") == "checked" and record.get("correct") is True
         witnessed = record.get("status") == "two_witnesses" or record.get("corroboration") == "two_witnesses"
         if not checked and not witnessed:

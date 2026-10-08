@@ -365,6 +365,8 @@ _TOOLS: tuple[dict[str, object], ...] = (
         "class": "WRITE",
         "description": (
             "Run a stored Rust test 3 times with a timeout and no network. "
+            "Three identical rustc runs are a reproducibility check, not an independent proof. "
+            "Do not treat the three runs as three methods. "
             "Record each pass or fail. The problem is checked only when all 3 runs pass. "
             "A numeric problem stays two_witnesses only when the excerpts are independent, and it is not verified. "
             "If rustc or cargo is missing, return compiler_missing and do not pretend the test passed. "
@@ -444,7 +446,7 @@ _TOOLS: tuple[dict[str, object], ...] = (
             "Store an expression and the reported result, then evaluate that expression again. "
             "The result is accepted only when the server's value matches. "
             "Do not trust a number the model reports. "
-            "A match is replayed, not verified, and it is not absolute truth. "
+            "A match is COMPUTATION_REPRODUCED, not mathematically verified and not academically reviewed. "
             "Does not fetch URLs and does not move the book to RELEASED."
         ),
     },
@@ -711,6 +713,8 @@ _INSTRUCTIONS = (
             "a worked problem's resolution is only an arithmetic expression, "
             "or a Rust test is the worked problem of a book that is not COMPUTER_SCIENCE. "
             "A programming book may keep the 3-pass rustc check. "
+            "Three identical rustc runs are a reproducibility check, not an independent proof. "
+            "Do not treat the three runs as three methods. "
             "User-provided local sources and open-web sources both count. Pirate copies and forbidden licenses do not. "
             "A worked problem outside COMPUTER_SCIENCE is a replayed computation or a numeric result cited from two excerpts. "
             "When no course guide is stored, the blueprint is a study book: roadmap, foundations, the topic chapters, "

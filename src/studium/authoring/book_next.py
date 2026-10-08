@@ -20,6 +20,7 @@ from studium.authoring.audit import (
 )
 from studium.authoring.blueprint import current_sections
 from studium.authoring.computation import list_computations
+from studium.authoring.problems import REPRODUCIBILITY_TEXT, RUST_NOT_WORKED_PROBLEM
 from studium.authoring.excerpts import excerpts_by_id
 from studium.authoring.paragraphs import supported_paragraphs, supported_section_ids
 from studium.authoring.section_blocks import blocked_ids, blocked_sections, mark_blocked, offers_for, remember_offer
@@ -63,7 +64,7 @@ _NEED_SOURCES = (
     "Pirate copies and forbidden licenses do not. Do not write or render yet."
 )
 _RUST_PROBLEM = (
-    "A Rust test cannot be the worked problem of a book that is not COMPUTER_SCIENCE. "
+    f"{RUST_NOT_WORKED_PROBLEM} {REPRODUCIBILITY_TEXT} "
     "Record a replayed computation or a numeric result cited from two excerpts."
 )
 _UNWRITTEN = (
@@ -349,7 +350,7 @@ def _pending_problem(root: Path, sections: list[dict[str, str]]) -> dict[str, ob
             return {
                 "tool": "studium_problem_check",
                 "arguments": {"id": unchecked["id"]},
-                "reason": "Run studium_problem_check. A Rust test is checked only after three passing runs.",
+                "reason": f"Run studium_problem_check. {REPRODUCIBILITY_TEXT}",
             }
         if offers_for(root, section_id, "problem_record"):
             mark_blocked(root, section_id=section_id, title=section["title"], reason=_NO_REPLAY)
