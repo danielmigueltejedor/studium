@@ -4,12 +4,65 @@ import json
 import re
 import subprocess
 
-from studium.authoring.render import find_engine
+from studium.authoring.render import emit_prose, find_engine, render_text_run
 from studium.mcp.server import dispatch, open_workspace
 
 _GREEK = "Density ρ₀ and viscosity μ meet length ℓ in the sum Σ × ρ."
 _PLAIN = "The opened page is the support for a second explanatory paragraph."
 _UNCHECKED = "An unchecked draft sentence stays in the draft."
+
+
+def test_unicode_and_delimited_math_stay_in_math_mode():
+    tex = render_text_run("Density ρ₀ and viscosity μ meet length ℓ in the sum Σ × ρ.")
+    assert r"\(\rho_{0}\)" in tex
+    assert r"\(\mu\)" in tex
+    assert r"\(\ell\)" in tex
+    assert r"\(\Sigma \times \rho\)" in tex
+    assert "Density" in tex
+    assert "and viscosity" in tex
+    joined = "con ρ₀ ≤ μ y la relación"
+    spanish = render_text_run(joined)
+    assert r"\(\rho_{0} \leq \mu\)" in spanish
+    assert " y la" in spanish
+    pressure = render_text_run("La presión cumple p = ρ g h en el punto.")
+    assert r"\(p = \rho g h\)" in pressure
+    assert "cumple " in pressure
+    assert " en el punto." in pressure
+    explicit = render_text_run(r"La relación \(E = mc^{2}\) cierra el párrafo.")
+    assert r"\(E = mc^{2}\)" in explicit
+    assert r"\textbackslash" not in explicit
+    dollar = render_text_run(r"la energía $E = mc^2$ basta")
+    assert r"\(E = mc^2\)" in dollar
+    assert "la energía " in dollar
+    for raw in ("ρ", "₀", "μ", "ℓ", "Σ", "×", "≤"):
+        assert raw not in tex + spanish + pressure
+
+
+def test_fenced_code_becomes_a_listing_and_display_math_stays_display():
+    src = "Usa el programa.\n\n```c\nint main(void) {\n    return 0;\n}\n```\n"
+    tex = "\n".join(emit_prose(src))
+    assert r"\begin{lstlisting}[" in tex
+    assert "language={C}" in tex
+    assert "int main(void)" in tex
+    assert "    return 0;" in tex
+    assert "```" not in tex
+    assert "Usa el programa." in tex
+    rust = "\n".join(emit_prose("```rust\nfn main() {}\n```"))
+    assert "language={Rust}" in rust
+    assert "fn main()" in rust
+    inline = render_text_run("Llama a `printf` y sigue.")
+    assert r"\texttt{printf}" in inline
+    assert "`" not in inline
+    displayed = "\n".join(emit_prose("Antes.\n\n\\begin{equation}\nE = mc^{2}\n\\end{equation}\n\nDespués."))
+    assert r"\begin{equation}" in displayed
+    assert r"\end{equation}" in displayed
+    assert r"\textbackslash" not in displayed
+    assert "Antes." in displayed
+    assert "Después." in displayed
+    standalone = "\n".join(emit_prose("ρ = m/V"))
+    assert r"\[" in standalone
+    assert r"\rho = m/V" in standalone
+    assert "ρ" not in standalone
 
 
 def test_draft_tex_has_the_book_skeleton_and_escapes_greek(tmp_path, monkeypatch):
@@ -178,8 +231,10 @@ def test_spanish_draft_uses_boxes_without_internal_ids(tmp_path, monkeypatch):
     assert r"\chapter{Conservación}" in tex
     assert "Tema 1:" not in tex
     assert "Tema 2:" not in tex
-    assert r"\chapter{Energía}" in tex
-    assert "Esta sección está vacía." in tex
+    assert r"\chapter{Energía}" not in tex
+    assert "Esta sección está vacía." not in tex
+    assert "Energía: todavía no está escrito" in tex
+    assert tex.index("Plan de estudio") < tex.index("Energía: todavía no está escrito")
     for heading in (
         "Prefacio",
         "Cómo usar este libro",
@@ -220,7 +275,8 @@ def test_spanish_draft_uses_boxes_without_internal_ids(tmp_path, monkeypatch):
     assert rendered["project_state"] != "RELEASED"
     assert (root / ".studium" / "state.json").read_bytes() == state_before
     if find_engine() is not None:
-        assert rendered["status"] == "rendered"
+        assert rendered["status"] == "incomplete"
+        assert rendered["message"] == "The book is incomplete. Write the next unwritten chapter: Energía."
         pdf = root / "latex" / "draft.pdf"
         assert pdf.read_bytes().startswith(b"%PDF-")
         visible = subprocess.check_output(["pdftotext", str(pdf), "-"], text=True)
@@ -473,6 +529,203 @@ def test_consejo_paragraph_becomes_a_tcolorbox_with_babel_spanish(tmp_path, monk
         assert "Contents" not in visible
 
 
+def test_draft_cover_math_code_boxes_and_figure_caption(tmp_path, monkeypatch):
+    monkeypatch.setattr("urllib.request.urlopen", _explode)
+    session = open_workspace(str(tmp_path))
+    created = dispatch(
+        "studium_project_create",
+        {"slug": "programacion", "topic": "Programación en C", "language": "es"},
+        session=session,
+    )
+    assert created["status"] == "created"
+    root = tmp_path / "programacion"
+    source_id = _source(session, "https://open.example/c")
+    excerpt_id = _excerpt(session, source_id, "https://open.example/c", "La página abierta describe el bucle.")
+    dispatch(
+        "studium_blueprint_store",
+        {
+            "sections": [
+                {"id": "tema-1", "title": "Bucles"},
+                {"id": "tema-2", "title": "Figuras"},
+            ]
+        },
+        session=session,
+    )
+    explanation = (
+        "La suma recorre los índices con ρ₀ ≤ μ y la relación \\(E = mc^{2}\\).\n\n"
+        "ρ = m/V\n\n"
+        "```c\n"
+        "int main(void) {\n"
+        "    return 0;\n"
+        "}\n"
+        "```"
+    )
+    dispatch(
+        "studium_paragraph_record",
+        {"section": "tema-1", "role": "explanation", "text": explanation, "excerpts": [excerpt_id]},
+        session=session,
+    )
+    dispatch(
+        "studium_paragraph_record",
+        {
+            "section": "tema-1",
+            "role": "consejo",
+            "text": "Comprueba el índice antes de leer el elemento.",
+            "excerpts": [excerpt_id],
+        },
+        session=session,
+    )
+    dispatch(
+        "studium_paragraph_record",
+        {
+            "section": "tema-1",
+            "role": "definition",
+            "text": "Se llama bucle a una repetición con una condición de salida.",
+            "excerpts": [excerpt_id],
+        },
+        session=session,
+    )
+    dispatch(
+        "studium_paragraph_record",
+        {
+            "section": "tema-1",
+            "role": "self_check",
+            "text": "Escribe el mismo bucle con tus palabras.",
+            "excerpts": [excerpt_id],
+        },
+        session=session,
+    )
+    computed = dispatch(
+        "studium_computation_check",
+        {"expression": "2 + 2", "result": 4, "section": "tema-1"},
+        session=session,
+    )
+    assert computed["status"] == "replayed"
+    dispatch(
+        "studium_paragraph_record",
+        {
+            "section": "tema-2",
+            "role": "explanation",
+            "text": "El dibujo acompaña la explicación y no sustituye la comprobación.",
+            "excerpts": [excerpt_id],
+        },
+        session=session,
+    )
+    scheme = dispatch(
+        "studium_figure_record",
+        {
+            "section": "tema-1",
+            "caption": "Esquema del bucle.",
+            "kind": "python",
+            "source": _PLOT,
+            "excerpts": [excerpt_id],
+        },
+        session=session,
+    )
+    measured = dispatch(
+        "studium_figure_record",
+        {
+            "section": "tema-2",
+            "caption": "La longitud dibujada es 2.",
+            "kind": "python",
+            "source": _PLOT,
+            "excerpts": [excerpt_id],
+        },
+        session=session,
+    )
+    assert dispatch("studium_figure_check", {"id": scheme["figure"]["id"]}, session=session)["checked"] is True
+    assert dispatch("studium_figure_check", {"id": measured["figure"]["id"]}, session=session)["checked"] is True
+    rendered = dispatch("studium_render", {}, session=session)
+    tex = (root / "latex" / "draft.tex").read_text(encoding="utf-8")
+    cover = tex.split(r"\begin{document}", 1)[1].split(r"\clearpage", 1)[0]
+    assert r"\maketitle" not in tex
+    assert "Studium" in cover
+    assert "Programación en C" in cover
+    assert "Apuntes de trabajo" in cover
+    assert "Borrador" in cover
+    assert "No publicado" in cover
+    assert "Edición 0.1.0" in cover
+    assert r"\today" in cover
+    assert r"\vspace*{0.08\textheight}" in cover
+    assert r"\vfill" in cover
+    assert cover.index("Studium") < cover.index("Programación en C") < cover.index("Apuntes de trabajo")
+    assert cover.index("Apuntes de trabajo") < cover.index("Borrador") < cover.index("Edición 0.1.0")
+    assert "DRAFT" not in tex
+    assert "Not released" not in tex
+    assert r"\(E = mc^{2}\)" in tex
+    assert r"\(\rho_{0} \leq \mu\)" in tex
+    assert r"\[" in tex
+    assert r"\rho = m/V" in tex
+    assert r"\textbackslash{}(" not in tex
+    assert "ρ" not in tex
+    assert "```" not in tex
+    assert r"\begin{lstlisting}[" in tex
+    assert "language={C}" in tex
+    assert r"\ttfamily" in tex
+    assert "int main(void) {" in tex
+    assert "    return 0;" in tex
+    assert "studiumtip" in tex
+    assert "studiumdef" in tex
+    assert "studiumworked" in tex
+    assert "studiumcheck" in tex
+    backs = [
+        _color(tex, "studiumTipBack"),
+        _color(tex, "studiumDefBack"),
+        _color(tex, "studiumWorkedBack"),
+        _color(tex, "studiumCheckBack"),
+    ]
+    frames = [
+        _color(tex, "studiumTipFrame"),
+        _color(tex, "studiumDefFrame"),
+        _color(tex, "studiumWorkedFrame"),
+        _color(tex, "studiumCheckFrame"),
+    ]
+    assert len(set(backs)) == 4
+    assert len(set(frames)) == 4
+    assert set(backs).isdisjoint(frames)
+    outside = _outside_boxes(tex)
+    assert "La suma recorre los índices" in outside
+    assert "int main(void)" in outside
+    assert "Comprueba el índice antes de leer el elemento." not in outside
+    assert "Se llama bucle a una repetición con una condición de salida." not in outside
+    chapter, _marker, appendix = tex.partition(r"\chapter{Auditoría de fuentes}")
+    assert "Una figura no demuestra la ciencia." not in tex
+    assert "A figure does not prove the science." not in tex
+    assert "Esquema del bucle." in chapter
+    assert r"\includegraphics" in chapter
+    assert r"\textheight/100*38" in chapter
+    assert r"\linewidth" in chapter
+    assert "La cifra del pie sigue sin comprobar." not in chapter
+    assert "La cifra del pie sigue sin comprobar." in appendix
+    assert rendered["released"] is False
+    assert rendered["project_state"] != "RELEASED"
+    if find_engine() is not None:
+        assert rendered["status"] == "rendered", rendered["message"]
+        pdf = root / "latex" / "draft.pdf"
+        assert pdf.read_bytes().startswith(b"%PDF-")
+        visible = subprocess.check_output(["pdftotext", "-layout", str(pdf), "-"], text=True)
+        assert "Programación en C" in visible
+        assert "Borrador" in visible
+        assert "int main" in visible
+        assert "Una figura no demuestra la ciencia." not in visible
+    else:
+        assert rendered["status"] == "compiler_missing"
+        assert not (root / "latex" / "draft.pdf").exists()
+
+
+def _color(tex: str, name: str) -> str:
+    match = re.search(r"\\definecolor\{" + name + r"\}\{RGB\}\{([^}]+)\}", tex)
+    assert match is not None
+    return match.group(1)
+
+
+_PNG = (
+    "89504e470d0a1a0a0000000d49484452000000010000000108000000003a7e9b55"
+    "0000000a49444154789c63f80f0001010100b138f6140000000049454e44ae426082"
+)
+_PLOT = "import pathlib\n" f'pathlib.Path("figure.png").write_bytes(bytes.fromhex("{_PNG}"))\n'
+
+
 def _outside_boxes(tex: str) -> str:
     return re.sub(r"\\begin\{tcolorbox\}.*?\\end\{tcolorbox\}", "", tex, flags=re.S)
 
@@ -567,7 +820,12 @@ def test_book_next_does_not_render_a_short_blocked_book(tmp_path, monkeypatch):
         assert "ask the user" not in json.dumps(nxt).lower().replace("do not ask the user how to format the page.", "")
     rendered = dispatch("studium_render", {}, session=session)
     tex = (root / "latex" / "draft.tex").read_text(encoding="utf-8")
-    assert "Gap: this section has no paragraph tied to an opened excerpt." in tex
+    assert "Gap: this section has no paragraph tied to an opened excerpt." not in tex
+    assert r"\chapter{Origenes}" not in tex
+    assert "Origenes: not written yet" in tex
+    assert tex.index("Study plan") < tex.index("Origenes: not written yet")
+    assert rendered["status"] == "incomplete"
+    assert rendered["message"] == "The book is incomplete. Write the next unwritten chapter: Origenes."
     assert rendered["released"] is False
     assert json.loads((root / ".studium" / "state.json").read_text(encoding="utf-8"))["state"] != "RELEASED"
 

@@ -47,40 +47,32 @@ Workflow:
   studium status [--json] [--project PATH]
   studium next [--json] [--project PATH]
   studium book-next [--json] [--project PATH]
-  studium computation --expression STR --result STR [--json] [--project PATH]
-  studium run [--project PATH]
-  studium blueprint set --section ID TITLE [--section ID TITLE ...] [--json] [--project PATH]
-  studium excerpt add --source ID --url URL --text STR [--json] [--project PATH]
-  studium paragraph add --section ID --text STR --excerpt ID [--excerpt ID ...] [--json] [--project PATH]
-  studium completeness [--json] [--project PATH]
-  studium claim add --text STR [--source ID ...] [--excerpt ID ...] [--json] [--project PATH]
-  studium verify (--fast | --full) [--entity ID] [--json] [--project PATH]
-  studium render [--json] [--project PATH]
-  studium build [--project PATH]
-  studium release [--project PATH]
+  studium agent-pack [--task TSK-] [--project PATH]
   studium mcp [--workspace PATH] [--project PATH] [--http] [--public] [--port PORT] [--token TOKEN]
 """
 
 _ADVANCED = """\
-Advanced:
-  studium doctor [--project PATH]
-  studium graph [--entity ID | --impact ID] [--json]
-  studium tasks [--json]
-  studium agent-pack [--task TSK-] [--project PATH]
-  studium diff <edition-a> <edition-b> [--json]
-  studium refresh-course [--project PATH]
+Draft:
+  studium computation --expression STR --result STR [--json] [--project PATH]
+  studium blueprint set|get [--json] [--project PATH]
+  studium excerpt add|list|get [--json] [--project PATH]
+  studium paragraph add|list|replace [--json] [--project PATH]
+  studium completeness [--json] [--project PATH]
+  studium claim add|list [--json] [--project PATH]
+  studium problem add|check|list [--json] [--project PATH]
+  studium figure add|check|remove [--json] [--project PATH]
+  studium audit add [--json] [--project PATH]
+  studium contradiction [--json] [--project PATH]
+  studium review [--json] [--project PATH]
+  studium verify (--fast | --full) [--entity ID] [--json] [--project PATH]
+  studium render [--json] [--project PATH]
+  studium media --url URL [--json] [--project PATH]
+  studium student-notes --title STR [--json] [--project PATH]
 """
 
 _RECORDS = """\
 Records:
-  studium source ...
-  studium claim ...
-  studium exercise ...
-  studium derivation ...
-  studium equation ...
-  studium figure ...
-  studium review ...
-  studium sources status|add|list|audit
+  studium sources status|add|list|get|audit|register|remove|impact|reject
 """
 
 

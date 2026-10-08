@@ -19,6 +19,27 @@ _RUST_SOURCE = "#[test]\nfn holds() {\n    assert_eq!(2 + 2, 4);\n}\n"
 _RUST_INVOCATION = ["rustc", "--test", "main.rs", "-o", "tester"]
 
 
+def test_book_next_resumes_from_the_book_files(tmp_path, monkeypatch):
+    monkeypatch.setattr("urllib.request.urlopen", _explode)
+    session = open_workspace(str(tmp_path))
+    created = dispatch(
+        "studium_project_create",
+        {"slug": "historia", "topic": "Historia medieval"},
+        session=session,
+    )
+    assert created["status"] == "created"
+    first = dispatch("studium_book_next", {}, session=session)
+    fresh = open_workspace(str(tmp_path))
+    second = dispatch("studium_book_next", {"project": "historia"}, session=fresh)
+    third = dispatch("studium_book_next", {"project": "historia"}, session=fresh)
+    assert first["tool"] == "studium_public_source_record"
+    assert second["tool"] == first["tool"]
+    assert second["arguments"] == first["arguments"]
+    assert third["tool"] == second["tool"]
+    assert third["arguments"] == second["arguments"]
+    assert second["released"] is False
+
+
 def test_book_next_on_an_empty_topic_book(tmp_path, monkeypatch):
     monkeypatch.setattr("urllib.request.urlopen", _explode)
     session = open_workspace(str(tmp_path))
@@ -167,6 +188,16 @@ def test_book_next_rejects_a_rust_problem_outside_computer_science(tmp_path, mon
     )
     assert recorded["status"] == "recorded"
     assert recorded["problem"]["kind"] == "rust"
+    assert recorded["problem"]["status_text"] == (
+        "A Rust test cannot be the worked problem of a book that is not COMPUTER_SCIENCE. "
+        "Three identical rustc runs are a reproducibility check, not an independent proof."
+    )
+    assert "three methods" not in json.dumps(recorded).lower()
+    rendered = dispatch("studium_render", {}, session=fluids)
+    tex = (tmp_path / "fluidos" / "latex" / "draft.tex").read_text(encoding="utf-8")
+    assert "assert_eq!" not in tex
+    assert "Compute the mass from the stored density." not in tex
+    assert rendered["released"] is False
     nxt = dispatch("studium_book_next", {}, session=fluids)
     assert nxt["tool"] == "studium_problem_remove"
     assert nxt["tool"] != "studium_computation_check"
@@ -192,7 +223,9 @@ def test_book_next_rejects_a_rust_problem_outside_computer_science(tmp_path, mon
     code_next = dispatch("studium_book_next", {}, session=code)
     assert code_next["tool"] == "studium_problem_check"
     assert code_next["reason"] != _RUST_PROBLEM
-    assert "three passing runs" in code_next["reason"]
+    assert "reproducibility check" in code_next["reason"]
+    assert "not an independent proof" in code_next["reason"]
+    assert "three methods" not in code_next["reason"].lower()
     assert code_next["tool"] != "studium_render"
     assert code_next["released"] is False
 
@@ -400,6 +433,79 @@ def test_verify_still_refuses_release(tmp_path, monkeypatch):
     assert "ask the user" not in json.dumps(done).lower().replace("do not ask the user how to format the page.", "")
     assert json.loads(state_before)["state"] != "RELEASED"
     assert (root / ".studium" / "state.json").read_bytes() == state_before
+
+
+def test_one_written_chapter_and_one_empty_chapter_is_not_render(tmp_path, monkeypatch):
+    monkeypatch.setattr("urllib.request.urlopen", _explode)
+    session, root = _topic(tmp_path, "historia", "Historia medieval")
+    excerpts = [_opened_source(session, index) for index in range(12)]
+    sections = [
+        {"id": "historia", "title": "Historia"},
+        {"id": "sql", "title": "SQL"},
+        *[{"id": f"tema-{index}", "title": f"Tema {index}"} for index in range(3, 9)],
+    ]
+    dispatch("studium_blueprint_store", {"sections": sections}, session=session)
+    half = " ".join(["density"] * 200)
+    dispatch(
+        "studium_paragraph_record",
+        {"section": "historia", "role": "purpose", "text": "This chapter opens the history.", "excerpts": [excerpts[0]]},
+        session=session,
+    )
+    dispatch(
+        "studium_paragraph_record",
+        {"section": "historia", "role": "explanation", "text": half, "excerpts": [excerpts[0]]},
+        session=session,
+    )
+    dispatch(
+        "studium_paragraph_record",
+        {"section": "historia", "role": "explanation", "text": half + " continued", "excerpts": [excerpts[1]]},
+        session=session,
+    )
+    dispatch(
+        "studium_paragraph_record",
+        {"section": "historia", "role": "consejo", "text": "Keep the later chapters in the plan.", "excerpts": [excerpts[0]]},
+        session=session,
+    )
+    dispatch(
+        "studium_paragraph_record",
+        {"section": "historia", "role": "self_check", "text": "Name the next unwritten chapter.", "excerpts": [excerpts[0]]},
+        session=session,
+    )
+    witnessed = dispatch(
+        "studium_problem_record",
+        {
+            "section": "historia",
+            "prompt": "What do the two pages report?",
+            "expected": "4",
+            "excerpts": [excerpts[2], excerpts[3]],
+        },
+        session=session,
+    )
+    assert witnessed["problem"]["status"] == "two_witnesses"
+    nxt = dispatch("studium_book_next", {}, session=session)
+    assert nxt["tool"] == "studium_paragraph_record"
+    assert nxt["tool"] != "studium_render"
+    assert nxt["arguments"]["section"] == "sql"
+    assert nxt["reason"] == (
+        "Write the next unwritten chapter: SQL. "
+        "The book is incomplete while SQL has no paragraphs. "
+        "Do not render it as finished."
+    )
+    assert nxt["released"] is False
+    rendered = dispatch("studium_render", {}, session=session)
+    tex = (root / "latex" / "draft.tex").read_text(encoding="utf-8")
+    body = tex.split(r"\appendix", 1)[0]
+    assert r"\chapter{SQL}" not in tex
+    assert "SQL" not in body
+    assert "SQL: not written yet" in tex
+    assert tex.index("Study plan") < tex.index("SQL: not written yet")
+    assert rendered["status"] == "incomplete"
+    assert rendered["message"] == "The book is incomplete. Write the next unwritten chapter: SQL."
+    assert rendered["released"] is False
+    assert rendered["project_state"] != "RELEASED"
+    again = dispatch("studium_book_next", {}, session=session)
+    assert again["tool"] != "studium_render"
+    assert again["reason"] == nxt["reason"]
 
 
 def test_client_instructions_draft_without_asking_or_releasing():

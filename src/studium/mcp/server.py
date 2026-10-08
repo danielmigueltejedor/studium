@@ -129,6 +129,8 @@ _TOOLS: tuple[dict[str, object], ...] = (
             "a worked problem's resolution is only an arithmetic expression, or a Rust test is the worked problem "
             "of a book that is not COMPUTER_SCIENCE. "
             "Remove that stored Rust problem with studium_problem_remove before recording a new computation. "
+            "Do not return render as completion while any blueprint chapter has no paragraphs. "
+            "The next action is to write that unwritten chapter by name. "
             "User-provided local sources and open-web sources both count. Pirate copies and forbidden licenses do not. "
             "The order is write, then audit, then contradiction scan, then review, then render. "
             "Each chapter is a short lead, several paragraphs of explanation as body text, at most one consejo, "
@@ -373,7 +375,11 @@ _TOOLS: tuple[dict[str, object], ...] = (
         "class": "WRITE",
         "description": (
             "Run a stored Rust test 3 times with a timeout and no network. "
+            "Three identical rustc runs are a reproducibility check, not an independent proof. "
+            "Do not treat the three runs as three methods. "
             "Record each pass or fail. The problem is checked only when all 3 runs pass. "
+            "A file of only comments is not a test and stays unchecked. "
+            "The source must contain a #[test] function or an assert, assert_eq, or assert_ne. "
             "A numeric problem stays two_witnesses only when the excerpts are independent, and it is not verified. "
             "If rustc or cargo is missing, return compiler_missing and do not pretend the test passed. "
             "Does not fetch URLs and does not move the book to RELEASED."
@@ -454,7 +460,7 @@ _TOOLS: tuple[dict[str, object], ...] = (
             "An expression that uses only integers and the four operators is accepted only when "
             "every one of those numbers appears in one excerpt cited by a paragraph. "
             "Do not trust a number the model reports. "
-            "A match is replayed, not verified, and it is not absolute truth. "
+            "A match is COMPUTATION_REPRODUCED, not mathematically verified and not academically reviewed. "
             "Does not fetch URLs and does not move the book to RELEASED."
         ),
     },
@@ -666,7 +672,8 @@ _INSTRUCTIONS = (
             "When a blueprint exists, next_action names the empty sections, tells the client to fill them from opened open-licensed text, and tells the client to add checked problems. "
             "Call studium_problem_record with a prompt and either a Rust test or a numeric answer tied to two stored excerpt ids. "
             "studium_problem_check runs a Rust test 3 times with a timeout and no network. "
-            "The problem is checked only when all 3 runs pass. "
+            "The problem is checked only when all 3 runs pass and the source has a #[test] function or an assert, assert_eq, or assert_ne. "
+            "A file of only comments stays unchecked. Three runs of an empty file do not count. "
             "studium_problem_remove deletes one problem by id. A missing id is an error. "
             "It does not delete sources or paragraphs. "
             "A numeric problem is two_witnesses only when the two excerpts come from different public sources, and it is not verified. "
@@ -725,6 +732,8 @@ _INSTRUCTIONS = (
             "or a Rust test is the worked problem of a book that is not COMPUTER_SCIENCE. "
             "Remove that stored Rust problem with studium_problem_remove before recording a new computation. "
             "A programming book may keep the 3-pass rustc check. "
+            "Three identical rustc runs are a reproducibility check, not an independent proof. "
+            "Do not treat the three runs as three methods. "
             "User-provided local sources and open-web sources both count. Pirate copies and forbidden licenses do not. "
             "A worked problem outside COMPUTER_SCIENCE is a replayed computation or a numeric result cited from two excerpts. "
             "When no course guide is stored, the blueprint is a study book: roadmap, foundations, the topic chapters, "
