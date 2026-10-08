@@ -112,7 +112,7 @@ def build_create_request(
 
 
 def create_project(request: CreateRequest) -> CreateResult:
-    from studium.authoring.languages import canonical_language
+    from studium.domain.languages import canonical_language
 
     if request.language is not None:
         canonical = canonical_language(request.language)

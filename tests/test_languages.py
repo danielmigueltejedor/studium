@@ -2,7 +2,7 @@
 
 import tomllib
 
-from studium.authoring.languages import (
+from studium.domain.languages import (
     SPANISH_CHAPTER,
     describe,
     messages,
@@ -21,7 +21,7 @@ _CATALOG = (
     ("pt", "portuguese", "Enunciado", "Prefácio", "Índice"),
     ("it", "italian", "Enunciato", "Prefazione", "Indice"),
     ("ca", "catalan", "Enunciat", "Prefaci", "Índex"),
-    ("gl", "galician", "Resposta", "Auditoría de fontes", "Folla de fórmulas"),
+    ("gl", "galician", "Resposta", "Auditoría de fontes", "Índice"),
 )
 
 
@@ -109,6 +109,9 @@ def test_catalog_languages_load_their_babel_option_and_chrome(tmp_path, monkeypa
         assert r"\renewcommand{\contentsname}{" + contents + "}" in tex
         assert statement in tex
         assert preface in tex
+        if code == "gl":
+            assert "Folla de fórmulas" in tex
+            assert "está vacía" not in tex
         assert rendered["released"] is False
         assert _PROSE in tex
 
