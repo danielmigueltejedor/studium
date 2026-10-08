@@ -540,7 +540,7 @@ def test_draft_cover_math_code_boxes_and_figure_caption(tmp_path, monkeypatch):
     assert created["status"] == "created"
     root = tmp_path / "programacion"
     source_id = _source(session, "https://open.example/c")
-    excerpt_id = _excerpt(session, source_id, "https://open.example/c", "La página abierta describe el bucle.")
+    excerpt_id = _excerpt(session, source_id, "https://open.example/c", "La página abierta describe el bucle y el caso 2.")
     dispatch(
         "studium_blueprint_store",
         {
