@@ -259,7 +259,9 @@ def test_book_next_refuses_a_chapter_with_one_explanation_section(tmp_path, monk
     )
     rendered = dispatch("studium_render", {}, session=session)
     tex = (root / "latex" / "draft.tex").read_text(encoding="utf-8")
-    assert tex.count(r"\section{Explicación}") == 2
+    assert r"\section{Explicación}" not in tex
+    assert explanation in tex
+    assert "La segunda explicación sigue el balance con otro desarrollo." in tex
     assert rendered["released"] is False
     still = dispatch("studium_book_next", {}, session=session)
     assert still["tool"] != "studium_render"

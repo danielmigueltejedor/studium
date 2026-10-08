@@ -935,6 +935,7 @@ def _copy(language: str) -> dict[str, str]:
             "consejo": "Consejo",
             "definition": "Definición",
             "section": "Explicación",
+            "unwritten": "todavía no está escrito",
             "enunciado": "Enunciado",
             "resolucion": "Resolución",
             "respuesta": "Respuesta",
@@ -972,6 +973,7 @@ def _copy(language: str) -> dict[str, str]:
             "consejo": "Tip",
             "definition": "Definition",
             "section": "Explanation",
+            "unwritten": "not written yet",
             "enunciado": "Statement",
             "resolucion": "Solution",
             "respuesta": "Answer",
@@ -1283,21 +1285,60 @@ def _chapter_lines(
             body.append(raw)
     lines: list[str] = []
     lines.extend(_italic(purpose))
-    if body:
-        lines.extend(["", r"\section{" + latex_escape(copy["section"]) + "}"])
-        lines.extend(_plain([body[0]]))
-        lines.extend(_figure_lines(root, section_id, copy))
-        for text in body[1:]:
-            lines.extend(["", r"\section{" + latex_escape(copy["section"]) + "}"])
-            lines.extend(_plain([text]))
-    else:
-        lines.extend(_figure_lines(root, section_id, copy))
+    lines.extend(_body_lines(root, section_id, body, copy))
     lines.extend(_box(copy["consejo"], _plain(consejo), "consejo"))
     for text in definitions:
         lines.extend(_box(copy["definition"], _plain([text]), "definition"))
     lines.extend(_worked_box(root, section_id, copy))
     lines.extend(_box(copy["self_check"], _plain(self_check), "self_check"))
     return lines
+
+
+def _body_lines(root: Path, section_id: str, body: list[str], copy: dict[str, str]) -> list[str]:
+    """Consecutive explanation paragraphs are one body. A new section uses the paragraph's own title."""
+
+    lines: list[str] = []
+    placed = False
+    for kind, value in _body_chunks(body):
+        if kind == "section":
+            lines.extend(["", r"\section{" + latex_escape(value) + "}"])
+            continue
+        lines.extend(_plain([value]))
+        if not placed:
+            lines.extend(_figure_lines(root, section_id, copy))
+            placed = True
+    if not placed:
+        lines.extend(_figure_lines(root, section_id, copy))
+    return lines
+
+
+def _body_chunks(body: list[str]) -> list[tuple[str, str]]:
+    chunks: list[tuple[str, str]] = []
+    for text in body:
+        title, rest = _heading_from_paragraph(text)
+        if title is not None:
+            chunks.append(("section", title))
+        if rest.strip():
+            chunks.append(("text", rest))
+    return chunks
+
+
+_GENERIC_SECTION = frozenset({"explicación", "explicacion", "explanation"})
+
+
+def _heading_from_paragraph(text: str) -> tuple[str | None, str]:
+    """A title is the paragraph's own first line. The word Explicación is not a title."""
+
+    if "\n" not in text:
+        return None, text
+    first, rest = text.split("\n", 1)
+    title = first.strip()
+    body = rest.strip()
+    if not title or not body or len(title) > 80 or title[-1] in ".!?":
+        return None, text
+    if title.casefold() in _GENERIC_SECTION:
+        return None, body
+    return title, body
 
 
 def _split_box_lead(text: str) -> tuple[str | None, str]:
@@ -1451,11 +1492,23 @@ def _figure_lines(root: Path, section_id: str, _copy: dict[str, str]) -> list[st
         else:
             fitted = _fit_block(r"\includegraphics{" + output + "}", consume_box=True)
         caption = record.get("caption") if isinstance(record.get("caption"), str) else ""
-        lines.extend(["", r"\noindent\begin{minipage}{\linewidth}", r"\centering"])
+        lines.extend(
+            [
+                "",
+                r"\par\vspace{\baselineskip}",
+                r"\noindent\begin{minipage}{\linewidth}",
+                r"\centering",
+            ]
+        )
         lines.extend(fitted)
         if caption.strip():
             lines.extend([r"\par\nopagebreak", r"{\small " + render_text_run(caption) + r"\par}"])
-        lines.append(r"\end{minipage}")
+        lines.extend(
+            [
+                r"\end{minipage}",
+                r"\par\vspace{\baselineskip}",
+            ]
+        )
     return lines
 
 
