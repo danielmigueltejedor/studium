@@ -66,6 +66,11 @@ _RUST_PROBLEM = (
     "A Rust test cannot be the worked problem of a book that is not COMPUTER_SCIENCE. "
     "Record a replayed computation or a numeric result cited from two excerpts."
 )
+_UNWRITTEN = (
+    "Write the next unwritten chapter: {title}. "
+    "The book is incomplete while {title} has no paragraphs. "
+    "Do not render it as finished."
+)
 _TWO_SECTIONS = (
     "This chapter needs at least two section blocks of explanation, not a single Explicación, "
     "plus the lead, one consejo, one worked problem, and one autoficha."
@@ -173,17 +178,7 @@ def book_next(root: Path) -> dict[str, object]:
     pending = _pending_paragraph(root, sections)
     if pending is not None:
         section, excerpt_id = pending
-        return _step(
-            state,
-            "studium_paragraph_record",
-            {"section": section["id"], "excerpts": [excerpt_id], "role": "purpose"},
-            (
-                f"Write the lead for {section['id']} ({section['title']}) from the stored excerpt. "
-                "A sentence that repeats it is not a chapter. "
-                "Attach the sources you used. A one-sentence restatement is too short. "
-                + _CHAPTER
-            ),
-        )
+        return _unwritten_step(state, root, section, excerpt_id)
     problem = _pending_problem(root, sections)
     if problem is not None:
         return _step(state, str(problem["tool"]), _arguments(problem.get("arguments")), str(problem["reason"]))
@@ -230,6 +225,8 @@ def book_next(root: Path) -> dict[str, object]:
             blocked=blocked_sections(root),
         )
     for section in sections:
+        if _paragraph_count(root, section["id"]) == 0:
+            return _unwritten_step(state, root, section, _excerpt_for_section(root, section["id"]))
         if _explanation_words(root, section["id"]) < _MIN_EXPLANATION_WORDS:
             return _explanation_step(state, root, section)
     audit = _pending_audit(root)
@@ -269,9 +266,45 @@ def book_next(root: Path) -> dict[str, object]:
     quality = _chapter_gate(state, root, sections)
     if quality is not None:
         return quality
+    unwritten = _first_unwritten(root, sections)
+    if unwritten is not None:
+        return _unwritten_step(state, root, unwritten, _excerpt_for_section(root, unwritten["id"]))
     if not _draft_is_current(root):
         return _render_step(state, root, sections)
     return _step(state, None, {}, "The DRAFT is rendered. Do not request release.", blocked=blocked_sections(root))
+
+
+def _unwritten_reason(section: dict[str, str]) -> str:
+    title = section["title"].strip() or section["id"]
+    return _UNWRITTEN.format(title=title)
+
+
+def _first_unwritten(root: Path, sections: list[dict[str, str]]) -> dict[str, str] | None:
+    covered = supported_section_ids(root)
+    return next((section for section in sections if section["id"] not in covered), None)
+
+
+def _paragraph_count(root: Path, section_id: str) -> int:
+    return sum(1 for record in supported_paragraphs(root) if record.get("section") == section_id)
+
+
+def _unwritten_step(
+    state: dict[str, object],
+    root: Path,
+    section: dict[str, str],
+    excerpt_id: str | None,
+) -> dict[str, object]:
+    """An empty planned chapter is the next action, not a finished render."""
+
+    if excerpt_id is None:
+        return _step(state, "studium_public_source_record", {}, _NEED_SOURCES)
+    return _step(
+        state,
+        "studium_paragraph_record",
+        {"section": section["id"], "excerpts": [excerpt_id], "role": "explanation"},
+        _unwritten_reason(section),
+        blocked=blocked_sections(root),
+    )
 
 
 def _render_step(

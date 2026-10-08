@@ -231,8 +231,10 @@ def test_spanish_draft_uses_boxes_without_internal_ids(tmp_path, monkeypatch):
     assert r"\chapter{Conservación}" in tex
     assert "Tema 1:" not in tex
     assert "Tema 2:" not in tex
-    assert r"\chapter{Energía}" in tex
-    assert "Esta sección está vacía." in tex
+    assert r"\chapter{Energía}" not in tex
+    assert "Esta sección está vacía." not in tex
+    assert "Energía: todavía no está escrito" in tex
+    assert tex.index("Plan de estudio") < tex.index("Energía: todavía no está escrito")
     for heading in (
         "Prefacio",
         "Cómo usar este libro",
@@ -273,7 +275,8 @@ def test_spanish_draft_uses_boxes_without_internal_ids(tmp_path, monkeypatch):
     assert rendered["project_state"] != "RELEASED"
     assert (root / ".studium" / "state.json").read_bytes() == state_before
     if find_engine() is not None:
-        assert rendered["status"] == "rendered"
+        assert rendered["status"] == "incomplete"
+        assert rendered["message"] == "The book is incomplete. Write the next unwritten chapter: Energía."
         pdf = root / "latex" / "draft.pdf"
         assert pdf.read_bytes().startswith(b"%PDF-")
         visible = subprocess.check_output(["pdftotext", str(pdf), "-"], text=True)
@@ -817,7 +820,12 @@ def test_book_next_does_not_render_a_short_blocked_book(tmp_path, monkeypatch):
         assert "ask the user" not in json.dumps(nxt).lower().replace("do not ask the user how to format the page.", "")
     rendered = dispatch("studium_render", {}, session=session)
     tex = (root / "latex" / "draft.tex").read_text(encoding="utf-8")
-    assert "Gap: this section has no paragraph tied to an opened excerpt." in tex
+    assert "Gap: this section has no paragraph tied to an opened excerpt." not in tex
+    assert r"\chapter{Origenes}" not in tex
+    assert "Origenes: not written yet" in tex
+    assert tex.index("Study plan") < tex.index("Origenes: not written yet")
+    assert rendered["status"] == "incomplete"
+    assert rendered["message"] == "The book is incomplete. Write the next unwritten chapter: Origenes."
     assert rendered["released"] is False
     assert json.loads((root / ".studium" / "state.json").read_text(encoding="utf-8"))["state"] != "RELEASED"
 

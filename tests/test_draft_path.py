@@ -187,7 +187,9 @@ def test_missing_compiler_does_not_pretend_a_pdf_exists(tmp_path, monkeypatch, c
     )
     monkeypatch.setattr("studium.authoring.render.shutil.which", lambda _name: None)
     rendered = dispatch("studium_render", {}, session=session)
-    assert rendered["status"] == "compiler_missing"
+    assert rendered["status"] == "incomplete"
+    assert rendered["compile_status"] == "compiler_missing"
+    assert rendered["message"].startswith("The book is incomplete. Write the next unwritten chapter: Conservation of mass.")
     assert rendered["pdf"] is None
     assert rendered["released"] is False
     assert rendered["project_state"] == "SOURCE_DISCOVERY"
@@ -204,7 +206,8 @@ def test_missing_compiler_does_not_pretend_a_pdf_exists(tmp_path, monkeypatch, c
     assert rc != EXIT_GATE
     payload = json.loads(captured.out)
     assert payload["pdf"] is None
-    assert payload["status"] == "compiler_missing"
+    assert payload["status"] == "incomplete"
+    assert payload["compile_status"] == "compiler_missing"
     assert not (root / "latex" / "draft.pdf").exists()
     called = handle(
         {
@@ -294,7 +297,9 @@ def test_engine_compiles_a_fixture_pdf(tmp_path):
         session=session,
     )
     rendered = dispatch("studium_render", {}, session=session)
-    assert rendered["status"] == "rendered"
+    assert rendered["status"] == "incomplete"
+    assert rendered["message"] == "The book is incomplete. Write the next unwritten chapter: Conservation of mass."
+    assert rendered["compile_status"] == "rendered"
     assert rendered["pdf"] == "latex/draft.pdf"
     assert rendered["released"] is False
     pdf = root / "latex" / "draft.pdf"
