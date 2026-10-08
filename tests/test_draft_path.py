@@ -225,7 +225,7 @@ def test_missing_compiler_does_not_pretend_a_pdf_exists(tmp_path, monkeypatch, c
 
 def test_topic_book_cites_public_sources_without_a_guide(tmp_path, monkeypatch):
     session = open_workspace(str(tmp_path))
-    created = dispatch("studium_project_create", {"slug": "rust", "topic": "Rust"}, session=session)
+    created = dispatch("studium_project_create", {"slug": "rust", "topic": "Rust", "language": "en"}, session=session)
     assert created["status"] == "created"
     assert created["project"]["course"]["domain_profile"] == "COMPUTER_SCIENCE"
     registered = dispatch("studium_source_register", {"decision": "none"}, session=session)
@@ -314,7 +314,7 @@ def test_engine_compiles_a_fixture_pdf(tmp_path):
 
 def _fluidos(tmp_path: Path):
     session = open_workspace(str(tmp_path))
-    assert dispatch("studium_project_create", {"slug": "fluidos", **_COURSE}, session=session)["status"] == "created"
+    assert dispatch("studium_project_create", {"slug": "fluidos", **_COURSE, "language": "en"}, session=session)["status"] == "created"
     registered = dispatch("studium_source_register", {"decision": "none"}, session=session)
     assert registered["local_sources"]["status"] == "NONE"
     assert (

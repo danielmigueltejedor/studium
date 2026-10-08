@@ -257,6 +257,9 @@ def _create(args: argparse.Namespace) -> int:
     if result.failure == "invalid_profile":
         print("invalid profile", file=sys.stderr)
         return 3
+    if result.failure == "invalid_language":
+        print("language must be a BCP 47 tag or a TeX babel language name", file=sys.stderr)
+        return 3
     if result.failure == "already_exists":
         print("project already exists", file=sys.stderr)
         return 1

@@ -526,7 +526,7 @@ def test_client_instructions_draft_without_asking_or_releasing():
     assert "This version has no tool for that." not in instructions
 
 
-def _topic(tmp_path, slug: str, topic: str, language: str | None = None):
+def _topic(tmp_path, slug: str, topic: str, language: str | None = "en"):
     session = open_workspace(str(tmp_path))
     payload: dict[str, object] = {"slug": slug, "topic": topic}
     if language is not None:

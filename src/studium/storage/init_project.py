@@ -3,7 +3,7 @@
 import json
 import re
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import tomllib
@@ -112,6 +112,14 @@ def build_create_request(
 
 
 def create_project(request: CreateRequest) -> CreateResult:
+    from studium.authoring.languages import canonical_language
+
+    if request.language is not None:
+        canonical = canonical_language(request.language)
+        if canonical is None:
+            return CreateResult(root=None, failure="invalid_language")
+        if canonical != request.language:
+            request = replace(request, language=canonical)
     if _SLUG.fullmatch(request.slug) is None:
         return CreateResult(root=None, failure="invalid_slug")
     if request.kind not in {BOOK_COURSE, BOOK_TOPIC}:

@@ -397,7 +397,7 @@ def _topic(tmp_path):
     assert (
         dispatch(
             "studium_project_create",
-            {"slug": "historia", "topic": "Historia medieval"},
+            {"slug": "historia", "topic": "Historia medieval", "language": "en"},
             session=session,
         )["status"]
         == "created"

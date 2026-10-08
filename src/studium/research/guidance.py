@@ -20,10 +20,12 @@ def local_source_guidance(
     sources: list[dict[str, object]],
     language: str | None,
 ) -> dict[str, object]:
+    from studium.authoring.languages import is_spanish_tag
+
     should_ask = local.get("status") == "UNKNOWN" and local.get("prompted") is not True
     question: str | None = None
     if should_ask:
-        question = QUESTION_ES if language == "es" else QUESTION_EN
+        question = QUESTION_ES if is_spanish_tag(language) else QUESTION_EN
     visible: list[dict[str, object]] = []
     if local.get("status") == "IMPORTED":
         for source in sources:
