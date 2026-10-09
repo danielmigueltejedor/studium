@@ -20,6 +20,7 @@ from studium.authoring.languages import (
     messages,
 )
 from studium.authoring.paragraphs import supported_paragraphs
+from studium.authoring.problems import problem_result_current
 from studium.authoring.support import corroboration_for_excerpts, supported_drafts
 from studium.domain.profiles import BOOK_TOPIC
 from studium.research.public_sources import bibliography_counts

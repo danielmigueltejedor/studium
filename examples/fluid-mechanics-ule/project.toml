@@ -1,0 +1,15 @@
+schema_version = "1.0.0"
+edition = "0.1.0"
+
+[course]
+kind = "course"
+name = "Mecánica de Fluidos"
+university = "Universidad de León"
+degree = "Grado en Ingeniería Aeroespacial"
+academic_year = "2025-2026"
+course_code = "0710311"
+semester = "S1"
+language = "es"
+domain_profile = "STEM"
+
+[overrides]

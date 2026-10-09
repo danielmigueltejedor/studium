@@ -7,7 +7,6 @@ two excerpts or a replayed computation.
 """
 
 import hashlib
-import io
 import os
 import shutil
 import subprocess
@@ -284,10 +283,13 @@ def check_figure(root: Path, figure_id: object) -> dict[str, object]:
     updated["proves_science"] = False
     updated["classification"] = "PENDING"
     updated["checked_at"] = utc_now()
-    excerpts = updated.get("excerpts") if isinstance(updated.get("excerpts"), list) else []
+    excerpts_value = updated.get("excerpts")
+    excerpts = excerpts_value if isinstance(excerpts_value, list) else []
     excerpt_ids = [item for item in excerpts if isinstance(item, str)]
-    caption = updated.get("caption") if isinstance(updated.get("caption"), str) else ""
-    section_id = updated.get("section") if isinstance(updated.get("section"), str) else ""
+    caption_value = updated.get("caption")
+    section_value = updated.get("section")
+    caption = caption_value if isinstance(caption_value, str) else ""
+    section_id = section_value if isinstance(section_value, str) else ""
     updated["caption_corroboration"] = _caption_corroboration(root, caption, excerpt_ids, section_id)
     if produced and output is not None:
         updated["output"] = output.resolve().relative_to(root.resolve()).as_posix()
@@ -330,7 +332,6 @@ def remove_figure(
         return _error("figure.not_found", "no stored figure with that id")
     try:
         with project_lock(root):
-            state = load_state_holding_lock(root)
             again = _find(root, identifier)
             if again is None:
                 return _error("figure.not_found", "no stored figure with that id")

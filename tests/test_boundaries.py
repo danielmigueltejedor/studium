@@ -10,7 +10,8 @@ _ALLOWED = {
     "studium.__main__": {"studium", "studium.cli"},
     "studium.domain": set(),
     "studium.policy": {"studium.domain", "studium.policy"},
-    "studium.validation": set(),
+    "studium.validation": {"studium.validation"},
+    "studium.verification": {"studium.verification"},
     "studium.state": {"studium.domain", "studium.state"},
     "studium.config": set(),
     "studium.storage": {"studium.domain", "studium.state", "studium.storage"},
@@ -28,6 +29,7 @@ _ALLOWED = {
         "studium.storage",
         "studium.research",
         "studium.authoring",
+        "studium.verification",
     },
     "studium.cli": {
         "studium",

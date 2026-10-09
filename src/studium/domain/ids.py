@@ -29,6 +29,7 @@ PREFIXES: frozenset[str] = frozenset(
         "CNF",
         "WAV",
         "CST",
+        "VRF",
     }
 )
 

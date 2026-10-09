@@ -20,6 +20,8 @@ from studium.authoring.audit import (
     writer_edition,
 )
 from studium.authoring.blueprint import current_sections
+from studium.authoring.computation import list_computations
+from studium.authoring.excerpts import excerpts_by_id
 from studium.authoring.languages import (
     BookLanguage,
     active_language,
@@ -31,8 +33,7 @@ from studium.authoring.languages import (
     two_sections_line,
     writing_name,
 )
-from studium.authoring.computation import list_computations
-from studium.authoring.excerpts import excerpts_by_id
+from studium.authoring.math_verify import section_has_strong_verification
 from studium.authoring.paragraphs import supported_paragraphs, supported_section_ids
 from studium.authoring.problems import REPRODUCIBILITY_TEXT, RUST_NOT_WORKED_PROBLEM, problem_result_current
 from studium.authoring.section_blocks import blocked_ids, blocked_sections, mark_blocked, offers_for, remember_offer
@@ -42,17 +43,17 @@ from studium.research.course_documents import list_course_documents
 from studium.research.public_sources import license_forbids_use
 from studium.storage.init_project import book_kind, load_project_toml, load_state
 from studium.storage.records import (
+    AUDITS,
     BLUEPRINT,
     CLAIMS,
     COMPUTATIONS,
-    EXCERPTS,
-    AUDITS,
     CONTRADICTIONS,
+    EXCERPTS,
     FIGURES,
     PARAGRAPHS,
-    REVIEWS,
     PROBLEMS,
     PUBLIC_BIBLIOGRAPHY,
+    REVIEWS,
     SECTION_BLOCKS,
     SECTION_OFFERS,
     fold_by_id,
@@ -293,11 +294,15 @@ def _book_next(root: Path) -> dict[str, object]:
 def unfinished_chapter(root: Path) -> tuple[dict[str, str], list[str]] | None:
     """The first planned section that is missing or short of the draft contract."""
 
-    for section in current_sections(root):
-        missing = _missing_pieces(root, section)
-        if missing:
-            return section, missing
-    return None
+    token = _BOOK_LANGUAGE.set(active_language(root))
+    try:
+        for section in current_sections(root):
+            missing = _missing_pieces(root, section)
+            if missing:
+                return section, missing
+        return None
+    finally:
+        _BOOK_LANGUAGE.reset(token)
 
 
 def _unfinished_step(
@@ -356,11 +361,11 @@ def _missing_pieces(root: Path, section: dict[str, str]) -> list[str]:
     if not _has_role(root, section_id, "purpose"):
         missing.append("lead")
     if not _has_role(root, section_id, "consejo"):
-        missing.append("consejo")
+        missing.append(tip_word(_current_language()))
     if not _worked_ok(root, section_id):
         missing.append("worked problem")
     if not _has_autoficha(root, section_id):
-        missing.append("autoficha")
+        missing.append(self_check_word(_current_language()))
     return missing
 
 
@@ -845,7 +850,8 @@ def _explanation_paragraphs(root: Path, section_id: str) -> list[dict[str, objec
     for record in supported_paragraphs(root):
         if record.get("section") != section_id or record.get("role") in _BODY_SKIP:
             continue
-        text = record.get("text") if isinstance(record.get("text"), str) else ""
+        text_value = record.get("text")
+        text = text_value if isinstance(text_value, str) else ""
         if text.strip():
             found.append(record)
     return found
@@ -856,7 +862,8 @@ def _explanation_words(root: Path, section_id: str) -> int:
     for record in supported_paragraphs(root):
         if record.get("section") != section_id or record.get("role") in _BODY_SKIP:
             continue
-        text = record.get("text") if isinstance(record.get("text"), str) else ""
+        text_value = record.get("text")
+        text = text_value if isinstance(text_value, str) else ""
         total += len(text.split())
     return total
 
@@ -886,15 +893,18 @@ def _resolution_texts(root: Path, section_id: str) -> list[str]:
     for record in fold_by_id(root / PROBLEMS):
         if record.get("section") != section_id:
             continue
-        source = record.get("source_text") if isinstance(record.get("source_text"), str) else ""
-        prompt = record.get("prompt") if isinstance(record.get("prompt"), str) else ""
+        source_value = record.get("source_text")
+        prompt_value = record.get("prompt")
+        source = source_value if isinstance(source_value, str) else ""
+        prompt = prompt_value if isinstance(prompt_value, str) else ""
         text = source.strip() or prompt.strip()
         if text:
             found.append(text)
     for record in fold_by_id(root / COMPUTATIONS):
         if record.get("section") != section_id:
             continue
-        expression = record.get("expression") if isinstance(record.get("expression"), str) else ""
+        expression_value = record.get("expression")
+        expression = expression_value if isinstance(expression_value, str) else ""
         if expression.strip():
             found.append(expression.strip())
     return found
@@ -930,9 +940,9 @@ def _source_counts(record: dict[str, object]) -> bool:
     if record.get("rejection_reason"):
         return False
     classification = record.get("classification")
-    if isinstance(classification, str) and classification.strip().lower() in {"rejected", "unauthorized"}:
-        return False
-    return True
+    return not (
+        isinstance(classification, str) and classification.strip().lower() in {"rejected", "unauthorized"}
+    )
 
 
 def _foreign_rust(root: Path) -> dict[str, object] | None:
@@ -956,10 +966,13 @@ def _worked_ok(root: Path, section_id: str) -> bool:
         )
     if _arithmetic_resolution(root, section_id) is not None:
         return False
+    if section_has_strong_verification(root, section_id):
+        return True
     for record in fold_by_id(root / COMPUTATIONS):
         if record.get("section") != section_id or record.get("status") != "replayed" or record.get("correct") is not True:
             continue
-        expression = record.get("expression") if isinstance(record.get("expression"), str) else ""
+        expression_value = record.get("expression")
+        expression = expression_value if isinstance(expression_value, str) else ""
         if expression.strip() and not _arithmetic_only(expression):
             return True
     for record in fold_by_id(root / PROBLEMS):
@@ -978,7 +991,8 @@ def _has_autoficha(root: Path, section_id: str) -> bool:
             continue
         if record.get("role") == "self_check":
             return True
-        text = record.get("text") if isinstance(record.get("text"), str) else ""
+        text_value = record.get("text")
+        text = text_value if isinstance(text_value, str) else ""
         title = messages(_current_language())["self_check"]
         stripped = text.strip()
         if stripped.startswith("Autoficha") or stripped.startswith(title):

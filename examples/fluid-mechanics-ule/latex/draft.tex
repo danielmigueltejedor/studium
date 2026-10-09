@@ -1,0 +1,340 @@
+\documentclass{book}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage[spanish]{babel}
+\addto\captionsspanish{\renewcommand{\contentsname}{Índice}}
+\AtBeginDocument{\spanishdeactivate{"~<>}}
+\usepackage[a4paper,margin=2.5cm]{geometry}
+\usepackage{titlesec}
+\titleformat{\chapter}[display]
+  {\normalfont\filright}{\large\scshape\chaptertitlename\ \thechapter}{1ex}{\huge\bfseries}
+\titlespacing*{\chapter}{0pt}{2.5ex plus 1ex minus .2ex}{2.3ex}
+\titleformat{name=\chapter,numberless}[display]
+  {\normalfont\filright}{}{0pt}{\huge\bfseries}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{amsmath}
+\definecolor{studiumInk}{RGB}{28,40,58}
+\definecolor{studiumRule}{RGB}{28,40,58}
+\definecolor{studiumTipBack}{RGB}{232,244,236}
+\definecolor{studiumTipFrame}{RGB}{27,107,58}
+\definecolor{studiumDefBack}{RGB}{232,240,250}
+\definecolor{studiumDefFrame}{RGB}{24,74,130}
+\definecolor{studiumWorkedBack}{RGB}{255,244,230}
+\definecolor{studiumWorkedFrame}{RGB}{138,78,12}
+\definecolor{studiumCheckBack}{RGB}{243,236,248}
+\definecolor{studiumCheckFrame}{RGB}{96,48,130}
+\definecolor{studiumCodeBack}{RGB}{245,245,242}
+\definecolor{studiumCodeRule}{RGB}{48,48,52}
+\usepackage{listings}
+\lstdefinelanguage{Rust}{
+  morekeywords={as,async,await,break,const,continue,crate,dyn,else,enum,extern,false,fn,for,if,impl,in,let,loop,match,mod,move,mut,pub,ref,return,self,Self,static,struct,super,trait,true,type,unsafe,use,where,while},
+  sensitive=true,
+  morecomment=[l]{//},
+  morecomment=[s]{/*}{*/},
+  morestring=[b]{"}
+}
+\lstdefinelanguage{Go}{
+  morekeywords={break,case,chan,const,continue,default,defer,else,fallthrough,for,func,go,goto,if,import,interface,map,package,range,return,select,struct,switch,type,var},
+  sensitive=true,
+  morecomment=[l]{//},
+  morecomment=[s]{/*}{*/},
+  morestring=[b]{"}
+}
+\lstdefinelanguage{JavaScript}{
+  morekeywords={break,case,catch,class,const,continue,debugger,default,delete,do,else,export,extends,finally,for,function,if,import,in,instanceof,let,new,return,super,switch,this,throw,try,typeof,var,void,while,with,yield},
+  sensitive=true,
+  morecomment=[l]{//},
+  morecomment=[s]{/*}{*/},
+  morestring=[b]{"},
+  morestring=[b]{'},
+}
+\lstdefinestyle{studium}{
+  basicstyle=\ttfamily\small,
+  columns=fullflexible,
+  keepspaces=true,
+  showstringspaces=false,
+  breaklines=true,
+  breakatwhitespace=false,
+  frame=leftline,
+  framerule=1.15pt,
+  rulecolor=\color{studiumCodeRule},
+  backgroundcolor=\color{studiumCodeBack},
+  xleftmargin=1.15em,
+  framexleftmargin=0.75em,
+  aboveskip=0.9em,
+  belowskip=0.7em,
+  tabsize=4,
+  keywordstyle=\ttfamily\bfseries,
+  commentstyle=\ttfamily\itshape,
+  stringstyle=\ttfamily
+}
+\lstset{style=studium}
+\usepackage[breakable,skins]{tcolorbox}
+\tcbset{
+  studiumtip/.style={colback=studiumTipBack,colframe=studiumTipFrame,colbacktitle=studiumTipFrame,coltitle=white,coltext=black,fonttitle=\bfseries,boxrule=0.65pt,arc=0.7pt,left=1.7mm,right=1.7mm,top=1.3mm,bottom=1.3mm,before skip=10pt,after skip=10pt},
+  studiumdef/.style={colback=studiumDefBack,colframe=studiumDefFrame,colbacktitle=studiumDefFrame,coltitle=white,coltext=black,fonttitle=\bfseries,boxrule=0.65pt,arc=0.7pt,left=1.7mm,right=1.7mm,top=1.3mm,bottom=1.3mm,before skip=10pt,after skip=10pt},
+  studiumworked/.style={colback=studiumWorkedBack,colframe=studiumWorkedFrame,colbacktitle=studiumWorkedFrame,coltitle=white,coltext=black,fonttitle=\bfseries,boxrule=0.65pt,arc=0.7pt,left=1.7mm,right=1.7mm,top=1.3mm,bottom=1.3mm,before skip=10pt,after skip=10pt},
+  studiumcheck/.style={colback=studiumCheckBack,colframe=studiumCheckFrame,colbacktitle=studiumCheckFrame,coltitle=white,coltext=black,fonttitle=\bfseries,boxrule=0.65pt,arc=0.7pt,left=1.7mm,right=1.7mm,top=1.3mm,bottom=1.3mm,before skip=10pt,after skip=10pt}
+}
+\usepackage{fancyhdr}
+\pagestyle{fancy}
+\fancyhf{}
+\fancyfoot[C]{\small Borrador}
+\renewcommand{\headrulewidth}{0pt}
+\renewcommand{\footrulewidth}{0pt}
+\fancypagestyle{plain}{%
+  \fancyhf{}
+  \fancyfoot[C]{\small Borrador}
+  \renewcommand{\headrulewidth}{0pt}
+  \renewcommand{\footrulewidth}{0pt}
+}
+\makeatletter
+\@openrightfalse
+\let\cleardoublepage\clearpage
+\makeatother
+\begin{document}
+\frontmatter
+\thispagestyle{empty}
+\setlength{\parindent}{0pt}
+\vspace*{0.08\textheight}
+{\normalsize\scshape\color{studiumInk} Studium\par}
+{\small Universidad de León\par}
+\vspace{0.55em}
+{\color{studiumRule}\rule{\linewidth}{0.9pt}\par}
+\vspace{0.16\textheight}
+{\raggedright\Huge\bfseries Mecánica de Fluidos\par}
+\vspace{0.9em}
+{\raggedright\Large\color{studiumInk} Grado en Ingeniería Aeroespacial\par}
+\vfill
+{\color{studiumRule}\rule{0.36\linewidth}{0.45pt}\par}
+\vspace{1.05em}
+{\large\scshape Borrador\par}
+\vspace{0.45em}
+{\normalsize Edición 0.1.0 --- No publicado\par}
+\vspace{0.4em}
+{\normalsize\today\par}
+\vspace*{0.08\textheight}
+\clearpage
+\chapter{Prefacio}
+\noindent Este libro presenta el tema con el lenguaje del curso. Cada capítulo abre con una entrada breve, sigue con la explicación y cierra con un problema resuelto y una autoficha.
+\chapter{Cómo usar este libro}
+\noindent Lee el capítulo seguido. El consejo, la definición, el problema resuelto y la autoficha van en recuadros. La explicación es el cuerpo del texto.
+
+\noindent Un capítulo lleva una entrada en cursiva, la explicación en el cuerpo, como mucho un consejo, definiciones solo al introducir un término, un problema resuelto y una autoficha.
+\tableofcontents
+\mainmatter
+\part{Mecánica de Fluidos}
+
+\chapter{Propiedades de los fluidos: densidad y viscosidad}
+
+La mecánica de fluidos estudia el comportamiento de los líquidos y de los gases en reposo y en movimiento, así como las fuerzas que ese movimiento origina sobre los cuerpos que los contienen o que se desplazan a través de ellos. Se considera fluido toda sustancia capaz de deformarse de manera continua bajo la acción de un esfuerzo cortante, por pequeño que este sea. En un fluido en reposo solo aparecen tensiones normales, mientras que durante el movimiento surgen además tensiones tangenciales que se oponen al deslizamiento relativo de las capas vecinas.
+
+La viscosidad dinámica mide la resistencia de un fluido a las deformaciones graduales producidas por tensiones cortantes o de tracción, como explica la versión española de Wikipedia. La NASA describe la viscosidad, a la que llama pegajosidad o stickiness del gas, como una de las propiedades que, junto con la forma del objeto, la velocidad y la masa del fluido, determinan la magnitud de las fuerzas aerodinámicas. A temperatura ambiente el agua presenta una viscosidad dinámica de 1 centipoise, mientras que la miel alcanza valores del orden de 70 centipoises, de modo que opone mucha más resistencia a fluir.
+
+\chapter{Estática de fluidos: presión hidrostática y principio de Arquímedes}
+
+En un fluido en reposo la presión hidrostática crece con la profundidad porque cada punto soporta el peso de las capas de fluido situadas por encima. La presión que ejerce el líquido es la presión termodinámica que interviene en la ecuación constitutiva y en la ecuación de movimiento del fluido; en algunos casos especiales coincide con la presión media o incluso con la presión hidrostática propiamente dicha. Todas las presiones representan una medida de la energía potencial por unidad de volumen del fluido.
+
+El principio de Arquímedes afirma que todo cuerpo total o parcialmente sumergido en un fluido en reposo experimenta un empuje vertical hacia arriba igual al peso del fluido desalojado. Este empuje hidrostático, medido en newtons, se expresa como el producto de la densidad del fluido, la aceleración de la gravedad y el volumen desalojado. Sobre esta ley se apoyan la flotación de los barcos, la estabilidad de los globos y dirigibles y los problemas de flotabilidad de los cuerpos sumergidos.
+
+\begin{tcolorbox}[title={Problema resuelto}, studiumworked, breakable]
+
+\noindent\textbf{Enunciado}
+Presión hidrostática en agua dulce a diez metros de profundidad. Sabiendo que la densidad es \(\rho = 998\) kg/m\(^{3}\), que la gravedad es g = 9,81 m/s\(^{2}\) y que la profundidad es h = 10 m, calcula el producto \(\rho g h\) en pascales con la expresión 998*9.81*10. Escribe el resultado como fracción exacta.
+
+\noindent\textbf{Resolución}
+
+\(998*9.81*10\)
+
+\noindent\textbf{Respuesta}
+
+\(489519/5\)
+\end{tcolorbox}
+
+\chapter{Cinemática: ecuación de continuidad y conservación de la masa}
+
+La ecuación de continuidad expresa matemáticamente una ley de conservación, ya sea en forma integral o en forma diferencial. Como la masa, la energía, el impulso y la carga eléctrica se conservan en sus respectivas condiciones, son muchos los fenómenos físicos que pueden describirse mediante ecuaciones de continuidad. En mecánica de fluidos la versión más habitual relaciona la variación temporal de la densidad con la divergencia del flujo másico, es decir, del producto de la densidad por el campo de velocidades.
+
+Para un fluido incompresible la densidad permanece constante y la ecuación de continuidad se reduce a la anulación de la divergencia del campo de velocidades: el fluido no puede acumularse ni agotarse en ningún punto. La conservación de la masa obliga además a que el caudal que atraviesa una sección sea el mismo en todas las secciones del conducto cuando el régimen es permanente. Un estrechamiento impone entonces una aceleración del flujo, idea que está en la base del medidor de Venturi.
+
+\chapter{Ecuación de Bernoulli y aplicaciones del flujo ideal}
+
+La ecuación de Bernoulli describe el comportamiento de un fluido ideal, es decir, incompresible y sin viscosidad, que se mueve a lo largo de una línea de corriente. La NASA la presenta como la suma de la presión estática y de la presión dinámica, que resulta ser igual a una constante a la que llama presión total del flujo. A lo largo de la línea de corriente la energía del fluido permanece constante: lo que el flujo gana en velocidad lo pierde en presión, y al contrario.
+
+La versión española de Wikipedia sitúa el enunciado del principio en la obra Hidrodinámica de Daniel Bernoulli, publicada en 1738, y la página de LibreTexts Español recuerda que la ecuación se aplica a fluidos incompresibles e inviscidos, en los que la energía mecánica total permanece constante. Cuando se añade el término de posición, la suma de la presión estática, la presión dinámica y el término que depende de la altura se mantiene constante a lo largo del flujo. Una consecuencia práctica es que en un medidor de Venturi la presión cae donde la velocidad aumenta, fenómeno que también explica la fuerza de sustentación sobre los perfiles de ala.
+
+\begin{tcolorbox}[title={Problema resuelto}, studiumworked, breakable]
+
+\noindent\textbf{Enunciado}
+Ley de Torricelli para un orificio de salida. Si un depósito tiene un orificio a una profundidad h = 5 m por debajo de la superficie libre y la gravedad vale g = 9,81 m/s\(^{2}\), calcula la energía cinética por unidad de masa, igual a dos por g por h, con la expresión 2*9.81*5. El resultado se expresa en metros cuadrados por segundo cuadrado.
+
+\noindent\textbf{Resolución}
+
+\(2*9.81*5\)
+
+\noindent\textbf{Respuesta}
+
+\(981/10\)
+\end{tcolorbox}
+
+\chapter{Análisis dimensional y número de Reynolds}
+
+El número de Reynolds es un número adimensional que compara las fuerzas de inercia con las fuerzas viscosas presentes en un flujo. La NASA explica que las fuerzas de inercia se caracterizan por el producto de la densidad, la velocidad y el gradiente de velocidad, mientras que las fuerzas viscosas dependen del coeficiente de viscosidad dinámica y de la segunda derivada del campo de velocidades. Valores altos del parámetro indican que las fuerzas viscosas son pequeñas frente a las de inercia, mientras que valores bajos obligan a considerarlas.
+
+En forma simplificada, el número de Reynolds es el cociente entre el producto de la densidad, la velocidad y una longitud característica y la viscosidad dinámica, como recoge la página de la NASA sobre la capa límite. El valor del parámetro determina si el flujo se comporta como laminar o como turbulento; la versión española de Wikipedia indica que su valor señala cuál de los dos modelos describe mejor el movimiento del fluido. Por eso se utiliza como parámetro de similitud para reproducir en túneles de viento las condiciones reales de vuelo a escala.
+
+\begin{tcolorbox}[title={Problema resuelto}, studiumworked, breakable]
+
+\noindent\textbf{Enunciado}
+Número de Reynolds del agua en una tubería. Para agua a \(20 ^{\circ}C\) que circula a 2 m/s por una tubería de 0,1 m de diámetro, con densidad \(\rho = 998\) kg/m\(^{3}\) y viscosidad dinámica \(\mu = 0\),001 Pa\(\cdots\), calcula el producto \(\rho V D\) dividido por \(\mu\) con la expresión 998*2*0.1/0.001. El resultado es un número adimensional.
+
+\noindent\textbf{Resolución}
+
+\(998*2*0.1/0.001\)
+
+\noindent\textbf{Respuesta}
+
+\(199600\)
+\end{tcolorbox}
+
+\chapter{Flujo en conductos: régimen laminar y turbulento}
+
+En un flujo laminar dentro de una tubería el fluido se mueve en láminas concéntricas que no se entremezclan: cada partícula sigue una trayectoria suave, el perfil de velocidades resulta parabólico, con velocidad máxima en el eje y velocidad nula en la pared, y el transporte lateral de cantidad de movimiento es exclusivamente molecular. El régimen laminar es típico de fluidos a velocidades bajas o con viscosidades altas, mientras que las viscosidades bajas, las velocidades altas y los caudales grandes favorecen la turbulencia.
+
+Cuando el número de Reynolds aumenta, el flujo pierde estabilidad: aparecen ondulaciones irregulares que evolucionan hacia un régimen turbulento, caracterizado por movimientos desordenados, no estacionarios y tridimensionales. La experiencia acumulada sitúa la transición en conductos circulares entre valores del parámetro próximos a 2300 y 4000, con una zona intermedia de comportamiento incierto. La rugosidad de la pared y el estado de la corriente de entrada pueden adelantar o retrasar esa transición.
+
+\chapter{Capa límite, sustentación y resistencia aerodinámica}
+
+Junto a la superficie de un cuerpo que se mueve en un fluido se forma una capa delgada en la que la velocidad pasa de cero, en la pared, al valor de la corriente libre, fuera de ella. La NASA explica que las moléculas adheridas a la superficie frenan por colisiones a las capas inmediatamente superiores, de modo que el espesor característico de esa capa límite depende del número de Reynolds. La teoría que describe estos efectos fue presentada por Ludwig Prandtl a comienzos del siglo XX y hoy es un tema habitual en los cursos avanzados de mecánica de fluidos.
+
+La capa límite puede ser laminar o turbulenta según el valor del número de Reynolds: a números bajos el flujo está estratificado y la velocidad varía de forma uniforme al alejarse de la pared, mientras que a números altos aparecen remolinos no estacionarios dentro de la capa. Cuando el flujo próximo a la pared pierde energía, la capa puede separarse del contorno y crear una estela que modifica la forma efectiva del cuerpo. La separación del flujo es la razón de la entrada en pérdida del ala en ángulos de ataque elevados, y sus efectos se reflejan en los coeficientes de sustentación y de resistencia.
+
+\chapter{Aplicaciones aeroespaciales de la mecánica de fluidos}
+
+La asignatura Mecánica de Fluidos del Grado en Ingeniería Aeroespacial de la Universidad de León se imparte en el primer semestre con 6 créditos ECTS y carácter obligatorio, dentro del área de Física Aplicada del departamento de Química y Física Aplicadas, y figura en el plan de estudios con el código 0710311 y el nombre en inglés Fluid Mechanics. El temario se apoya en las bases de estática, cinemática y dinámica de fluidos que desarrollan las secciones anteriores de este libro.
+
+La NASA explica que la presión estática integrada a lo largo de la superficie de un perfil da la fuerza aerodinámica total, que se descompone en sustentación y resistencia, y describe cómo un tubo de Pitot estático mide las presiones estática y total para calcular la velocidad del avión. El curso Advanced Fluid Mechanics del MIT dedica capítulos a la estática de fluidos, al flujo no viscoso y a la ecuación de Bernoulli, a las ecuaciones de flujo viscoso y al análisis dimensional. Estos temas completan la formación básica que aquí se presenta.
+\appendix
+\chapter{Notación}
+\noindent Esta parte del borrador aún no tiene material.
+\chapter{Hoja de fórmulas}
+\noindent Esta parte del borrador aún no tiene material.
+\chapter{Soluciones}
+
+Presión hidrostática en agua dulce a diez metros de profundidad. Sabiendo que la densidad es \(\rho = 998\) kg/m\(^{3}\), que la gravedad es g = 9,81 m/s\(^{2}\) y que la profundidad es h = 10 m, calcula el producto \(\rho g h\) en pascales con la expresión 998*9.81*10. Escribe el resultado como fracción exacta.
+
+Ley de Torricelli para un orificio de salida. Si un depósito tiene un orificio a una profundidad h = 5 m por debajo de la superficie libre y la gravedad vale g = 9,81 m/s\(^{2}\), calcula la energía cinética por unidad de masa, igual a dos por g por h, con la expresión 2*9.81*5. El resultado se expresa en metros cuadrados por segundo cuadrado.
+
+Número de Reynolds del agua en una tubería. Para agua a \(20 ^{\circ}C\) que circula a 2 m/s por una tubería de 0,1 m de diámetro, con densidad \(\rho = 998\) kg/m\(^{3}\) y viscosidad dinámica \(\mu = 0\),001 Pa\(\cdots\), calcula el producto \(\rho V D\) dividido por \(\mu\) con la expresión 998*2*0.1/0.001. El resultado es un número adimensional.
+
+\(998*9.81*10 = 489519/5\)
+
+\(2*9.81*5 = 981/10\)
+
+\(998*2*0.1/0.001 = 199600\)
+\chapter{Auditoría de fuentes}
+
+\noindent Estado de las fuentes: PENDING. 14 pendientes. Los conflictos almacenados quedan fuera (0). Las fuentes que la guía almacenada no cita quedan fuera. Recuento de no citadas: 0.
+
+\noindent dos testimonios.
+
+\noindent Extractos: Suplemento abierto: EVD-0004 Viscosity \(-\) NASA Glenn Research Center (Beginner's Guide to Aeronautics) (PENDING). No es la bibliografía de la guía., Suplemento abierto: EVD-0007 Viscosidad \(-\) Wikipedia en español (PENDING). No es la bibliografía de la guía., Suplemento abierto: EVD-0003 Reynolds Number \(-\) NASA Glenn Research Center (Beginner's Guide to Aeronautics) (PENDING). No es la bibliografía de la guía..
+
+\noindent dos testimonios.
+
+\noindent Extractos: Suplemento abierto: EVD-0004 Viscosity \(-\) NASA Glenn Research Center (Beginner's Guide to Aeronautics) (PENDING). No es la bibliografía de la guía., Suplemento abierto: EVD-0007 Viscosidad \(-\) Wikipedia en español (PENDING). No es la bibliografía de la guía., Suplemento abierto: EVD-0003 Reynolds Number \(-\) NASA Glenn Research Center (Beginner's Guide to Aeronautics) (PENDING). No es la bibliografía de la guía..
+
+\noindent dos testimonios.
+
+\noindent Extractos: Suplemento abierto: EVD-0010 Presión en un fluido \(-\) Wikipedia en español (PENDING). No es la bibliografía de la guía., Suplemento abierto: EVD-0011 Principio de Arquímedes \(-\) Wikipedia en español (PENDING). No es la bibliografía de la guía..
+
+\noindent dos testimonios.
+
+\noindent Extractos: Suplemento abierto: EVD-0010 Presión en un fluido \(-\) Wikipedia en español (PENDING). No es la bibliografía de la guía., Suplemento abierto: EVD-0011 Principio de Arquímedes \(-\) Wikipedia en español (PENDING). No es la bibliografía de la guía..
+
+\noindent dos testimonios.
+
+\noindent Extractos: Suplemento abierto: EVD-0009 Ecuación de continuidad \(-\) Wikipedia en español (PENDING). No es la bibliografía de la guía., Suplemento abierto: EVD-0014 Advanced Fluid Mechanics (2.25) \(-\) MIT OpenCourseWare, Fall 2013 (PENDING). No es la bibliografía de la guía..
+
+\noindent dos testimonios.
+
+\noindent Extractos: Suplemento abierto: EVD-0009 Ecuación de continuidad \(-\) Wikipedia en español (PENDING). No es la bibliografía de la guía., Suplemento abierto: EVD-0014 Advanced Fluid Mechanics (2.25) \(-\) MIT OpenCourseWare, Fall 2013 (PENDING). No es la bibliografía de la guía..
+
+\noindent dos testimonios.
+
+\noindent Extractos: Suplemento abierto: EVD-0002 Bernoulli's Equation \(-\) NASA Glenn Research Center (Beginner's Guide to Aeronautics) (PENDING). No es la bibliografía de la guía., Suplemento abierto: EVD-0006 Principio de Bernoulli \(-\) Wikipedia en español (PENDING). No es la bibliografía de la guía., Suplemento abierto: EVD-0013 11.3: Ecuación de Bernoulli \(-\) LibreTexts Español (Física sin límites) (PENDING). No es la bibliografía de la guía..
+
+\noindent dos testimonios.
+
+\noindent Extractos: Suplemento abierto: EVD-0002 Bernoulli's Equation \(-\) NASA Glenn Research Center (Beginner's Guide to Aeronautics) (PENDING). No es la bibliografía de la guía., Suplemento abierto: EVD-0006 Principio de Bernoulli \(-\) Wikipedia en español (PENDING). No es la bibliografía de la guía., Suplemento abierto: EVD-0013 11.3: Ecuación de Bernoulli \(-\) LibreTexts Español (Física sin límites) (PENDING). No es la bibliografía de la guía..
+
+\noindent dos testimonios.
+
+\noindent Extractos: Suplemento abierto: EVD-0003 Reynolds Number \(-\) NASA Glenn Research Center (Beginner's Guide to Aeronautics) (PENDING). No es la bibliografía de la guía., Suplemento abierto: EVD-0008 Número de Reynolds \(-\) Wikipedia en español (PENDING). No es la bibliografía de la guía., Suplemento abierto: EVD-0005 Boundary Layer \(-\) NASA Glenn Research Center (Beginner's Guide to Aeronautics) (PENDING). No es la bibliografía de la guía..
+
+\noindent dos testimonios.
+
+\noindent Extractos: Suplemento abierto: EVD-0003 Reynolds Number \(-\) NASA Glenn Research Center (Beginner's Guide to Aeronautics) (PENDING). No es la bibliografía de la guía., Suplemento abierto: EVD-0008 Número de Reynolds \(-\) Wikipedia en español (PENDING). No es la bibliografía de la guía., Suplemento abierto: EVD-0005 Boundary Layer \(-\) NASA Glenn Research Center (Beginner's Guide to Aeronautics) (PENDING). No es la bibliografía de la guía..
+
+\noindent dos testimonios.
+
+\noindent Extractos: Suplemento abierto: EVD-0012 Flujo laminar \(-\) Wikipedia en español (PENDING). No es la bibliografía de la guía., Suplemento abierto: EVD-0008 Número de Reynolds \(-\) Wikipedia en español (PENDING). No es la bibliografía de la guía., Suplemento abierto: EVD-0003 Reynolds Number \(-\) NASA Glenn Research Center (Beginner's Guide to Aeronautics) (PENDING). No es la bibliografía de la guía..
+
+\noindent dos testimonios.
+
+\noindent Extractos: Suplemento abierto: EVD-0012 Flujo laminar \(-\) Wikipedia en español (PENDING). No es la bibliografía de la guía., Suplemento abierto: EVD-0008 Número de Reynolds \(-\) Wikipedia en español (PENDING). No es la bibliografía de la guía., Suplemento abierto: EVD-0003 Reynolds Number \(-\) NASA Glenn Research Center (Beginner's Guide to Aeronautics) (PENDING). No es la bibliografía de la guía..
+
+\noindent dos testimonios.
+
+\noindent Extractos: Suplemento abierto: EVD-0005 Boundary Layer \(-\) NASA Glenn Research Center (Beginner's Guide to Aeronautics) (PENDING). No es la bibliografía de la guía., Suplemento abierto: EVD-0003 Reynolds Number \(-\) NASA Glenn Research Center (Beginner's Guide to Aeronautics) (PENDING). No es la bibliografía de la guía., Suplemento abierto: EVD-0014 Advanced Fluid Mechanics (2.25) \(-\) MIT OpenCourseWare, Fall 2013 (PENDING). No es la bibliografía de la guía..
+
+\noindent dos testimonios.
+
+\noindent Extractos: Suplemento abierto: EVD-0005 Boundary Layer \(-\) NASA Glenn Research Center (Beginner's Guide to Aeronautics) (PENDING). No es la bibliografía de la guía., Suplemento abierto: EVD-0003 Reynolds Number \(-\) NASA Glenn Research Center (Beginner's Guide to Aeronautics) (PENDING). No es la bibliografía de la guía., Suplemento abierto: EVD-0014 Advanced Fluid Mechanics (2.25) \(-\) MIT OpenCourseWare, Fall 2013 (PENDING). No es la bibliografía de la guía..
+
+\noindent dos testimonios.
+
+\noindent Extractos: Suplemento abierto: EVD-0001 Universidad de León \(-\) Plan de estudios del Grado en Ingeniería Aeroespacial, asignatura 0710311 Mecánica de Fluidos (PENDING). No es la bibliografía de la guía., Suplemento abierto: EVD-0014 Advanced Fluid Mechanics (2.25) \(-\) MIT OpenCourseWare, Fall 2013 (PENDING). No es la bibliografía de la guía., Suplemento abierto: EVD-0013 11.3: Ecuación de Bernoulli \(-\) LibreTexts Español (Física sin límites) (PENDING). No es la bibliografía de la guía., Suplemento abierto: EVD-0002 Bernoulli's Equation \(-\) NASA Glenn Research Center (Beginner's Guide to Aeronautics) (PENDING). No es la bibliografía de la guía..
+
+\noindent dos testimonios.
+
+\noindent Extractos: Suplemento abierto: EVD-0001 Universidad de León \(-\) Plan de estudios del Grado en Ingeniería Aeroespacial, asignatura 0710311 Mecánica de Fluidos (PENDING). No es la bibliografía de la guía., Suplemento abierto: EVD-0014 Advanced Fluid Mechanics (2.25) \(-\) MIT OpenCourseWare, Fall 2013 (PENDING). No es la bibliografía de la guía., Suplemento abierto: EVD-0013 11.3: Ecuación de Bernoulli \(-\) LibreTexts Español (Física sin límites) (PENDING). No es la bibliografía de la guía., Suplemento abierto: EVD-0002 Bernoulli's Equation \(-\) NASA Glenn Research Center (Beginner's Guide to Aeronautics) (PENDING). No es la bibliografía de la guía..
+
+\noindent REV-0001: propiedades scientific
+
+\noindent REV-0002: estatica scientific
+
+\noindent REV-0003: continuidad scientific
+
+\noindent REV-0004: bernoulli scientific
+
+\noindent REV-0005: reynolds scientific
+
+\noindent REV-0006: tuberias scientific
+
+\noindent REV-0007: capa-limite scientific
+
+\noindent REV-0008: aplicaciones scientific
+\chapter{Plan de estudio}
+
+\noindent Esta parte del borrador aún no tiene material.
+\backmatter
+\begin{thebibliography}{99}
+\bibitem{src1} Universidad de León \(-\) Plan de estudios del Grado en Ingeniería Aeroespacial, asignatura 0710311 Mecánica de Fluidos. https://www.unileon.es/estudiantes/oferta-academica/grados/grado-en-ingenieria-aeroespacial/plan-estudios?id=0710311\&cursoa=2022.
+\bibitem{src2} Bernoulli's Equation \(-\) NASA Glenn Research Center (Beginner's Guide to Aeronautics). https://www.grc.nasa.gov/www/k-12/airplane/bern.html.
+\bibitem{src3} Reynolds Number \(-\) NASA Glenn Research Center (Beginner's Guide to Aeronautics). https://www.grc.nasa.gov/www/k-12/airplane/reynolds.html.
+\bibitem{src4} Viscosity \(-\) NASA Glenn Research Center (Beginner's Guide to Aeronautics). https://www.grc.nasa.gov/www/k-12/airplane/viscosity.html.
+\bibitem{src5} Boundary Layer \(-\) NASA Glenn Research Center (Beginner's Guide to Aeronautics). https://www1.grc.nasa.gov/beginners-guide-to-aeronautics/boundary-layer/.
+\bibitem{src6} Principio de Bernoulli \(-\) Wikipedia en español. https://es.wikipedia.org/wiki/Principio\_de\_Bernoulli.
+\bibitem{src7} Viscosidad \(-\) Wikipedia en español. https://es.wikipedia.org/wiki/Viscosidad.
+\bibitem{src8} Número de Reynolds \(-\) Wikipedia en español. https://es.wikipedia.org/wiki/N\%C3\%BAmero\_de\_Reynolds.
+\bibitem{src9} Ecuación de continuidad \(-\) Wikipedia en español. https://es.wikipedia.org/wiki/Ecuaci\%C3\%B3n\_de\_continuidad.
+\bibitem{src10} Presión en un fluido \(-\) Wikipedia en español. https://es.wikipedia.org/wiki/Presi\%C3\%B3n\_en\_un\_fluido.
+\bibitem{src11} Principio de Arquímedes \(-\) Wikipedia en español. https://es.wikipedia.org/wiki/Principio\_de\_Arqu\%C3\%ADmedes.
+\bibitem{src12} Flujo laminar \(-\) Wikipedia en español. https://es.wikipedia.org/wiki/Flujo\_laminar.
+\bibitem{src13} 11.3: Ecuación de Bernoulli \(-\) LibreTexts Español (Física sin límites). https://espanol.libretexts.org/Bookshelves/Fisica/Libro\%3A\_Fisica\_(sin\_limites)/11\%3A\_La\_din\%C3\%A1mica\_de\_fluidos\_y\_sus\_aplicaciones/11.3\%3A\_Ecuaci\%C3\%B3n\_de\_Bernoulli.
+\bibitem{src14} Advanced Fluid Mechanics (2.25) \(-\) MIT OpenCourseWare, Fall 2013. https://ocw.mit.edu/courses/2-25-advanced-fluid-mechanics-fall-2013/.
+\end{thebibliography}
+\end{document}

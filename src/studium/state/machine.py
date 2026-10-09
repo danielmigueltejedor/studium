@@ -7,15 +7,15 @@ entry gate is missing or not ok does not change the state.
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from studium.domain.enums import STATE_ORDER, ProjectEvent, ProjectState
 from studium.state.gates import (
     AUTHORING_COMPLETE,
     BLUEPRINT_ACCEPTED,
-    COURSE_JSON,
     CORPUS_STARTED,
     CORPUS_SUFFICIENT,
+    COURSE_JSON,
     PROJECT_TOML,
     RELEASE,
     RELEASE_INTACT,
@@ -180,4 +180,4 @@ def _refuse(state: ProjectState | None, code: str, message: str) -> ApplyResult:
 
 
 def _timestamp() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return datetime.now(UTC).replace(microsecond=0).strftime("%Y-%m-%dT%H:%M:%SZ")

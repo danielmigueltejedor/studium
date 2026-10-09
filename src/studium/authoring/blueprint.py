@@ -30,11 +30,10 @@ def store_blueprint(
     """Replace the stored outline. Does not change project state or local_sources."""
 
     cleaned, error = _sections(sections)
-    if error is not None:
-        return error
+    if error is not None or cleaned is None:
+        return error if error is not None else _error("mcp.invalid_input", "sections are required")
     try:
         with project_lock(root):
-            state = load_state_holding_lock(root)
             prior = _current(root)
             identifier = str(prior["id"]) if prior is not None else allocate_id(root, "OUT")
             record: dict[str, object] = {

@@ -1,6 +1,5 @@
 """Atomic records, interrupted writes, and stale dependent results."""
 
-import json
 import threading
 from pathlib import Path
 
@@ -172,7 +171,7 @@ def test_changed_source_and_exercise_do_not_keep_a_stale_result(tmp_path, monkey
     from hashlib import sha256
 
     restored["text_sha256"] = sha256(
-        f"{left_source['candidate']['id']}\nhttps://open.example/one\n{restored['text']}".encode("utf-8")
+        f"{left_source['candidate']['id']}\nhttps://open.example/one\n{restored['text']}".encode()
     ).hexdigest()
     append_jsonl(root / "bibliography" / "excerpts.jsonl", restored)
     # Re-audit against the restored excerpt, then change the source record only.

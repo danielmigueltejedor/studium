@@ -13,11 +13,11 @@ from studium.authoring.computation import check_computation
 from studium.authoring.excerpts import get_excerpt, list_excerpts, record_excerpt
 from studium.authoring.figures import check_figure, record_figure, remove_figure
 from studium.authoring.paragraphs import draft_completeness, list_paragraphs, record_paragraph, replace_paragraph
-from studium.research.media import record_media
-from studium.research.student_notes import record_student_notes
 from studium.authoring.problems import check_problem, list_problems, record_problem, remove_problem
 from studium.authoring.render import render_draft
 from studium.authoring.verify import verify_book
+from studium.research.media import record_media
+from studium.research.student_notes import record_student_notes
 
 EXIT_GATE = 2
 EXIT_COMPILER = 4

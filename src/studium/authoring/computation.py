@@ -5,12 +5,11 @@ expression itself. The result is accepted only when that evaluation matches.
 Acceptance is ``replayed``, not verified, and it is not absolute truth.
 """
 
+import ast
 import hashlib
 import re
 from fractions import Fraction
 from pathlib import Path
-
-import ast
 
 from studium.authoring.blueprint import current_sections
 from studium.authoring.excerpts import excerpts_by_id
@@ -113,9 +112,10 @@ def _replay(
     claimed_text = current.get("claimed_result")
     if not isinstance(stored_expression, str) or not isinstance(claimed_text, str):
         return _error("computation.invalid", "the stored computation cannot be replayed")
-    if expression is not None:
-        if not isinstance(expression, str) or expression.strip() != stored_expression:
-            return _error("computation.expression_changed", "replay evaluates the stored expression")
+    if expression is not None and (
+        not isinstance(expression, str) or expression.strip() != stored_expression
+    ):
+        return _error("computation.expression_changed", "replay evaluates the stored expression")
     claimed = _fraction(claimed_text)
     if claimed is None:
         return _error("computation.invalid", "the stored result is not numeric")
@@ -123,7 +123,8 @@ def _replay(
         server_result = evaluate(stored_expression)
     except ComputationError as exc:
         return _error("computation.invalid", str(exc))
-    section = current.get("section") if isinstance(current.get("section"), str) else None
+    section_value = current.get("section")
+    section = section_value if isinstance(section_value, str) else None
     refusal = _small_integer_refusal(root, stored_expression, section)
     if refusal is not None:
         return refusal
@@ -151,7 +152,6 @@ def _store(
     matched = server_result == claimed
     try:
         with project_lock(root):
-            state = load_state_holding_lock(root)
             record_id = identifier if identifier is not None else allocate_id(root, "PRB")
             record: dict[str, object] = {
                 "schema_version": "1.0.0",

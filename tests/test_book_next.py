@@ -493,7 +493,7 @@ def test_one_written_chapter_and_one_empty_chapter_is_not_render(tmp_path, monke
         "The book is incomplete while SQL has no paragraphs. "
         "Do not render it as finished. "
         "Missing contract pieces: paragraphs, two explanation sections, 400 words of explanation, "
-        "lead, consejo, worked problem, autoficha. "
+        "lead, Tip, worked problem, Self-check. "
         "Do not render. Do not hand the draft over. "
         "A partial PDF is not a reason to stop."
     )
@@ -535,9 +535,9 @@ def test_unwritten_section_does_not_get_a_render_or_a_stop(tmp_path, monkeypatch
         "two explanation sections",
         "400 words of explanation",
         "lead",
-        "consejo",
+        "Tip",
         "worked problem",
-        "autoficha",
+        "Self-check",
     )
     for _ in range(6):
         nxt = dispatch("studium_book_next", {}, session=session)

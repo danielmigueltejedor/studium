@@ -135,7 +135,7 @@ def _public(root: Path, source_id: str) -> dict[str, object] | None:
 
 
 def _digest(source_id: str, url: str, text: str) -> str:
-    payload = f"{source_id}\n{url}\n{text}".encode("utf-8")
+    payload = f"{source_id}\n{url}\n{text}".encode()
     return hashlib.sha256(payload).hexdigest()
 
 

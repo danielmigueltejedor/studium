@@ -29,10 +29,12 @@ def local_source_guidance(
     visible: list[dict[str, object]] = []
     if local.get("status") == "IMPORTED":
         for source in sources:
+            raw_roles = source.get("roles")
+            roles = raw_roles if isinstance(raw_roles, list) else []
             visible.append(
                 {
                     "id": source.get("id"),
-                    "roles": list(source.get("roles") or []),
+                    "roles": list(roles),
                     "classification": source.get("classification"),
                 }
             )

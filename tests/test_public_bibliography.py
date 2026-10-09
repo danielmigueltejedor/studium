@@ -473,7 +473,7 @@ def test_year_conflict_stays_pending(tmp_path, monkeypatch):
     assert folded["classification"] == "PENDING"
     assert folded["year"] == 2011
     assert folded.get("identity") is None
-    assert _GUIDE == folded["text"]
+    assert folded["text"] == _GUIDE
     audit = json.loads((root / "audit" / "audit.jsonl").read_text(encoding="utf-8").splitlines()[-1])
     assert set(audit) == {
         "schema_version",

@@ -1,0 +1,17 @@
+\babel@toc {spanish}{}\relax 
+\contentsline {chapter}{Prefacio}{\es@scroman {ii}}{}%
+\contentsline {chapter}{Cómo usar este libro}{\es@scroman {iii}}{}%
+\contentsline {part}{I\hspace {1em}Mecánica de Fluidos}{1}{}%
+\contentsline {chapter}{\numberline {1}Propiedades de los fluidos: densidad y viscosidad}{2}{}%
+\contentsline {chapter}{\numberline {2}Estática de fluidos: presión hidrostática y principio de Arquímedes}{3}{}%
+\contentsline {chapter}{\numberline {3}Cinemática: ecuación de continuidad y conservación de la masa}{4}{}%
+\contentsline {chapter}{\numberline {4}Ecuación de Bernoulli y aplicaciones del flujo ideal}{5}{}%
+\contentsline {chapter}{\numberline {5}Análisis dimensional y número de Reynolds}{6}{}%
+\contentsline {chapter}{\numberline {6}Flujo en conductos: régimen laminar y turbulento}{7}{}%
+\contentsline {chapter}{\numberline {7}Capa límite, sustentación y resistencia aerodinámica}{8}{}%
+\contentsline {chapter}{\numberline {8}Aplicaciones aeroespaciales de la mecánica de fluidos}{9}{}%
+\contentsline {chapter}{\numberline {A}Notación}{10}{}%
+\contentsline {chapter}{\numberline {B}Hoja de fórmulas}{11}{}%
+\contentsline {chapter}{\numberline {C}Soluciones}{12}{}%
+\contentsline {chapter}{\numberline {D}Auditoría de fuentes}{13}{}%
+\contentsline {chapter}{\numberline {E}Plan de estudio}{15}{}%

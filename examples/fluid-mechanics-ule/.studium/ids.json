@@ -1,0 +1,11 @@
+{
+  "schema_version": "1.0.0",
+  "counters": {
+    "TSK": 1,
+    "OUT": 1,
+    "EVD": 14,
+    "PAR": 16,
+    "PRB": 6,
+    "REV": 8
+  }
+}

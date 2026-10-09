@@ -68,17 +68,31 @@ def record_problem(
     assert section_id is not None and cleaned_prompt is not None
     if directive_changes_policy(cleaned_prompt):
         return _error("policy.overridden", "problem prompt changed policy")
-    if rust is not None and directive_changes_policy(rust["source_text"]):
-        return _error("policy.overridden", "problem source changed policy")
+    rust_source: str | None = None
+    rust_invocation: list[str] | None = None
+    if rust is not None:
+        raw_source = rust.get("source_text")
+        raw_invocation = rust.get("invocation")
+        if not isinstance(raw_source, str) or not isinstance(raw_invocation, list):
+            return _error("mcp.invalid_input", "a Rust test needs source_text and an invocation list")
+        rust_source = raw_source
+        rust_invocation = raw_invocation
+        if directive_changes_policy(rust_source):
+            return _error("policy.overridden", "problem source changed policy")
+    numeric_excerpts: list[str] = []
     if numeric is not None:
-        blockers = paragraph_citation_blockers(root, numeric["excerpts"])
+        raw_excerpts = numeric.get("excerpts")
+        if not isinstance(raw_excerpts, list):
+            return _error("mcp.invalid_input", "a numeric problem needs two stored excerpt ids")
+        numeric_excerpts = [str(item) for item in raw_excerpts]
+        blockers = paragraph_citation_blockers(root, numeric_excerpts)
         if blockers:
             return _rejected(root, blockers)
     try:
         with project_lock(root):
             state = load_state_holding_lock(root)
             if numeric is not None:
-                fresh = paragraph_citation_blockers(root, numeric["excerpts"])
+                fresh = paragraph_citation_blockers(root, numeric_excerpts)
                 if fresh:
                     return _rejected_state(state, fresh)
             identifier = allocate_id(root, "PRB")
@@ -95,22 +109,23 @@ def record_problem(
             }
             if rust is not None:
                 relative = f"problems/{identifier}/main.rs"
-                command, command_error = _command(root, identifier, rust["invocation"], relative)
+                assert rust_source is not None and rust_invocation is not None
+                command, command_error = _command(root, identifier, rust_invocation, relative)
                 if command_error is not None:
                     return command_error
                 record["kind"] = "rust"
-                record["source_text"] = rust["source_text"]
+                record["source_text"] = rust_source
                 record["source_path"] = relative
                 record["invocation"] = command
                 record["runs"] = []
                 record["status_text"] = _rust_status_text(root)
-                _write_source(root, relative, rust["source_text"])
+                _write_source(root, relative, rust_source)
             else:
                 assert numeric is not None
                 record["kind"] = "numeric"
                 record["expected"] = numeric["expected"]
-                record["excerpts"] = numeric["excerpts"]
-                if corroboration_for_excerpts(root, numeric["excerpts"]) == "two_witnesses":
+                record["excerpts"] = numeric_excerpts
+                if corroboration_for_excerpts(root, numeric_excerpts) == "two_witnesses":
                     record["status"] = "two_witnesses"
                     record["corroboration"] = "two_witnesses"
             _stamp_inputs(root, record)
@@ -255,6 +270,7 @@ def _check_rust(root: Path, record: dict[str, object]) -> dict[str, object]:
     command, command_error = _command(root, str(record.get("id")), [str(item) for item in invocation], source_path)
     if command_error is not None:
         return command_error
+    assert command is not None
     runs = _three_runs(root, command, compiler)
     checked = len(runs) == _RUNS and all(run.get("passed") is True for run in runs)
     updated = dict(record)
@@ -423,9 +439,10 @@ def _command(
             rewritten = source_path
         elif previous_flag == "-o" and "/" not in arg:
             rewritten = output_path
-        if previous_flag in {"-o", "--out-dir", "--manifest-path"} or "/" in rewritten or rewritten.endswith((".rs", ".toml")):
-            if _inside(root, rewritten) is None:
-                return None, _error("problem.invocation_invalid", "invocation path leaves the book")
+        if (
+            previous_flag in {"-o", "--out-dir", "--manifest-path"} or "/" in rewritten or rewritten.endswith((".rs", ".toml"))
+        ) and _inside(root, rewritten) is None:
+            return None, _error("problem.invocation_invalid", "invocation path leaves the book")
         cleaned.append(rewritten)
         previous_flag = arg if arg.startswith("-") else ""
     if invocation[0] == "rustc":
@@ -469,7 +486,7 @@ def _mode(
     invocation: object,
     expected: object,
     excerpts: object,
-) -> tuple[dict[str, str] | None, dict[str, object] | None, dict[str, object] | None]:
+) -> tuple[dict[str, object] | None, dict[str, object] | None, dict[str, object] | None]:
     rust_bits = source_text is not None or invocation is not None
     numeric_bits = expected is not None or excerpts is not None
     if rust_bits and numeric_bits:
@@ -556,7 +573,8 @@ def problem_input_sha256(root: Path, record: dict[str, object]) -> str:
         str(record.get("source_text") or ""),
     ]
     stored = excerpts_by_id(root)
-    raw = record.get("excerpts") if isinstance(record.get("excerpts"), list) else []
+    raw_value = record.get("excerpts")
+    raw = raw_value if isinstance(raw_value, list) else []
     for excerpt_id in raw:
         if not isinstance(excerpt_id, str):
             continue

@@ -5,7 +5,7 @@ import pytest
 from studium.domain.ids import PREFIXES, IdAllocator
 
 _ID_RE = re.compile(
-    r"^(SRC|EVD|CLM|PAR|PRB|CON|SYM|TRM|EQ|DER|FIG|EX|CH|REV|TSK|TOP|OUT|SKL|CNF|WAV|CST)-[0-9]{4,}$"
+    r"^(SRC|EVD|CLM|PAR|PRB|CON|SYM|TRM|EQ|DER|FIG|EX|CH|REV|TSK|TOP|OUT|SKL|CNF|WAV|CST|VRF)-[0-9]{4,}$"
 )
 
 
@@ -54,7 +54,7 @@ def test_every_prefix_allocates_a_stable_id():
 
 
 def test_unknown_prefix_raises_value_error():
-    with pytest.raises(ValueError, match="id.unknown_prefix"):
+    with pytest.raises(ValueError, match=r"id\.unknown_prefix"):
         IdAllocator().allocate("NOPE")
-    with pytest.raises(ValueError, match="id.unknown_prefix"):
+    with pytest.raises(ValueError, match=r"id\.unknown_prefix"):
         IdAllocator({"NOPE": 1})

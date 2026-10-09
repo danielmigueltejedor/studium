@@ -40,21 +40,13 @@ _UNAUTHORIZED_KINDS = frozenset({"pirate", "pirated", "unauthorized", "unauthori
 def unauthorized_copy(value: object) -> bool:
     """True when the client marks a copy as pirate or unauthorized."""
 
-    if value is True:
-        return True
-    if isinstance(value, str) and value.strip().lower() in _UNAUTHORIZED_KINDS | {"true", "yes"}:
-        return True
-    return False
+    return value is True or (isinstance(value, str) and value.strip().lower() in _UNAUTHORIZED_KINDS | {"true", "yes"})
 
 
 def license_forbids_use(value: object) -> bool:
     """True when the client says the license forbids this use."""
 
-    if value is True:
-        return True
-    if isinstance(value, str) and "forbid" in value.lower():
-        return True
-    return False
+    return value is True or (isinstance(value, str) and "forbid" in value.lower())
 
 
 def openstax_host(url: object) -> bool:
@@ -684,7 +676,11 @@ def _identity_established(corroborations: list[dict[str, object]], stored: dict[
         agreeing.append(entry)
     if len(agreeing) < 2:
         return False
-    keys = [_author_key(entry["authors"]) for entry in agreeing if isinstance(entry.get("authors"), list)]
+    keys: list[tuple[str, ...]] = []
+    for entry in agreeing:
+        raw_authors = entry.get("authors")
+        if isinstance(raw_authors, list):
+            keys.append(_author_key(raw_authors))
     if len(keys) != len(agreeing) or any(not key for key in keys) or len(set(keys)) != 1:
         return False
     stored_authors = stored.get("authors")
@@ -737,7 +733,7 @@ def _conflict_message(conflicts: list[dict[str, object]]) -> str:
     fields: list[str] = []
     for item in conflicts:
         field = item.get("field")
-        if field in {"year", "title", "isbn"} and field not in fields:
+        if isinstance(field, str) and field in {"year", "title", "isbn"} and field not in fields:
             fields.append(field)
     if fields == ["year"]:
         return YEAR_CONFLICT_STATUS

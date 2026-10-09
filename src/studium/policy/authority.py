@@ -28,9 +28,8 @@ def authority_assignment_error(
     peer_reviewed: bool | None,
     probable_kind: str | None,
 ) -> str | None:
-    if probable_kind == "wuolah":
-        if scientific_authority == "maximal" or source_class in _WUOLAH_BLOCKED:
-            return "sources.authority_not_allowed"
+    if probable_kind == "wuolah" and (scientific_authority == "maximal" or source_class in _WUOLAH_BLOCKED):
+        return "sources.authority_not_allowed"
     if scientific_authority != "maximal":
         return None
     if source_class in _MAXIMAL_CLASSES:

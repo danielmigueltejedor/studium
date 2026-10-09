@@ -2,13 +2,13 @@
 
 import tomllib
 
+from studium.authoring.render import find_engine
+from studium.cli.app import main
 from studium.domain.languages import (
     SPANISH_CHAPTER,
     describe,
     messages,
 )
-from studium.authoring.render import find_engine
-from studium.cli.app import main
 from studium.mcp.server import dispatch, open_workspace
 
 _PROSE = "Density stays constant in the control volume."

@@ -2,11 +2,10 @@
 
 import json
 import re
+import tomllib
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
-
-import tomllib
 
 from studium.domain.enums import ProjectEvent, ProjectState
 from studium.domain.ids import IdAllocator

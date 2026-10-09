@@ -4,7 +4,7 @@ The boolean meant "the ``--sources`` path was missing". It was not a user
 decision. ``schema_version`` stays ``1.0.0``.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from studium.domain.enums import LOCAL_SOURCE_STATUSES
 
@@ -12,7 +12,7 @@ _ZERO_COUNT = frozenset({"UNKNOWN", "NONE", "AVAILABLE", "SKIPPED"})
 
 
 def utc_now() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return datetime.now(UTC).replace(microsecond=0).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def initial_local_sources(status: str, now: str | None = None) -> dict[str, object]:
@@ -39,9 +39,10 @@ def migrate_state(
     """
 
     migrated = dict(document)
-    if isinstance(document.get("local_sources"), dict):
-        local = _normalize_object(dict(document["local_sources"]))
-        changed = local != document.get("local_sources")
+    local_source_value = document.get("local_sources")
+    if isinstance(local_source_value, dict):
+        local = _normalize_object(dict(local_source_value))
+        changed = local != local_source_value
         migrated["local_sources"] = local
         if "local_sources_missing" in migrated:
             del migrated["local_sources_missing"]

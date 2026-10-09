@@ -78,10 +78,7 @@ def _forward_gates(root: Path, current: ProjectState, kind: str) -> list[dict[st
         if gate_name == CORPUS_STARTED:
             blockers.extend(corpus_started_blockers(root))
             continue
-        if gate_name == COURSE_JSON:
-            result = gate_for(gate_name, course, documents)
-        else:
-            result = gate_for(gate_name)
+        result = gate_for(gate_name, course, documents) if gate_name == COURSE_JSON else gate_for(gate_name)
         if result.ok:
             continue
         for blocker in result.blockers:

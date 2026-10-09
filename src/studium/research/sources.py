@@ -24,13 +24,13 @@ from studium.domain.profiles import (
     TOPIC_BOOK_STATUS,
     WRITING_STILL_UNAVAILABLE,
 )
-from studium.research.public_sources import public_bibliography_next_action, public_source_count
 from studium.policy.authority import authority_assignment_error, source_class_error
 from studium.policy.trust import contains_directive, directive_changes_policy
 from studium.research.attachments import attachment_to_intake
 from studium.research.formats import ACCEPTED_FORMATS, sniff
 from studium.research.guidance import local_source_guidance
 from studium.research.impact import apply_impact, impact_report, record_support
+from studium.research.public_sources import public_bibliography_next_action, public_source_count
 from studium.storage.init_project import (
     book_kind,
     load_project_toml,
@@ -410,15 +410,15 @@ def source_audit(
                 updated["peer_reviewed"] = peer_reviewed
             if probable_kind is not None:
                 updated["probable_kind"] = probable_kind
+            source_class_value = updated.get("source_class")
+            scientific_value = updated.get("scientific_authority")
+            peer_value = updated.get("peer_reviewed")
+            probable_value = updated.get("probable_kind")
             problem = authority_assignment_error(
-                source_class=updated.get("source_class") if isinstance(updated.get("source_class"), str) else None,
-                scientific_authority=(
-                    updated.get("scientific_authority")
-                    if isinstance(updated.get("scientific_authority"), str)
-                    else None
-                ),
-                peer_reviewed=updated.get("peer_reviewed") if isinstance(updated.get("peer_reviewed"), bool) else None,
-                probable_kind=updated.get("probable_kind") if isinstance(updated.get("probable_kind"), str) else None,
+                source_class=source_class_value if isinstance(source_class_value, str) else None,
+                scientific_authority=scientific_value if isinstance(scientific_value, str) else None,
+                peer_reviewed=peer_value if isinstance(peer_value, bool) else None,
+                probable_kind=probable_value if isinstance(probable_value, str) else None,
             )
             if problem is not None:
                 return _error(problem, "authority assignment was rejected")
@@ -460,11 +460,12 @@ def source_audit(
                     now=utc_now(),
                     allocate=lambda prefix: allocate_id(root, prefix),
                 )
+            origin_value = updated.get("origin")
             _audit(
                 root,
                 source_id=source_id,
                 operation="audit",
-                origin=updated.get("origin") if isinstance(updated.get("origin"), str) else None,
+                origin=origin_value if isinstance(origin_value, str) else None,
                 actor=actor,
                 previous_hash=previous,
                 new_hash=canonical_hash(_stored(updated)),
@@ -499,11 +500,12 @@ def source_remove(root: Path, source_id: str, *, actor: dict[str, object] | None
             local = _recount(state, len(_live(root)))
             state["local_sources"] = local
             write_state(root, state)
+            current_origin = current.get("origin")
             _audit(
                 root,
                 source_id=source_id,
                 operation="remove",
-                origin=current.get("origin") if isinstance(current.get("origin"), str) else None,
+                origin=current_origin if isinstance(current_origin, str) else None,
                 actor=actor,
                 previous_hash=str(current.get("sha256")),
                 new_hash=None,
@@ -544,11 +546,12 @@ def source_reject(
             updated["rejection_reason"] = reason.strip()
             updated["classification"] = current.get("classification")
             append_jsonl(root / _REGISTRY, _stored(updated))
+            reject_origin = current.get("origin")
             _audit(
                 root,
                 source_id=source_id,
                 operation="reject",
-                origin=current.get("origin") if isinstance(current.get("origin"), str) else None,
+                origin=reject_origin if isinstance(reject_origin, str) else None,
                 actor=actor,
                 previous_hash=str(current.get("sha256")),
                 new_hash=str(current.get("sha256")),
@@ -575,6 +578,8 @@ def release_safe_metadata(root: Path) -> list[dict[str, object]]:
 
     safe: list[dict[str, object]] = []
     for source in _live(root):
+        raw_roles = source.get("roles")
+        roles = raw_roles if isinstance(raw_roles, list) else []
         safe.append(
             {
                 "id": source.get("id"),
@@ -583,7 +588,7 @@ def release_safe_metadata(root: Path) -> list[dict[str, object]]:
                 "classification": source.get("classification"),
                 "origin": source.get("origin"),
                 "source_class": source.get("source_class"),
-                "roles": list(source.get("roles") or []),
+                "roles": list(roles),
             }
         )
     return safe

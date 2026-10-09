@@ -37,6 +37,7 @@ from studium.mcp.server import (
 _MAX_BODY = 32 * 1024 * 1024
 _SESSION_TTL = 60 * 60
 _REQUEST_TIMEOUT = 30.0
+_REQUEST_BACKLOG = 128
 _PUBLIC_TOKEN_REQUIRED = "public MCP requires a bearer token. Pass --token. The token is not printed."
 _TUNNEL_URL = re.compile(r"https://[A-Za-z0-9-]+\.trycloudflare\.com")
 _ALLOWED_ORIGIN_SUFFIXES = (".chatgpt.com", ".openai.com")
@@ -194,12 +195,20 @@ def start_http_server(
     if session is None:
         return None
     state = HttpState(session=session, token=token if token_configured(token) else None, public=public)
-    httpd = ThreadingHTTPServer(("127.0.0.1", port), _handler(state))
+    httpd = _ThreadingHttpServer(("127.0.0.1", port), _handler(state))
     httpd.daemon_threads = True
     thread = threading.Thread(target=httpd.serve_forever, name="studium-mcp-http", daemon=True)
     thread.start()
     _wait_until_listening(int(httpd.server_address[1]))
     return HttpEndpoint(httpd, thread, state)
+
+
+class _ThreadingHttpServer(ThreadingHTTPServer):
+    """Threaded server with a backlog that tolerates a burst of parallel clients."""
+
+    daemon_threads = True
+    allow_reuse_address = True
+    request_queue_size = _REQUEST_BACKLOG
 
 
 def serve_http(
@@ -341,7 +350,6 @@ def _stop_process(proc: subprocess.Popen[bytes] | None) -> None:
 
 
 def _wait_until_listening(port: int) -> None:
-    import socket
 
     deadline = time.monotonic() + 2
     while time.monotonic() < deadline:
@@ -528,7 +536,7 @@ def _post(handler: BaseHTTPRequestHandler, state: HttpState) -> None:
     try:
         handler.connection.settimeout(state.request_timeout)
         body = handler.rfile.read(length) if length else b""
-    except (TimeoutError, socket.timeout):
+    except TimeoutError:
         _send_json(handler, 408, {"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "request timeout"}})
         return
     try:
@@ -634,7 +642,10 @@ def _send_json(
     for key, value in extra or []:
         handler.send_header(key, value)
     handler.end_headers()
-    handler.wfile.write(body)
+    try:
+        handler.wfile.write(body)
+    except (BrokenPipeError, ConnectionResetError, OSError):
+        return
 
 
 def _send_sse(
@@ -661,5 +672,8 @@ def _send_sse(
     for key, value in extra:
         handler.send_header(key, value)
     handler.end_headers()
-    handler.wfile.write(body)
+    try:
+        handler.wfile.write(body)
+    except (BrokenPipeError, ConnectionResetError, OSError):
+        return
 
