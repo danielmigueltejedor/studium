@@ -13,14 +13,23 @@ from pathlib import Path
 from typing import BinaryIO
 
 from studium import __version__
+from studium.authoring.academic_blueprint import get_academic_blueprint, store_academic_blueprint
 from studium.authoring.audit import book_review, contradiction_scan, record_audit
 from studium.authoring.blueprint import get_blueprint, store_blueprint
 from studium.authoring.book_next import book_next
 from studium.authoring.claims import list_claims, record_claim
+from studium.authoring.completeness import chapter_completeness
 from studium.authoring.computation import check_computation
+from studium.authoring.consistency import consistency_report
+from studium.authoring.context import chapter_context, resume_packet
+from studium.authoring.coverage import source_coverage
+from studium.authoring.depth.planner import build_depth_plan, depth_plan_status
+from studium.authoring.derivations import check_derivation, list_derivations, record_derivation
 from studium.authoring.excerpts import get_excerpt, list_excerpts, record_excerpt
+from studium.authoring.expansion import expansion_plan
 from studium.authoring.figures import check_figure, record_figure, remove_figure
 from studium.authoring.math_verify import list_verifications, verify_math
+from studium.authoring.notation import list_notation, list_terminology, record_notation, record_terminology
 from studium.authoring.paragraphs import (
     annotate_next_action,
     draft_completeness,
@@ -30,6 +39,7 @@ from studium.authoring.paragraphs import (
 )
 from studium.authoring.problems import check_problem, list_problems, record_problem, remove_problem
 from studium.authoring.quality import assess_book, chapter_quality
+from studium.authoring.quality_report import quality_report
 from studium.authoring.render import render_draft
 from studium.authoring.verify import verify_book
 from studium.config.resolve import is_project, resolve_project
@@ -715,6 +725,12 @@ def _dispatch(session: McpSession, name: str, arguments: Mapping[str, object]) -
             invocation=arguments.get("invocation") if "invocation" in arguments else None,
             expected=arguments.get("expected") if "expected" in arguments else None,
             excerpts=arguments.get("excerpts") if "excerpts" in arguments else None,
+            role=arguments.get("role") if "role" in arguments else None,
+            difficulty=arguments.get("difficulty") if "difficulty" in arguments else None,
+            problem_type=arguments.get("problem_type") if "problem_type" in arguments else None,
+            learning_objectives=arguments.get("learning_objectives") if "learning_objectives" in arguments else None,
+            method=arguments.get("method") if "method" in arguments else None,
+            solution=arguments.get("solution") if "solution" in arguments else None,
             actor=actor,
         )
     if name == "studium_problem_check":
@@ -792,6 +808,7 @@ def _dispatch(session: McpSession, name: str, arguments: Mapping[str, object]) -
             text=arguments.get("text"),
             excerpts=arguments.get("excerpts") if "excerpts" in arguments else None,
             role=arguments.get("role") if "role" in arguments else None,
+            concepts=arguments.get("concepts") if "concepts" in arguments else None,
             actor=actor,
         )
     if name == "studium_paragraph_replace":
@@ -801,6 +818,7 @@ def _dispatch(session: McpSession, name: str, arguments: Mapping[str, object]) -
             text=arguments.get("text"),
             excerpts=arguments.get("excerpts") if "excerpts" in arguments else None,
             role=arguments.get("role") if "role" in arguments else None,
+            concepts=arguments.get("concepts") if "concepts" in arguments else None,
             actor=actor,
         )
     if name == "studium_media_record":
@@ -873,6 +891,95 @@ def _dispatch(session: McpSession, name: str, arguments: Mapping[str, object]) -
         )
     if name == "studium_course_recorded":
         return attempt_course_recorded(root)
+    if name == "studium_academic_blueprint_store":
+        return store_academic_blueprint(
+            root,
+            parts=arguments.get("parts"),
+            subject=arguments.get("subject") if "subject" in arguments else None,
+            profile_key=arguments.get("profile_key") if "profile_key" in arguments else None,
+            actor=actor if isinstance(actor, dict) else None,
+        )
+    if name == "studium_academic_blueprint_get":
+        return get_academic_blueprint(root)
+    if name == "studium_depth_plan":
+        return build_depth_plan(
+            root,
+            academic_depth=arguments.get("academic_depth") if "academic_depth" in arguments else None,
+            length=arguments.get("length") if "length" in arguments else None,
+            curriculum_scope=arguments.get("curriculum_scope") if "curriculum_scope" in arguments else None,
+            target_pages=arguments.get("target_pages") if "target_pages" in arguments else None,
+            min_pages=arguments.get("min_pages") if "min_pages" in arguments else None,
+            max_pages=arguments.get("max_pages") if "max_pages" in arguments else None,
+            exercises_with_solutions=arguments.get("exercises_with_solutions")
+            if "exercises_with_solutions" in arguments
+            else None,
+            theory_emphasis=arguments.get("theory_emphasis") if "theory_emphasis" in arguments else None,
+        )
+    if name == "studium_depth_plan_status":
+        return depth_plan_status(root)
+    if name == "studium_derivation_record":
+        return record_derivation(
+            root,
+            section=arguments.get("section"),
+            name=arguments.get("name"),
+            equation=arguments.get("equation"),
+            equation_id=arguments.get("equation_id") if "equation_id" in arguments else None,
+            assumptions=arguments.get("assumptions") if "assumptions" in arguments else None,
+            governing_principles=arguments.get("governing_principles") if "governing_principles" in arguments else None,
+            steps=arguments.get("steps") if "steps" in arguments else None,
+            steps_latex=arguments.get("steps_latex") if "steps_latex" in arguments else None,
+            symbolic=arguments.get("symbolic") if "symbolic" in arguments else None,
+            variables=arguments.get("variables") if "variables" in arguments else None,
+            boundary_conditions=arguments.get("boundary_conditions") if "boundary_conditions" in arguments else None,
+            applicability=arguments.get("applicability") if "applicability" in arguments else None,
+            limitations=arguments.get("limitations") if "limitations" in arguments else None,
+            references=arguments.get("references") if "references" in arguments else None,
+            actor=actor if isinstance(actor, dict) else None,
+        )
+    if name == "studium_derivation_check":
+        return check_derivation(
+            root,
+            arguments.get("id") if "id" in arguments else None,
+            symbolic=arguments.get("symbolic") if "symbolic" in arguments else None,
+            numeric=arguments.get("numeric") if "numeric" in arguments else None,
+            dimensions=arguments.get("dimensions") if "dimensions" in arguments else None,
+            actor=actor if isinstance(actor, dict) else None,
+        )
+    if name == "studium_derivation_list":
+        return list_derivations(root)
+    if name == "studium_notation_record":
+        return record_notation(
+            root,
+            section=arguments.get("section"),
+            symbol=arguments.get("symbol"),
+            meaning=arguments.get("meaning"),
+            units=arguments.get("units") if "units" in arguments else None,
+        )
+    if name == "studium_notation_list":
+        return list_notation(root)
+    if name == "studium_terminology_record":
+        return record_terminology(
+            root,
+            section=arguments.get("section"),
+            term=arguments.get("term"),
+            definition=arguments.get("definition"),
+        )
+    if name == "studium_terminology_list":
+        return list_terminology(root)
+    if name == "studium_expansion_plan":
+        return expansion_plan(root, arguments.get("section") if "section" in arguments else None)
+    if name == "studium_section_completeness":
+        return chapter_completeness(root, arguments.get("section") if "section" in arguments else None)
+    if name == "studium_source_coverage":
+        return source_coverage(root, arguments.get("section") if "section" in arguments else None)
+    if name == "studium_consistency_report":
+        return consistency_report(root)
+    if name == "studium_section_context":
+        return chapter_context(root, arguments.get("section") if "section" in arguments else None)
+    if name == "studium_resume_packet":
+        return resume_packet(root)
+    if name == "studium_quality_report":
+        return quality_report(root)
     return {"status": "mcp.unknown_tool", "message": "tool is not in the closed set"}
 
 

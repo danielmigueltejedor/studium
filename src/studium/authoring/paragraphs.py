@@ -1,12 +1,14 @@
 """Draft paragraphs tied to an opened excerpt.
 
 A paragraph is not verified or accepted. The model is not a source. Empty
-blueprint sections stay empty.
+blueprint sections stay empty. A paragraph may optionally name the planned
+concepts from the academic blueprint it teaches.
 """
 
 import hashlib
 from pathlib import Path
 
+from studium.authoring.academic_blueprint import academic_concept_ids
 from studium.authoring.blueprint import current_sections
 from studium.authoring.support import paragraph_citation_blockers
 from studium.policy.trust import contains_directive, directive_changes_policy
@@ -18,6 +20,7 @@ from studium.storage.records import PARAGRAPHS, allocate_id, append_jsonl, fold_
 _AUDIT = "audit/audit.jsonl"
 _MAX_TEXT = 20_000
 _MAX_EXCERPTS = 40
+_MAX_CONCEPTS = 40
 GAP_LABEL = "Gap: this section has no paragraph tied to an opened excerpt."
 
 
@@ -28,6 +31,7 @@ def record_paragraph(
     text: object,
     excerpts: object,
     role: object = None,
+    concepts: object = None,
     actor: dict[str, object] | None = None,
 ) -> dict[str, object]:
     """Store one draft paragraph for a blueprint section. Does not change state."""
@@ -44,7 +48,10 @@ def record_paragraph(
     paragraph_role, role_error = _role(role)
     if role_error is not None:
         return role_error
-    assert section_id is not None and cleaned_text is not None and excerpt_ids is not None
+    concept_ids, concept_error = _concepts(root, concepts)
+    if concept_error is not None:
+        return concept_error
+    assert section_id is not None and cleaned_text is not None and excerpt_ids is not None and concept_ids is not None
     if directive_changes_policy(cleaned_text):
         return _error("policy.overridden", "paragraph text changed policy")
     blockers = paragraph_citation_blockers(root, excerpt_ids)
@@ -74,6 +81,8 @@ def record_paragraph(
             }
             if paragraph_role is not None:
                 record["role"] = paragraph_role
+            if concept_ids:
+                record["concepts"] = concept_ids
             append_jsonl(root / PARAGRAPHS, record)
             _audit(root, record=record, actor=actor)
             fresh = load_state_holding_lock(root)
@@ -89,6 +98,7 @@ def replace_paragraph(
     text: object,
     excerpts: object,
     role: object = None,
+    concepts: object = None,
     actor: dict[str, object] | None = None,
 ) -> dict[str, object]:
     """Rewrite one stored paragraph in place. The new text still cites an excerpt.
@@ -112,7 +122,10 @@ def replace_paragraph(
     paragraph_role, role_error = _role(role)
     if role_error is not None:
         return role_error
-    assert cleaned_text is not None and excerpt_ids is not None
+    concept_ids, concept_error = _concepts(root, concepts)
+    if concept_error is not None:
+        return concept_error
+    assert cleaned_text is not None and excerpt_ids is not None and concept_ids is not None
     if directive_changes_policy(cleaned_text):
         return _error("policy.overridden", "paragraph text changed policy")
     blockers = paragraph_citation_blockers(root, excerpt_ids)
@@ -145,6 +158,10 @@ def replace_paragraph(
                 record["role"] = paragraph_role
             elif isinstance(current.get("role"), str):
                 record["role"] = current["role"]
+            if concept_ids:
+                record["concepts"] = concept_ids
+            elif isinstance(current.get("concepts"), list):
+                record["concepts"] = current["concepts"]
             append_jsonl(root / PARAGRAPHS, record)
             _audit(root, record=record, actor=actor, operation="replace_paragraph")
             fresh = load_state_holding_lock(root)
@@ -339,9 +356,33 @@ def _public(record: dict[str, object]) -> dict[str, object]:
     }
     if record.get("role") in _KEPT_ROLES:
         visible["role"] = record["role"]
+    concepts = record.get("concepts")
+    if isinstance(concepts, list):
+        visible["concepts"] = [str(item) for item in concepts if isinstance(item, str)]
     if record.get("content_directives_ignored") is True:
         visible["content_directives_ignored"] = True
     return visible
+
+
+def _concepts(root: Path, value: object) -> tuple[list[str] | None, dict[str, object] | None]:
+    if value is None:
+        return [], None
+    if not isinstance(value, list) or len(value) > _MAX_CONCEPTS:
+        return None, _error("mcp.invalid_input", "concepts must be a list of academic blueprint concept ids")
+    known = academic_concept_ids(root)
+    identifiers: list[str] = []
+    for item in value:
+        if not isinstance(item, str) or not item.strip() or len(item.strip()) > 128:
+            return None, _error("mcp.invalid_input", "concepts must be a list of academic blueprint concept ids")
+        cleaned = item.strip()
+        if cleaned not in known:
+            return None, _error(
+                "paragraph.concept_unknown",
+                "the paragraph names a concept that is not in the academic blueprint",
+            )
+        if cleaned not in identifiers:
+            identifiers.append(cleaned)
+    return identifiers, None
 
 
 def _body(state: dict[str, object], record: dict[str, object], *, status: str) -> dict[str, object]:

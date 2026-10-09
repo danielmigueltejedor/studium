@@ -7,14 +7,20 @@ solution is not correct until the check passes.
 """
 
 import hashlib
+import json
+import math
 import os
 import re
 import shutil
 import subprocess
+from fractions import Fraction
 from pathlib import Path
 
+from studium.authoring.academic_blueprint import academic_concept_ids
 from studium.authoring.blueprint import current_sections
+from studium.authoring.computation import ComputationError, evaluate
 from studium.authoring.excerpts import excerpts_by_id
+from studium.authoring.mathematics import MathError, substitution_latex, symbol_names_of, validate_latex
 from studium.authoring.support import corroboration_for_excerpts, paragraph_citation_blockers
 from studium.policy.trust import contains_directive, directive_changes_policy
 from studium.storage.init_project import load_project_toml, load_state_holding_lock
@@ -41,6 +47,39 @@ REPRODUCIBILITY_TEXT = (
 RUST_NOT_WORKED_PROBLEM = (
     "A Rust test cannot be the worked problem of a book that is not COMPUTER_SCIENCE."
 )
+PROBLEM_ROLES = frozenset({"worked", "practice"})
+EXERCISE_DIFFICULTIES = frozenset({"FOUNDATIONAL", "INTERMEDIATE", "ADVANCED", "EXAM_LEVEL", "CHALLENGE"})
+DIFFICULTY_LEVELS = {
+    "FOUNDATIONAL": 1,
+    "INTERMEDIATE": 2,
+    "ADVANCED": 3,
+    "EXAM_LEVEL": 4,
+    "CHALLENGE": 5,
+}
+#: The kind of reasoning a problem exercises. The set is shared by the
+#: authoring tool and the renderer so a chapter can be audited for variety.
+PROBLEM_TYPES = frozenset(
+    {
+        "CONCEPTUAL",
+        "NUMERICAL",
+        "SYMBOLIC",
+        "PROOF",
+        "DIMENSIONAL",
+        "MULTI_STEP",
+        "DESIGN",
+        "PARAMETER_STUDY",
+        "OPTIMIZATION",
+        "INTERPRETATION",
+        "ERROR_IDENTIFICATION",
+        "ASSUMPTION_VALIDATION",
+        "APPLICATION",
+        "COMPARATIVE",
+    }
+)
+_MAX_OBJECTIVES = 20
+_MAX_METHOD = 500
+_MAX_SOLUTION_TEXT = 20_000
+_MAX_STEPS = 40
 
 
 def record_problem(
@@ -52,6 +91,12 @@ def record_problem(
     invocation: object = None,
     expected: object = None,
     excerpts: object = None,
+    role: object = None,
+    difficulty: object = None,
+    problem_type: object = None,
+    learning_objectives: object = None,
+    method: object = None,
+    solution: object = None,
     actor: dict[str, object] | None = None,
 ) -> dict[str, object]:
     """Store one problem. Does not run it and does not change project state."""
@@ -65,6 +110,26 @@ def record_problem(
     rust, numeric, mode_error = _mode(source_text, invocation, expected, excerpts)
     if mode_error is not None:
         return mode_error
+    problem_role, role_error = _role(role)
+    if role_error is not None:
+        return role_error
+    difficulty_key, difficulty_error = _difficulty(difficulty)
+    if difficulty_error is not None:
+        return difficulty_error
+    type_key, type_error = _problem_type(problem_type)
+    if type_error is not None:
+        return type_error
+    objectives, objectives_error = _objectives(root, learning_objectives)
+    if objectives_error is not None:
+        return objectives_error
+    method_text, method_error = _method(method)
+    if method_error is not None:
+        return method_error
+    solution_value, solution_error = _solution(solution)
+    if solution_error is not None:
+        return solution_error
+    if solution_value is not None and numeric is None:
+        return _error("mcp.invalid_input", "a structured solution needs a numeric problem")
     assert section_id is not None and cleaned_prompt is not None
     if directive_changes_policy(cleaned_prompt):
         return _error("policy.overridden", "problem prompt changed policy")
@@ -107,6 +172,18 @@ def record_problem(
                 "content_directives_ignored": contains_directive(cleaned_prompt.encode("utf-8")),
                 "recorded_at": utc_now(),
             }
+            if problem_role is not None:
+                record["role"] = problem_role
+            if difficulty_key is not None:
+                record["difficulty"] = difficulty_key
+            if type_key is not None:
+                record["problem_type"] = type_key
+            if objectives:
+                record["learning_objectives"] = objectives
+            if method_text is not None:
+                record["method"] = method_text
+            if solution_value is not None:
+                record["solution"] = solution_value
             if rust is not None:
                 relative = f"problems/{identifier}/main.rs"
                 assert rust_source is not None and rust_invocation is not None
@@ -215,10 +292,13 @@ def _check_numeric(root: Path, record: dict[str, object]) -> dict[str, object]:
     excerpt_ids = list(excerpts) if isinstance(excerpts, list) and all(isinstance(item, str) for item in excerpts) else []
     present = len(excerpt_ids) == 2 and all(item in stored for item in excerpt_ids)
     independent = present and corroboration_for_excerpts(root, excerpt_ids) == "two_witnesses"
+    step_checks = _step_checks(record)
     updated = dict(record)
     updated["status"] = "two_witnesses" if independent else "unchecked"
     updated["correct"] = False
     updated["classification"] = "PENDING"
+    if step_checks:
+        updated["step_checks"] = step_checks
     if independent:
         updated["corroboration"] = "two_witnesses"
     else:
@@ -233,7 +313,52 @@ def _check_numeric(root: Path, record: dict[str, object]) -> dict[str, object]:
     state = _read_state(root)
     body = _body(state, updated, status="two_witnesses" if independent else "unchecked")
     body["checked"] = False
+    if step_checks:
+        body["step_checks"] = step_checks
+        body["steps_reproduced"] = all(check.get("reproduced") is True for check in step_checks)
     return body
+
+
+def _decimal(value: "Fraction") -> str:
+    if value.denominator == 1:
+        return str(value.numerator)
+    return f"{float(value):.6g}"
+
+
+def _step_checks(record: dict[str, object]) -> list[dict[str, object]]:
+    """Replay every numeric solution step that carries an expression.
+
+    A reproduced step is a calculation that matched its stored result. It is not
+    a proof and it does not make the whole solution correct.
+    """
+
+    solution = record.get("solution")
+    if not isinstance(solution, dict):
+        return []
+    steps = solution.get("steps")
+    if not isinstance(steps, list):
+        return []
+    checks: list[dict[str, object]] = []
+    for index, step in enumerate(steps):
+        if not isinstance(step, dict) or "expression" not in step:
+            continue
+        expression = step["expression"]
+        if not isinstance(expression, str):
+            continue
+        try:
+            actual = evaluate(expression)
+        except ComputationError as exc:
+            checks.append({"index": index, "expression": expression, "reproduced": False, "error": str(exc)})
+            continue
+        entry: dict[str, object] = {"index": index, "expression": expression, "value": _decimal(actual)}
+        if "expected" in step:
+            expected = _number(step["expected"])
+            entry["expected"] = step["expected"]
+            entry["reproduced"] = expected is not None and math.isclose(
+                float(expected), float(actual), rel_tol=1e-9, abs_tol=1e-12
+            )
+        checks.append(entry)
+    return checks
 
 
 def _check_rust(root: Path, record: dict[str, object]) -> dict[str, object]:
@@ -572,6 +697,9 @@ def problem_input_sha256(root: Path, record: dict[str, object]) -> str:
         str(record.get("expected") or ""),
         str(record.get("source_text") or ""),
     ]
+    solution = record.get("solution")
+    if solution:
+        parts.append(json.dumps(solution, sort_keys=True, ensure_ascii=False))
     stored = excerpts_by_id(root)
     raw_value = record.get("excerpts")
     raw = raw_value if isinstance(raw_value, list) else []
@@ -610,6 +738,22 @@ def _public(record: dict[str, object], root: Path | None = None) -> dict[str, ob
         "classification": "PENDING",
         "correct": record.get("correct") is True,
     }
+    if record.get("role") in PROBLEM_ROLES:
+        visible["role"] = record["role"]
+    if record.get("difficulty") in EXERCISE_DIFFICULTIES:
+        visible["difficulty"] = record["difficulty"]
+    objectives = record.get("learning_objectives")
+    if isinstance(objectives, list):
+        visible["learning_objectives"] = [str(item) for item in objectives if isinstance(item, str)]
+    if isinstance(record.get("method"), str):
+        visible["method"] = record["method"]
+    if record.get("problem_type") in PROBLEM_TYPES:
+        visible["problem_type"] = record["problem_type"]
+    solution = record.get("solution")
+    if isinstance(solution, dict):
+        visible["solution"] = solution
+    if isinstance(record.get("step_checks"), list):
+        visible["step_checks"] = record["step_checks"]
     if record.get("kind") == "rust":
         visible["source_path"] = record.get("source_path")
         visible["invocation"] = record.get("invocation")
@@ -672,6 +816,321 @@ def _identifier(value: object) -> str | None:
     if not cleaned or len(cleaned) > 128:
         return None
     return cleaned
+
+
+def _role(value: object) -> tuple[str | None, dict[str, object] | None]:
+    if value is None:
+        return None, None
+    if not isinstance(value, str):
+        return None, _error("mcp.invalid_input", "role must be worked or practice")
+    cleaned = value.strip().lower()
+    if cleaned not in PROBLEM_ROLES:
+        return None, _error("mcp.invalid_input", "role must be worked or practice")
+    return cleaned, None
+
+
+def _difficulty(value: object) -> tuple[str | None, dict[str, object] | None]:
+    if value is None:
+        return None, None
+    if not isinstance(value, str):
+        return None, _error("mcp.invalid_input", _DIFFICULTY_TEXT)
+    cleaned = value.strip().upper()
+    if cleaned not in EXERCISE_DIFFICULTIES:
+        return None, _error("mcp.invalid_input", _DIFFICULTY_TEXT)
+    return cleaned, None
+
+
+_DIFFICULTY_TEXT = "difficulty must be FOUNDATIONAL, INTERMEDIATE, ADVANCED, EXAM_LEVEL, or CHALLENGE"
+
+
+def _problem_type(value: object) -> tuple[str | None, dict[str, object] | None]:
+    if value is None:
+        return None, None
+    if not isinstance(value, str) or value.strip().upper() not in PROBLEM_TYPES:
+        return None, _error("mcp.invalid_input", "problem_type is not a known problem type")
+    return value.strip().upper(), None
+
+
+def _objectives(root: Path, value: object) -> tuple[list[str] | None, dict[str, object] | None]:
+    if value is None:
+        return [], None
+    if not isinstance(value, list) or len(value) > _MAX_OBJECTIVES:
+        return None, _error("mcp.invalid_input", "learning_objectives must be academic blueprint concept ids")
+    concept_ids = academic_concept_ids(root)
+    identifiers: list[str] = []
+    for item in value:
+        if not isinstance(item, str) or not item.strip() or len(item.strip()) > 128:
+            return None, _error("mcp.invalid_input", "learning_objectives must be academic blueprint concept ids")
+        cleaned = item.strip()
+        if cleaned not in concept_ids:
+            return None, _error(
+                "problem.objective_unknown",
+                "the learning objective is not a concept of the academic blueprint",
+            )
+        if cleaned not in identifiers:
+            identifiers.append(cleaned)
+    return identifiers, None
+
+
+def _method(value: object) -> tuple[str | None, dict[str, object] | None]:
+    if value is None:
+        return None, None
+    if not isinstance(value, str):
+        return None, _error("mcp.invalid_input", "method must be a short sentence")
+    cleaned = value.strip()
+    if not cleaned or len(cleaned) > _MAX_METHOD:
+        return None, _error("mcp.invalid_input", "method must be a short sentence")
+    return cleaned, None
+
+
+def _scalar_text(value: object) -> str | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return repr(value)
+    if isinstance(value, str) and value.strip():
+        return value.strip()[:200]
+    return None
+
+
+def _text(value: object, name: str, limit: int = 2_000) -> tuple[str | None, dict[str, object] | None]:
+    if value is None:
+        return None, None
+    if not isinstance(value, str):
+        return None, _error("mcp.invalid_input", f"{name} must be text")
+    cleaned = value.strip()
+    if not cleaned or len(cleaned) > limit:
+        return None, _error("mcp.invalid_input", f"{name} must be text")
+    return cleaned, None
+
+
+def _text_list(value: object, name: str, limit: int = _MAX_STEPS) -> tuple[list[str] | None, dict[str, object] | None]:
+    if value is None:
+        return [], None
+    if not isinstance(value, list) or len(value) > limit:
+        return None, _error("mcp.invalid_input", f"{name} must be a short list of texts")
+    items: list[str] = []
+    for entry in value:
+        text, error = _text(entry, name)
+        if error is not None:
+            return None, error
+        assert text is not None
+        items.append(text)
+    return items, None
+
+
+def _latex_field(value: object, name: str) -> tuple[str | None, dict[str, object] | None]:
+    if value is None:
+        return None, None
+    if not isinstance(value, str) or not value.strip():
+        return None, _error("mcp.invalid_input", f"{name} must be a non-empty LaTeX fragment")
+    cleaned = value.strip()
+    problems = validate_latex(cleaned)
+    if problems:
+        return None, _error("mcp.invalid_input", f"{name} is not valid LaTeX: " + "; ".join(problems))
+    return cleaned, None
+
+
+def _given(value: object) -> tuple[list[dict[str, str]] | None, dict[str, object] | None]:
+    if value is None:
+        return [], None
+    if not isinstance(value, list) or len(value) > _MAX_STEPS:
+        return None, _error("mcp.invalid_input", "solution.given must be a list of quantities")
+    quantities: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for item in value:
+        if not isinstance(item, dict):
+            return None, _error("mcp.invalid_input", "each given quantity must be an object")
+        symbol = item.get("symbol")
+        number = _scalar_text(item.get("value"))
+        unit, unit_error = _text(item.get("unit"), "solution.given.unit", 100)
+        if unit_error is not None:
+            return None, unit_error
+        if not isinstance(symbol, str) or not symbol.strip().isidentifier():
+            return None, _error("mcp.invalid_input", "a given symbol must be an identifier")
+        symbol = symbol.strip()
+        if symbol in seen:
+            return None, _error("mcp.invalid_input", "a given symbol is repeated")
+        if number is None or unit is None:
+            return None, _error("mcp.invalid_input", "a given quantity needs a value and a unit")
+        seen.add(symbol)
+        entry = {"symbol": symbol, "value": number, "unit": unit}
+        meaning, meaning_error = _text(item.get("meaning"), "solution.given.meaning", 300)
+        if meaning_error is not None:
+            return None, meaning_error
+        if meaning is not None:
+            entry["meaning"] = meaning
+        quantities.append(entry)
+    return quantities, None
+
+
+def _model(value: object) -> tuple[list[dict[str, str]] | None, dict[str, object] | None]:
+    if value is None:
+        return [], None
+    if not isinstance(value, list) or len(value) > _MAX_STEPS:
+        return None, _error("mcp.invalid_input", "solution.model must be a list of equations")
+    equations: list[dict[str, str]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            return None, _error("mcp.invalid_input", "each model equation must be an object")
+        name, name_error = _text(item.get("name"), "solution.model.name", 300)
+        latex, latex_error = _latex_field(item.get("latex"), "solution.model.latex")
+        if name_error is not None or latex_error is not None or name is None or latex is None:
+            return None, name_error or latex_error or _error("mcp.invalid_input", "a model equation needs a name and LaTeX")
+        equation = {"name": name, "latex": latex}
+        symbolic, symbolic_error = _symbolic_field(item.get("symbolic"), "solution.model.symbolic")
+        if symbolic_error is not None:
+            return None, symbolic_error
+        if symbolic is not None:
+            equation["symbolic"] = symbolic
+        equations.append(equation)
+    return equations, None
+
+
+def _symbolic_field(value: object, name: str) -> tuple[str | None, dict[str, object] | None]:
+    if value is None:
+        return None, None
+    if not isinstance(value, str) or not value.strip():
+        return None, _error("mcp.invalid_input", f"{name} must be a symbolic expression")
+    cleaned = value.strip()
+    try:
+        symbol_names_of(cleaned)
+    except MathError as exc:
+        return None, _error("mcp.invalid_input", f"{name} is not a valid symbolic expression: {exc}")
+    return cleaned, None
+
+
+def _steps(value: object) -> tuple[list[dict[str, str]] | None, dict[str, object] | None]:
+    if value is None:
+        return [], None
+    if not isinstance(value, list) or len(value) > _MAX_STEPS:
+        return None, _error("mcp.invalid_input", "solution.steps must be a short list")
+    steps: list[dict[str, str]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            return None, _error("mcp.invalid_input", "each solution step must be an object")
+        text, text_error = _text(item.get("text"), "solution.steps.text", 2_000)
+        if text_error is not None:
+            return None, text_error
+        step: dict[str, str] = {}
+        if text is not None:
+            step["text"] = text
+        for field, checker in (("equation", _latex_field), ("symbolic", _symbolic_field)):
+            cleaned, field_error = checker(item.get(field), f"solution.steps.{field}")
+            if field_error is not None:
+                return None, field_error
+            if cleaned is not None:
+                step[field] = cleaned
+        expression = item.get("expression")
+        if expression is not None:
+            if not isinstance(expression, str) or not expression.strip():
+                return None, _error("mcp.invalid_input", "a step expression must be text")
+            try:
+                evaluate(expression)
+            except ComputationError as exc:
+                return None, _error("mcp.invalid_input", f"a step expression cannot be checked: {exc}")
+            step["expression"] = expression.strip()
+        expected = _scalar_text(item.get("expected"))
+        if expected is not None:
+            step["expected"] = expected
+        if "expression" in step and "expected" in step:
+            try:
+                if _number(step["expected"]) is None:
+                    raise ComputationError("expected is not a number")
+            except ComputationError as exc:
+                return None, _error("mcp.invalid_input", f"a step expected value cannot be compared: {exc}")
+        unit, unit_error = _text(item.get("unit"), "solution.steps.unit", 100)
+        if unit_error is not None:
+            return None, unit_error
+        if unit is not None:
+            step["unit"] = unit
+        if not step:
+            return None, _error("mcp.invalid_input", "a solution step needs some content")
+        steps.append(step)
+    return steps, None
+
+
+def _number(value: object) -> "Fraction | None":
+    from fractions import Fraction
+
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float, Fraction)):
+        return Fraction(value)
+    if isinstance(value, str):
+        try:
+            return Fraction(value.strip())
+        except (ValueError, ZeroDivisionError):
+            return None
+    return None
+
+
+def _auto_substitution(model: list[dict[str, str]], given: list[dict[str, str]]) -> str | None:
+    lookup = {entry["symbol"]: (entry["value"], entry["unit"]) for entry in given}
+    for equation in model:
+        symbolic = equation.get("symbolic")
+        if not symbolic:
+            continue
+        try:
+            names = symbol_names_of(symbolic)
+        except MathError:
+            continue
+        if names and all(name in lookup for name in names):
+            try:
+                return substitution_latex(symbolic, {name: lookup[name] for name in names})
+            except MathError:
+                return None
+    return None
+
+
+def _solution(value: object) -> tuple[dict[str, object] | None, dict[str, object] | None]:
+    """Validate and normalize the optional structured solution of a numeric problem."""
+
+    if value is None:
+        return None, None
+    if not isinstance(value, dict):
+        return None, _error("mcp.invalid_input", "solution must be an object")
+    normalized: dict[str, object] = {}
+    given, error = _given(value.get("given"))
+    if error is not None:
+        return None, error
+    model, error = _model(value.get("model"))
+    if error is not None:
+        return None, error
+    steps, error = _steps(value.get("steps"))
+    if error is not None:
+        return None, error
+    for name in ("assumptions", "development", "limitations", "mistakes"):
+        items, list_error = _text_list(value.get(name), f"solution.{name}")
+        if list_error is not None:
+            return None, list_error
+        if items:
+            normalized[name] = items
+    for name in ("unknown", "interpretation"):
+        text, text_error = _text(value.get(name), f"solution.{name}")
+        if text_error is not None:
+            return None, text_error
+        if text is not None:
+            normalized[name] = text
+    for name in ("substitution", "result"):
+        latex, latex_error = _latex_field(value.get(name), f"solution.{name}")
+        if latex_error is not None:
+            return None, latex_error
+        if latex is not None:
+            normalized[name] = latex
+    if given:
+        normalized["given"] = given
+    if model:
+        normalized["model"] = model
+    if steps:
+        normalized["steps"] = steps
+    if "substitution" not in normalized and model and given:
+        computed = _auto_substitution(model, given)
+        if computed is not None:
+            normalized["substitution"] = computed
+    if not normalized:
+        return None, _error("mcp.invalid_input", "solution has no usable field")
+    return normalized, None
 
 
 def _rejected(root: Path, blockers: list[dict[str, object]]) -> dict[str, object]:

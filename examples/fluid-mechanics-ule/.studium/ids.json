@@ -3,9 +3,12 @@
   "counters": {
     "TSK": 1,
     "OUT": 1,
-    "EVD": 14,
-    "PAR": 16,
-    "PRB": 6,
-    "REV": 8
+    "EVD": 21,
+    "PAR": 56,
+    "PRB": 40,
+    "DER": 10,
+    "SYM": 23,
+    "TRM": 14,
+    "REV": 10
   }
 }
