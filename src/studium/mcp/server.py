@@ -727,8 +727,10 @@ def _dispatch(session: McpSession, name: str, arguments: Mapping[str, object]) -
             excerpts=arguments.get("excerpts") if "excerpts" in arguments else None,
             role=arguments.get("role") if "role" in arguments else None,
             difficulty=arguments.get("difficulty") if "difficulty" in arguments else None,
+            problem_type=arguments.get("problem_type") if "problem_type" in arguments else None,
             learning_objectives=arguments.get("learning_objectives") if "learning_objectives" in arguments else None,
             method=arguments.get("method") if "method" in arguments else None,
+            solution=arguments.get("solution") if "solution" in arguments else None,
             actor=actor,
         )
     if name == "studium_problem_check":
@@ -925,6 +927,8 @@ def _dispatch(session: McpSession, name: str, arguments: Mapping[str, object]) -
             assumptions=arguments.get("assumptions") if "assumptions" in arguments else None,
             governing_principles=arguments.get("governing_principles") if "governing_principles" in arguments else None,
             steps=arguments.get("steps") if "steps" in arguments else None,
+            steps_latex=arguments.get("steps_latex") if "steps_latex" in arguments else None,
+            symbolic=arguments.get("symbolic") if "symbolic" in arguments else None,
             variables=arguments.get("variables") if "variables" in arguments else None,
             boundary_conditions=arguments.get("boundary_conditions") if "boundary_conditions" in arguments else None,
             applicability=arguments.get("applicability") if "applicability" in arguments else None,

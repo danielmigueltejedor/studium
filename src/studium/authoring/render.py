@@ -20,6 +20,7 @@ from studium.authoring.languages import (
     generic_section_titles,
     messages,
 )
+from studium.authoring.mathematics import MathError, symbolic_latex, unit_latex
 from studium.authoring.notation import notation_registry
 from studium.authoring.paragraphs import supported_paragraphs
 from studium.authoring.problems import problem_result_current
@@ -396,9 +397,59 @@ _BOX_STYLE = {
 #: Labels for the two boxes the language catalog does not carry. Spanish
 #: books use Spanish; every other language uses the English default.
 _EXTRA_BOX_LABELS: dict[str, dict[str, str]] = {
-    "spanish": {"exercises": "Ejercicios", "derivations": "Derivaciones", "symbol": "Símbolo", "meaning": "Significado", "units": "Unidades"},
+    "spanish": {
+        "exercises": "Ejercicios",
+        "derivations": "Derivaciones",
+        "symbol": "Símbolo",
+        "meaning": "Significado",
+        "units": "Unidades",
+        "given": "Datos",
+        "unknown": "Incógnita",
+        "model": "Modelo físico",
+        "assumptions": "Hipótesis",
+        "principles": "Principios",
+        "steps": "Pasos",
+        "variables": "Variables",
+        "boundaries": "Condiciones de contorno",
+        "development": "Desarrollo",
+        "substitution": "Sustitución numérica",
+        "result": "Resultado",
+        "interpretation": "Interpretación",
+        "verification": "Comprobación de los pasos",
+        "applicability": "Aplicabilidad",
+        "limitations": "Limitaciones",
+        "mistakes": "Errores frecuentes",
+        "reproduced": "reproducido",
+        "not_reproduced": "no reproducido",
+        "step_word": "Paso",
+    },
 }
-_EXTRA_BOX_DEFAULTS = {"exercises": "Exercises", "derivations": "Derivations", "symbol": "Symbol", "meaning": "Meaning", "units": "Units"}
+_EXTRA_BOX_DEFAULTS = {
+    "exercises": "Exercises",
+    "derivations": "Derivations",
+    "symbol": "Symbol",
+    "meaning": "Meaning",
+    "units": "Units",
+    "given": "Given",
+    "unknown": "Unknown",
+    "model": "Physical model",
+    "assumptions": "Assumptions",
+    "principles": "Principles",
+    "steps": "Steps",
+    "variables": "Variables",
+    "boundaries": "Boundary conditions",
+    "development": "Development",
+    "substitution": "Numerical substitution",
+    "result": "Result",
+    "interpretation": "Interpretation",
+    "verification": "Step check",
+    "applicability": "Applicability",
+    "limitations": "Limitations",
+    "mistakes": "Common mistakes",
+    "reproduced": "reproduced",
+    "not_reproduced": "not reproduced",
+    "step_word": "Step",
+}
 
 #: Verification statuses in prose. The raw enum name stays the fallback so a
 #: status is never softened into a stronger claim.
@@ -1241,7 +1292,7 @@ def _chapter_lines(
     for text in definitions:
         lines.extend(_box(copy["definition"], _plain([text]), "definition"))
     lines.extend(_derivation_box(root, section_id, language))
-    lines.extend(_worked_box(root, section_id, copy))
+    lines.extend(_worked_box(root, section_id, copy, language))
     lines.extend(_exercise_box(root, section_id, language))
     lines.extend(_box(copy["self_check"], _plain(self_check), "self_check"))
     return lines
@@ -1375,7 +1426,7 @@ def _worked_problem_records(root: Path, section_id: str) -> list[dict[str, objec
     return found
 
 
-def _worked_box(root: Path, section_id: str, copy: dict[str, str]) -> list[str]:
+def _worked_box(root: Path, section_id: str, copy: dict[str, str], language: BookLanguage) -> list[str]:
     """One worked problem per chapter, with the statement, the working, and the answer."""
 
     problems = _worked_problem_records(root, section_id)
@@ -1387,6 +1438,10 @@ def _worked_box(root: Path, section_id: str, copy: dict[str, str]) -> list[str]:
     if not problems and not computations:
         return []
     problem = problems[0] if problems else {}
+    solution = problem.get("solution")
+    if isinstance(solution, dict) and solution:
+        body = _solution_body(problem, solution, copy, language)
+        return _box(copy["worked"], body, "worked")
     computation = computations[0] if computations else {}
     prompt = problem.get("prompt") if isinstance(problem.get("prompt"), str) else ""
     expected = problem.get("expected") if isinstance(problem.get("expected"), str) else ""
@@ -1410,6 +1465,55 @@ def _worked_box(root: Path, section_id: str, copy: dict[str, str]) -> list[str]:
         *_labeled(copy["respuesta"], answer, expression=bool(result.strip()) and answer == result.strip()),
     ]
     return _box(copy["worked"], body, "worked")
+
+
+def _solution_body(problem: dict[str, object], solution: dict[str, object], copy: dict[str, str], language: BookLanguage) -> list[str]:
+    """A structured, multi-step engineering solution: model, substitution, result."""
+
+    body: list[str] = []
+    prompt = problem.get("prompt") if isinstance(problem.get("prompt"), str) else ""
+    if prompt.strip():
+        body.extend(_labeled(copy["enunciado"], prompt))
+    given = solution.get("given")
+    if isinstance(given, list):
+        body.extend(_given_lines(given, language))
+    unknown = solution.get("unknown")
+    if isinstance(unknown, str) and unknown.strip():
+        body.extend(_labeled(_extra_label(language, "unknown"), unknown))
+    model = solution.get("model")
+    if isinstance(model, list):
+        body.extend(_model_lines(model, language))
+    assumptions = solution.get("assumptions")
+    if isinstance(assumptions, list):
+        body.extend(_bullet_items(_extra_label(language, "assumptions"), [str(item) for item in assumptions], language))
+    steps = solution.get("steps")
+    if isinstance(steps, list) and steps:
+        body.extend(_steps_lines(steps, language))
+    else:
+        development = solution.get("development")
+        if isinstance(development, list) and development:
+            body.extend(_numbered_steps([str(item) for item in development], [], language))
+    substitution = solution.get("substitution")
+    if isinstance(substitution, str) and substitution.strip():
+        body.extend(["", r"\noindent\textbf{" + latex_escape(_extra_label(language, "substitution")) + "}"])
+        body.extend(_display_math(substitution))
+    result = solution.get("result")
+    if isinstance(result, str) and result.strip():
+        body.extend(["", r"\noindent\textbf{" + latex_escape(_extra_label(language, "result")) + "}"])
+        body.extend(_display_math(result))
+    interpretation = solution.get("interpretation")
+    if isinstance(interpretation, str) and interpretation.strip():
+        body.extend(_labeled(_extra_label(language, "interpretation"), interpretation))
+    step_checks = problem.get("step_checks")
+    if isinstance(step_checks, list):
+        body.extend(_step_check_lines(step_checks, language))
+    limitations = solution.get("limitations")
+    if isinstance(limitations, list):
+        body.extend(_bullet_items(_extra_label(language, "limitations"), [str(item) for item in limitations], language))
+    mistakes = solution.get("mistakes")
+    if isinstance(mistakes, list):
+        body.extend(_bullet_items(_extra_label(language, "mistakes"), [str(item) for item in mistakes], language))
+    return body
 
 
 def _labeled(label: str, text: str, *, expression: bool = False, language: str = "") -> list[str]:
@@ -1464,6 +1568,200 @@ def _practice_numbering(root: Path) -> dict[str, int]:
     return numbering
 
 
+def _symbolic_display(symbolic: str) -> list[str]:
+    try:
+        return _display_math(symbolic_latex(symbolic))
+    except MathError:  # pragma: no cover - defensive
+        return []
+
+
+def _symbol_tex(name: str) -> str:
+    cleaned = name.strip()
+    if not cleaned:
+        return ""
+    try:
+        return symbolic_latex(cleaned)
+    except MathError:
+        return r"\mathrm{" + latex_escape(cleaned) + "}"
+
+
+def _unit_tex(unit: str) -> str:
+    try:
+        return unit_latex(unit)
+    except MathError:
+        return r"\mathrm{" + latex_escape(unit.strip()) + "}"
+
+
+def _display_math(tex: str) -> list[str]:
+    stripped = tex.strip()
+    if not stripped:
+        return []
+    if stripped.startswith(r"\[") and stripped.endswith(r"\]"):
+        return ["", stripped]
+    if stripped.startswith(r"\(") and stripped.endswith(r"\)"):
+        return ["", r"\[" + stripped[2:-2] + r"\]"]
+    if stripped.startswith("$") and stripped.endswith("$") and len(stripped) > 2:
+        return ["", r"\[" + stripped[1:-1] + r"\]"]
+    return ["", r"\[", stripped, r"\]"]
+
+
+def _bullet_items(label: str, items: list[str], language: BookLanguage) -> list[str]:
+    texts = [item for item in items if isinstance(item, str) and item.strip()]
+    if not texts:
+        return []
+    lines = ["", r"\noindent\textbf{" + latex_escape(label) + "}", r"\begin{itemize}"]
+    for text in texts:
+        lines.append(r"\item " + _item_run(text, language))
+    lines.append(r"\end{itemize}")
+    return lines
+
+
+def _item_run(text: str, _language: BookLanguage) -> str:
+    """One list item: explicit math is kept, prose is escaped."""
+
+    return render_text_run(text.strip())
+
+
+def _numbered_steps(steps: list[str], steps_latex: list[str], language: BookLanguage) -> list[str]:
+    count = max(len(steps), len(steps_latex))
+    if count == 0:
+        return []
+    lines = ["", r"\noindent\textbf{" + latex_escape(_extra_label(language, "steps")) + r"}", r"\begin{enumerate}"]
+    for index in range(count):
+        lines.append(r"\item")
+        if index < len(steps) and steps[index].strip():
+            lines.extend(emit_prose(steps[index].strip()))
+        if index < len(steps_latex) and steps_latex[index].strip():
+            lines.extend(_display_math(steps_latex[index]))
+    lines.append(r"\end{enumerate}")
+    return lines
+
+
+def _split_trailing_unit(text: str) -> tuple[str, str]:
+    """Split "meaning (unit)" into meaning and unit, tolerating nested parentheses."""
+
+    stripped = text.rstrip()
+    if not stripped.endswith(")"):
+        return text, ""
+    depth = 0
+    for index in range(len(stripped) - 1, -1, -1):
+        char = stripped[index]
+        if char == ")":
+            depth += 1
+        elif char == "(":
+            depth -= 1
+            if depth == 0:
+                prefix = stripped[:index].rstrip()
+                unit = stripped[index + 1 : -1].strip()
+                if prefix and unit:
+                    return prefix, unit
+                return text, ""
+    return text, ""
+
+
+def _variables_lines(variables: dict[str, object], language: BookLanguage) -> list[str]:
+    if not variables:
+        return []
+    lines = ["", r"\noindent\textbf{" + latex_escape(_extra_label(language, "variables")) + r"}", r"\begin{itemize}"]
+    for name, raw in variables.items():
+        if isinstance(raw, dict):
+            meaning = raw.get("meaning") if isinstance(raw.get("meaning"), str) else ""
+            units = raw.get("units") if isinstance(raw.get("units"), str) else ""
+        else:
+            meaning = raw if isinstance(raw, str) else ""
+            units = ""
+        if not units and meaning:
+            meaning, units = _split_trailing_unit(meaning)
+        item = "$" + _symbol_tex(str(name)) + "$"
+        if meaning:
+            item += ": " + render_text_run(str(meaning))
+        if units:
+            item += " ($" + _unit_tex(str(units)) + "$)"
+        lines.append(r"\item " + item)
+    lines.append(r"\end{itemize}")
+    return lines
+
+
+def _given_lines(given: list[object], language: BookLanguage) -> list[str]:
+    if not given:
+        return []
+    lines = ["", r"\noindent\textbf{" + latex_escape(_extra_label(language, "given")) + r"}", r"\begin{itemize}"]
+    for raw in given:
+        if not isinstance(raw, dict):
+            continue
+        symbol = _symbol_tex(str(raw.get("symbol") or ""))
+        value = str(raw.get("value") or "")
+        unit = str(raw.get("unit") or "")
+        item = "$" + symbol + r" = " + latex_escape(value)
+        if unit and unit.strip() and unit.strip().lower() not in {"dimensionless", "adimensional", "1"}:
+            item += r"\," + _unit_tex(unit)
+        item += "$"
+        meaning = raw.get("meaning")
+        if isinstance(meaning, str) and meaning.strip():
+            item += " — " + render_text_run(meaning.strip())
+        lines.append(r"\item " + item)
+    lines.append(r"\end{itemize}")
+    return lines
+
+
+def _model_lines(model: list[object], language: BookLanguage) -> list[str]:
+    if not model:
+        return []
+    lines = ["", r"\noindent\textbf{" + latex_escape(_extra_label(language, "model")) + "}"]
+    for raw in model:
+        if not isinstance(raw, dict):
+            continue
+        name = raw.get("name")
+        latex = raw.get("latex")
+        if isinstance(name, str) and name.strip():
+            lines.extend(["", r"\noindent\textit{" + latex_escape(name.strip()) + "}"])
+        if isinstance(latex, str) and latex.strip():
+            lines.extend(_display_math(latex))
+    return lines
+
+
+def _steps_lines(steps: list[object], language: BookLanguage) -> list[str]:
+    if not steps:
+        return []
+    lines = ["", r"\noindent\textbf{" + latex_escape(_extra_label(language, "development")) + r"}", r"\begin{enumerate}"]
+    for raw in steps:
+        if not isinstance(raw, dict):
+            continue
+        lines.append(r"\item")
+        text = raw.get("text")
+        if isinstance(text, str) and text.strip():
+            lines.extend(emit_prose(text.strip()))
+        equation = raw.get("equation")
+        symbolic = raw.get("symbolic")
+        if isinstance(equation, str) and equation.strip():
+            lines.extend(_display_math(equation))
+        elif isinstance(symbolic, str) and symbolic.strip():
+            rendered = _symbolic_display(symbolic)
+            if rendered:
+                lines.extend(rendered)
+    lines.append(r"\end{enumerate}")
+    return lines
+
+
+def _step_check_lines(step_checks: list[object], language: BookLanguage) -> list[str]:
+    usable = [check for check in step_checks if isinstance(check, dict) and "reproduced" in check]
+    if not usable:
+        return []
+    lines = ["", r"\noindent\textbf{" + latex_escape(_extra_label(language, "verification")) + r"}", r"\begin{itemize}"]
+    for check in usable:
+        index = check.get("index")
+        number = str(index + 1) if isinstance(index, int) else "?"
+        value = str(check.get("value") or check.get("expected") or "")
+        phrase = _extra_label(language, "reproduced") if check.get("reproduced") is True else _extra_label(language, "not_reproduced")
+        item = latex_escape(_extra_label(language, "step_word")) + " " + latex_escape(number)
+        if value:
+            item += r": $" + render_text_run(value) + "$"
+        item += " — " + latex_escape(phrase)
+        lines.append(r"\item " + item)
+    lines.append(r"\end{itemize}")
+    return lines
+
+
 def _derivation_box(root: Path, section_id: str, language: BookLanguage) -> list[str]:
     """The recorded derivations of this chapter with their stored check status."""
 
@@ -1477,7 +1775,29 @@ def _derivation_box(root: Path, section_id: str, language: BookLanguage) -> list
         equation = record.get("equation") if isinstance(record.get("equation"), str) else ""
         body.extend(["", r"\noindent\textbf{" + latex_escape(name.strip() or label) + "}"])
         if equation.strip():
-            body.extend(["", *emit_prose(equation.strip())])
+            body.extend(_display_math(equation))
+        for key, label_key in (
+            ("assumptions", "assumptions"),
+            ("governing_principles", "principles"),
+            ("boundary_conditions", "boundaries"),
+            ("applicability", "applicability"),
+            ("limitations", "limitations"),
+        ):
+            values = record.get(key)
+            if isinstance(values, list):
+                body.extend(_bullet_items(_extra_label(language, label_key), [str(item) for item in values], language))
+        steps = record.get("steps")
+        steps_latex = record.get("steps_latex")
+        body.extend(
+            _numbered_steps(
+                [str(item) for item in steps] if isinstance(steps, list) else [],
+                [str(item) for item in steps_latex] if isinstance(steps_latex, list) else [],
+                language,
+            )
+        )
+        variables = record.get("variables")
+        if isinstance(variables, dict):
+            body.extend(_variables_lines(variables, language))
         verification = record.get("verification")
         status = str(verification.get("status")) if isinstance(verification, dict) else "UNVERIFIED"
         body.extend(["", r"\noindent\footnotesize " + latex_escape(_status_phrase(status, language)) + "."])
@@ -1495,9 +1815,11 @@ def _exercise_box(root: Path, section_id: str, language: BookLanguage) -> list[s
     for index, record in enumerate(records, 1):
         prompt = record.get("prompt") if isinstance(record.get("prompt"), str) else ""
         difficulty = record.get("difficulty") if isinstance(record.get("difficulty"), str) else ""
+        problem_type = record.get("problem_type") if isinstance(record.get("problem_type"), str) else ""
+        tags = [tag for tag in (difficulty.strip(), problem_type.strip()) if tag]
         head = str(index)
-        if difficulty.strip():
-            head += f" ({difficulty.strip()})"
+        if tags:
+            head += " (" + ", ".join(tags) + ")"
         body.extend(["", r"\noindent\textbf{" + latex_escape(head) + "}"])
         if prompt.strip():
             body.extend(emit_prose(prompt.strip()))

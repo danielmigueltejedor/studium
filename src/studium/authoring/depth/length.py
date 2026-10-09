@@ -157,6 +157,47 @@ def validate_length_target(
     return notes
 
 
+def assess_length_match(*, scope: LengthScope, actual_pages: int | float, tolerance: float = 0.6) -> dict[str, object]:
+    """Compare a measured document against the scope its plan needs.
+
+    A book whose rendered length is far below the floor for its declared depth
+    is reported as ``UNDER_TARGET`` with the reason. This is not a page quota:
+    it is a mismatch between a promised depth (COMPREHENSIVE) and the measured
+    document. The measured page count is the only fact here.
+    """
+
+    pages = float(actual_pages)
+    floor = scope.floor
+    ceiling = scope.ceiling
+    if pages <= 0:
+        verdict = "NO_OUTPUT"
+        message = "the document has no measured page count, so nothing is compared"
+    elif pages < floor * tolerance:
+        verdict = "UNDER_TARGET"
+        message = (
+            f"the document is {pages:.0f} pages but the {scope.preference} scope needs about "
+            f"{floor:.0f}-{ceiling:.0f} pages; the declared depth is not supported by the measured length"
+        )
+    elif pages < floor:
+        verdict = "BELOW_FLOOR"
+        message = f"the document is {pages:.0f} pages, below the {floor:.0f}-page floor for the {scope.preference} scope"
+    elif pages > ceiling / tolerance:
+        verdict = "ABOVE_CEILING"
+        message = f"the document is {pages:.0f} pages, above the {ceiling:.0f}-page ceiling; check for filler"
+    else:
+        verdict = "WITHIN_RANGE"
+        message = f"the document is {pages:.0f} pages, inside the planned {floor:.0f}-{ceiling:.0f} page scope"
+    return {
+        "verdict": verdict,
+        "actual_pages": round(pages, 1),
+        "floor": floor,
+        "ceiling": ceiling,
+        "preference": scope.preference,
+        "matches": verdict == "WITHIN_RANGE",
+        "message": message,
+    }
+
+
 def length_preference(value: object) -> tuple[str | None, dict[str, object] | None]:
     """Validate a length preference value."""
 

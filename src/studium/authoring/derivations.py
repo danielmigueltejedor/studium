@@ -17,6 +17,7 @@ from typing import NamedTuple
 
 from studium.authoring.blueprint import current_sections
 from studium.authoring.excerpts import excerpts_by_id
+from studium.authoring.mathematics import MathError, symbol_names_of, validate_latex
 from studium.policy.trust import directive_changes_policy
 from studium.storage.init_project import load_state_holding_lock
 from studium.storage.locking import ProjectLocked, project_lock
@@ -80,6 +81,8 @@ def record_derivation(
     assumptions: object = None,
     governing_principles: object = None,
     steps: object = None,
+    steps_latex: object = None,
+    symbolic: object = None,
     variables: object = None,
     boundary_conditions: object = None,
     applicability: object = None,
@@ -119,6 +122,12 @@ def record_derivation(
         return error
     if steps_list:
         paragraphs["steps"] = steps_list
+    steps_tex, error = _latex_lines(steps_latex, "steps_latex")
+    if error is not None:
+        return error
+    symbolic_tex, error = _symbolic_line(symbolic, "symbolic")
+    if error is not None:
+        return error
     boundaries, error = _lines(boundary_conditions, "boundary_conditions")
     if error is not None:
         return error
@@ -156,6 +165,10 @@ def record_derivation(
                 record["equation_id"] = identifier
             for key, values in paragraphs.items():
                 record[key] = values
+            if steps_tex:
+                record["steps_latex"] = steps_tex
+            if symbolic_tex is not None:
+                record["symbolic"] = symbolic_tex
             if variables_map:
                 record["variables"] = variables_map
             if references_map:
@@ -415,6 +428,36 @@ def _lines(value: object, field: str) -> tuple[list[str] | None, dict[str, objec
     return cleaned, None
 
 
+def _latex_lines(value: object, field: str) -> tuple[list[str] | None, dict[str, object] | None]:
+    if value is None:
+        return [], None
+    if not isinstance(value, list) or len(value) > _MAX_ENTRIES:
+        return None, _error("mcp.invalid_input", f"{field} must be a list of short LaTeX lines")
+    cleaned: list[str] = []
+    for item in value:
+        if not isinstance(item, str) or not item.strip() or len(item) > _MAX_LINE:
+            return None, _error("mcp.invalid_input", f"{field} entries must be short LaTeX lines")
+        stripped = item.strip()
+        problems = validate_latex(stripped)
+        if problems:
+            return None, _error("mcp.invalid_input", f"{field} has invalid LaTeX: " + "; ".join(problems))
+        cleaned.append(stripped)
+    return cleaned, None
+
+
+def _symbolic_line(value: object, field: str) -> tuple[str | None, dict[str, object] | None]:
+    if value is None:
+        return None, None
+    if not isinstance(value, str) or not value.strip() or len(value) > _MAX_LINE:
+        return None, _error("mcp.invalid_input", f"{field} must be one symbolic line")
+    cleaned = value.strip()
+    try:
+        symbol_names_of(cleaned)
+    except MathError as exc:
+        return None, _error("mcp.invalid_input", f"{field} is not a valid symbolic expression: {exc}")
+    return cleaned, None
+
+
 def _variables(value: object) -> tuple[dict[str, object] | None, dict[str, object] | None]:
     if value is None:
         return None, None
@@ -495,6 +538,8 @@ def _public(record: dict[str, object]) -> dict[str, object]:
         "assumptions",
         "governing_principles",
         "steps",
+        "steps_latex",
+        "symbolic",
         "boundary_conditions",
         "applicability",
         "limitations",

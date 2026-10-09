@@ -26,9 +26,15 @@ compilado. No se inventan cifras: todas proceden de `studium_quality_report`,
 | Cobertura de conceptos | 20 de 20 |
 | Consistencia entre capítulos | sí |
 | Contradicciones abiertas | 0 |
-| Páginas medidas del PDF | 38 |
+| Páginas medidas del PDF | 48 |
+| Páginas planificadas (rango) | 36–66 |
+| Veredicto de longitud | WITHIN_RANGE |
 | Errores de LaTeX (`!`) | 0 |
 | Cajas overfull | 0 |
+
+## Longitud medida frente al plan
+
+El plan de profundidad declara un ámbito COMPREHENSIVE de 36–66 páginas. El PDF medido tiene 48 páginas y el veredicto automático de longitud es WITHIN_RANGE.
 
 ## Estados de verificación de las derivaciones
 

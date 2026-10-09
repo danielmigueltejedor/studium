@@ -32,6 +32,7 @@ if str(_REPO / "src") not in sys.path:
     sys.path.insert(0, str(_REPO / "src"))
 
 from studium.authoring.computation import evaluate  # noqa: E402
+from studium.authoring.depth.length import LengthScope, assess_length_match  # noqa: E402
 from studium.authoring.render import find_engine, render_draft  # noqa: E402
 from studium.cli.app import main  # noqa: E402
 from studium.mcp.server import dispatch, open_workspace  # noqa: E402
@@ -1690,6 +1691,455 @@ EXTRA_DERIVATIONS: dict[str, list[dict[str, object]]] = {
 }
 
 
+# The prompt is the problem statement. It no longer repeats a raw arithmetic
+# expression: the arithmetic belongs to the verified record, not to the prose.
+WORKED_PROMPTS: dict[str, str] = {
+    "introduccion": (
+        "Peso específico del aire. En condiciones estándar al nivel del mar la densidad del aire es "
+        "1,225 kg/m³ y la aceleración de la gravedad es 9,81 m/s². Calcula el peso específico del aire "
+        "y exprésalo en newtons por metro cúbico."
+    ),
+    "propiedades": (
+        "Viscosidad cinemática del agua. El agua a 20 °C tiene una viscosidad dinámica de 0,001 Pa·s y "
+        "una densidad de 998 kg/m³. Calcula su viscosidad cinemática y exprésala en metros cuadrados por "
+        "segundo."
+    ),
+    "estatica": (
+        "Presión hidrostática a diez metros de profundidad. Con densidad 998 kg/m³, gravedad 9,81 m/s² y "
+        "profundidad 10 m, calcula la presión manométrica en el seno del agua y exprésala en pascales."
+    ),
+    "continuidad": (
+        "Caudal volumétrico por una tubería. Por una sección de 0,01 m² circula agua a 2 m/s. Calcula el "
+        "caudal volumétrico y exprésalo en metros cúbicos por segundo."
+    ),
+    "bernoulli": (
+        "Ley de Torricelli. Un depósito abierto tiene un orificio de salida 5 m por debajo de la "
+        "superficie libre. Con g = 9,81 m/s², calcula la energía cinética específica y, a partir de ella, "
+        "la velocidad de salida."
+    ),
+    "momentum": (
+        "Fuerza sobre un codo. El agua de densidad 998 kg/m³ entra en un codo por una sección de 0,01 m² "
+        "a 2 m/s y cambia su velocidad en 2 m/s en la dirección de la corriente. Calcula la fuerza que el "
+        "fluido ejerce sobre el codo y exprésala en newtons."
+    ),
+    "reynolds": (
+        "Número de Reynolds del agua en una tubería. Para agua a 20 °C (densidad 998 kg/m³, viscosidad "
+        "dinámica 0,001 Pa·s) que circula a 2 m/s por una tubería de 0,1 m de diámetro, calcula el número "
+        "de Reynolds e interpreta el régimen de flujo."
+    ),
+    "tuberias": (
+        "Velocidad media en una tubería. Por una tubería de sección 0,01 m² circula un caudal de "
+        "0,02 m³/s. Calcula la velocidad media y exprésala en metros por segundo."
+    ),
+    "capa-limite": (
+        "Espesor de desplazamiento de una capa límite de perfil lineal. Sobre una placa plana se "
+        "desarrolla una capa límite de 0,02 m de espesor con perfil de velocidades lineal, para el que el "
+        "espesor de desplazamiento es la mitad del espesor de la capa. Calcula el espesor de "
+        "desplazamiento."
+    ),
+    "instrumentacion": (
+        "Presión dinámica del aire. El aire de densidad 1,225 kg/m³ circula a 10 m/s. Calcula la presión "
+        "dinámica que registra un tubo de Pitot y exprésala en pascales."
+    ),
+}
+
+# The practice prompts, base exercise first and extension second, with the raw
+# expressions removed for the same reason.
+PRACTICE_PROMPTS: dict[str, list[str]] = {
+    "introduccion": [
+        (
+            "Peso específico del agua dulce. Con densidad 998 kg/m³ y gravedad 9,81 m/s², calcula el peso "
+            "específico del agua y exprésalo en newtons por metro cúbico."
+        ),
+        (
+            "Peso de un volumen de aire. Con densidad 1,225 kg/m³ y gravedad 9,81 m/s², calcula el peso de "
+            "2 m³ de aire y exprésalo en newtons."
+        ),
+    ],
+    "propiedades": [
+        (
+            "Viscosidad cinemática del aire. Para aire con viscosidad dinámica 0,0000181 Pa·s y densidad "
+            "1,225 kg/m³, calcula su viscosidad cinemática."
+        ),
+        (
+            "Viscosidad dinámica a partir de una tensión cortante. Si sobre un fluido actúa una tensión "
+            "cortante de 2 Pa y el gradiente de velocidad vale 500 por segundo, calcula la viscosidad "
+            "dinámica y exprésala en pascales por segundo."
+        ),
+    ],
+    "estatica": [
+        (
+            "Presión hidrostática a veinte metros de profundidad. Con densidad 998 kg/m³ y gravedad "
+            "9,81 m/s², calcula la presión manométrica a 20 m."
+        ),
+        (
+            "Empuje sobre un cuerpo sumergido. Un cuerpo desaloja 0,02 m³ de agua de densidad 998 kg/m³ bajo "
+            "gravedad 9,81 m/s². Calcula el empuje de Arquímedes y exprésalo en newtons."
+        ),
+    ],
+    "continuidad": [
+        (
+            "Velocidad en un estrechamiento. El mismo caudal de 0,02 m³/s atraviesa una sección de "
+            "0,005 m². Calcula la velocidad y exprésala en metros por segundo."
+        ),
+        (
+            "Caudal por una sección mayor. Para un área de 0,03 m² y una velocidad de 4 m/s, calcula el "
+            "caudal y exprésalo en metros cúbicos por segundo."
+        ),
+    ],
+    "bernoulli": [
+        "Torricelli con mayor altura. Repite el cálculo de la energía cinética específica para una profundidad de 10 m.",
+        "Torricelli con poca altura. Repite el cálculo de la energía cinética específica para una profundidad de 2 m.",
+    ],
+    "momentum": [
+        "Fuerza con cambio de velocidad mayor. Repite el cálculo de la fuerza sobre el codo para un cambio de velocidad de 3 m/s.",
+        (
+            "Fuerza con sección mayor. El agua de densidad 998 kg/m³ circula por una sección de 0,02 m² a "
+            "1 m/s y cambia su velocidad en 1 m/s. Calcula la fuerza sobre el codo."
+        ),
+    ],
+    "reynolds": [
+        (
+            "Número de Reynolds del aire. Para aire con densidad 1,225 kg/m³ que circula a 50 m/s por un "
+            "conducto de 1 m de diámetro y viscosidad dinámica 0,0000181 Pa·s, calcula el número de "
+            "Reynolds."
+        ),
+        (
+            "Número de Reynolds del agua con menor diámetro. Para agua con densidad 998 kg/m³ que circula a "
+            "1,5 m/s por un tubo de 0,05 m de diámetro y viscosidad dinámica 0,001 Pa·s, calcula el número "
+            "de Reynolds."
+        ),
+    ],
+    "tuberias": [
+        "Velocidad media con otro caudal. Repite el cálculo para un caudal de 0,03 m³/s y una sección de 0,01 m².",
+        "Velocidad media con un caudal mayor. Repite el cálculo para un caudal de 0,06 m³/s y una sección de 0,01 m².",
+    ],
+    "capa-limite": [
+        (
+            "Espesor de desplazamiento de un perfil parabólico. Para una capa límite de 0,06 m de espesor "
+            "con perfil parabólico, el espesor de desplazamiento vale un tercio del espesor. Calcula ese "
+            "espesor."
+        ),
+        (
+            "Espesor de desplazamiento de una capa más gruesa. Para una capa límite de 0,1 m de espesor con "
+            "perfil lineal, calcula el espesor de desplazamiento."
+        ),
+    ],
+    "instrumentacion": [
+        "Presión dinámica a mayor velocidad. Repite el cálculo para una velocidad de 20 m/s.",
+        "Presión dinámica a baja velocidad. Para aire de densidad 1,225 kg/m³ que circula a 5 m/s, calcula la presión dinámica.",
+    ],
+}
+
+# The kind of reasoning each problem exercises, so a chapter's variety can be
+# audited instead of assumed.
+WORKED_TYPES: dict[str, str] = {
+    "introduccion": "APPLICATION",
+    "propiedades": "MULTI_STEP",
+    "estatica": "APPLICATION",
+    "continuidad": "APPLICATION",
+    "bernoulli": "MULTI_STEP",
+    "momentum": "MULTI_STEP",
+    "reynolds": "INTERPRETATION",
+    "tuberias": "APPLICATION",
+    "capa-limite": "SYMBOLIC",
+    "instrumentacion": "APPLICATION",
+}
+WORKED_DIFFICULTIES: dict[str, str] = {
+    "introduccion": "INTERMEDIATE",
+    "propiedades": "INTERMEDIATE",
+    "estatica": "INTERMEDIATE",
+    "continuidad": "FOUNDATIONAL",
+    "bernoulli": "ADVANCED",
+    "momentum": "ADVANCED",
+    "reynolds": "ADVANCED",
+    "tuberias": "FOUNDATIONAL",
+    "capa-limite": "ADVANCED",
+    "instrumentacion": "INTERMEDIATE",
+}
+PRACTICE_TYPES: dict[str, list[str]] = {
+    "introduccion": ["APPLICATION", "APPLICATION"],
+    "propiedades": ["NUMERICAL", "SYMBOLIC"],
+    "estatica": ["APPLICATION", "APPLICATION"],
+    "continuidad": ["APPLICATION", "APPLICATION"],
+    "bernoulli": ["NUMERICAL", "NUMERICAL"],
+    "momentum": ["NUMERICAL", "APPLICATION"],
+    "reynolds": ["NUMERICAL", "INTERPRETATION"],
+    "tuberias": ["NUMERICAL", "NUMERICAL"],
+    "capa-limite": ["NUMERICAL", "APPLICATION"],
+    "instrumentacion": ["NUMERICAL", "NUMERICAL"],
+}
+
+# A structured, multi-step engineering solution for each worked problem. The
+# symbolic model is verified from the record; the substitution is generated
+# from that model and the given quantities, so the displayed equation and the
+# checked computation cannot drift apart.
+EXTRA_SOLUTIONS: dict[str, dict[str, object]] = {
+    "introduccion": {
+        "given": [
+            {"symbol": "rho", "value": "1.225", "unit": "kg/m^3", "meaning": "densidad del aire en condiciones estándar"},
+            {"symbol": "g", "value": "9.81", "unit": "m/s^2", "meaning": "aceleración de la gravedad"},
+        ],
+        "unknown": "peso específico gamma del aire, en newtons por metro cúbico",
+        "model": [{"name": "Peso específico", "latex": r"\gamma = \rho\, g", "symbolic": "rho*g"}],
+        "assumptions": [
+            "el aire se trata como medio continuo de densidad uniforme",
+            "la gravedad es constante en todo el volumen considerado",
+        ],
+        "steps": [
+            {"text": "Se identifica el peso específico con el producto de la densidad por la aceleración de la gravedad.", "equation": r"\gamma = \rho\, g"},
+            {"text": "Se sustituyen los valores medidos y se conserva la unidad del sistema internacional.", "expression": "1.225*9.81", "unit": "N/m^3"},
+        ],
+        "result": r"\gamma = 12.02\,\mathrm{N\,m^{-3}}",
+        "interpretation": "Cada metro cúbico de aire pesa unos 12,02 N; al ser tan pequeño frente al del agua, solo se aprecia en volúmenes grandes.",
+        "limitations": ["a gran altitud la densidad del aire disminuye y el peso específico baja", "no se aplica a la capa de aire tan enrarecida como para perder el medio continuo"],
+        "mistakes": ["confundir la densidad (kg/m³) con el peso específico (N/m³)", "olvidar que la unidad procede de multiplicar kg/m³ por m/s²"],
+    },
+    "propiedades": {
+        "given": [
+            {"symbol": "mu", "value": "0.001", "unit": "Pa*s", "meaning": "viscosidad dinámica del agua a 20 °C"},
+            {"symbol": "rho", "value": "998", "unit": "kg/m^3", "meaning": "densidad del agua a 20 °C"},
+        ],
+        "unknown": "viscosidad cinemática nu, en metros cuadrados por segundo",
+        "model": [{"name": "Viscosidad cinemática", "latex": r"\nu = \frac{\mu}{\rho}", "symbolic": "mu/rho"}],
+        "assumptions": ["fluido newtoniano", "densidad uniforme y temperatura constante"],
+        "steps": [
+            {"text": "Se parte de la definición de viscosidad cinemática como cociente entre la viscosidad dinámica y la densidad.", "equation": r"\nu = \frac{\mu}{\rho}"},
+            {"text": "Se sustituyen las propiedades del agua a 20 °C.", "expression": "0.001/998", "unit": "m^2/s"},
+        ],
+        "result": r"\nu = 1.002\times10^{-6}\,\mathrm{m^{2}\,s^{-1}}",
+        "interpretation": "El agua difunde cantidad de movimiento muy lentamente; este valor se usa para calcular el número de Reynolds del agua en tuberías.",
+        "limitations": ["la viscosidad depende fuertemente de la temperatura; el valor solo vale cerca de 20 °C", "no describe fluidos no newtonianos sin correcciones"],
+        "mistakes": ["invertir el cociente y dividir la densidad entre la viscosidad", "mezclar las unidades de Pa·s con las de kg/(m·s)"],
+    },
+    "estatica": {
+        "given": [
+            {"symbol": "rho", "value": "998", "unit": "kg/m^3", "meaning": "densidad del agua dulce"},
+            {"symbol": "g", "value": "9.81", "unit": "m/s^2", "meaning": "aceleración de la gravedad"},
+            {"symbol": "h", "value": "10", "unit": "m", "meaning": "profundidad bajo la superficie libre"},
+        ],
+        "unknown": "presión manométrica p en el seno del agua, en pascales",
+        "model": [{"name": "Ecuación fundamental de la hidrostática", "latex": r"p = p_0 + \rho\, g\, h", "symbolic": "rho*g*h"}],
+        "assumptions": ["fluido en reposo", "densidad uniforme", "gravedad constante"],
+        "steps": [
+            {"text": "En un fluido en reposo la presión crece con la profundidad según el peso de la columna de agua.", "equation": r"p = p_0 + \rho\, g\, h"},
+            {"text": "Se toma p0 como presión atmosférica y se calcula la sobrepresión debida a la columna.", "expression": "998*9.81*10", "unit": "Pa"},
+        ],
+        "result": r"p - p_0 = 9.79\times10^{4}\,\mathrm{Pa}",
+        "interpretation": "Diez metros de agua añaden casi una atmósfera (1 atm = 101 325 Pa) de presión manométrica, por eso un buceador nota la presión al descender.",
+        "limitations": ["supone el agua incompresible y de densidad constante, válido a pocos kilómetros de profundidad", "no incluye la presión atmosférica si se pide la presión absoluta"],
+        "mistakes": ["sumar la profundidad en centímetros sin convertirla a metros", "confundir presión manométrica con presión absoluta"],
+    },
+    "continuidad": {
+        "given": [
+            {"symbol": "A", "value": "0.01", "unit": "m^2", "meaning": "área de la sección recta"},
+            {"symbol": "V", "value": "2", "unit": "m/s", "meaning": "velocidad media del agua"},
+        ],
+        "unknown": "caudal volumétrico Q, en metros cúbicos por segundo",
+        "model": [{"name": "Caudal volumétrico", "latex": r"Q = A\, V", "symbolic": "A*V"}],
+        "assumptions": ["flujo estacionario", "velocidad uniforme en la sección", "fluido incompresible"],
+        "steps": [
+            {"text": "El caudal es el volumen que atraviesa la sección por unidad de tiempo, igual al área por la velocidad.", "equation": r"Q = A\, V"},
+            {"text": "Se sustituyen el área y la velocidad dadas.", "expression": "0.01*2", "unit": "m^3/s"},
+        ],
+        "result": r"Q = 0.020\,\mathrm{m^{3}\,s^{-1}}",
+        "interpretation": "Por la tubería pasan 20 litros de agua cada segundo; el caudal se conserva aguas abajo salvo en un depósito.",
+        "limitations": ["el perfil de velocidades real no es uniforme; la velocidad es la media de la sección", "en régimen no estacionario el caudal puede cambiar con el tiempo"],
+        "mistakes": ["multiplicar el diámetro en lugar del área", "usar el área en centímetros cuadrados sin convertir"],
+    },
+    "bernoulli": {
+        "given": [
+            {"symbol": "g", "value": "9.81", "unit": "m/s^2", "meaning": "aceleración de la gravedad"},
+            {"symbol": "h", "value": "5", "unit": "m", "meaning": "altura del líquido sobre el orificio"},
+        ],
+        "unknown": "energía cinética específica V² y velocidad de salida V, en metros por segundo",
+        "model": [{"name": "Torricelli", "latex": r"V^{2} = 2\, g\, h", "symbolic": "2*g*h"}],
+        "assumptions": ["depósito abierto a la atmósfera", "fluido ideal sin viscosidad", "régimen estacionario", "orificio pequeño frente a la sección del depósito"],
+        "steps": [
+            {"text": "Al aplicar Bernoulli entre la superficie libre y el orificio, la presión vale la atmosférica en ambos puntos y la velocidad en la superficie es despreciable.", "equation": r"p_{atm} + \rho g h = p_{atm} + \tfrac{1}{2}\rho V^{2}"},
+            {"text": "Se simplifica y queda el cuadrado de la velocidad igual a dos veces g por h.", "expression": "2*9.81*5", "unit": "m^2/s^2"},
+            {"text": "Se toma la raíz cuadrada para obtener la velocidad de salida.", "equation": r"V = \sqrt{2\, g\, h} = \sqrt{98.1} \approx 9.90\,\mathrm{m\,s^{-1}}"},
+        ],
+        "result": r"V = 9.90\,\mathrm{m\,s^{-1}}",
+        "interpretation": "La velocidad de salida no depende de la densidad del líquido ni del tamaño del orificio, solo de la altura de carga.",
+        "limitations": ["ignora las pérdidas por viscosidad y el coeficiente de contracción del chorro", "deja de ser válido si el orificio no es pequeño frente al depósito"],
+        "mistakes": ["olvidar el factor 2 de 2gh", "calcular V² y presentarlo como la velocidad sin extraer la raíz"],
+    },
+    "momentum": {
+        "given": [
+            {"symbol": "rho", "value": "998", "unit": "kg/m^3", "meaning": "densidad del agua"},
+            {"symbol": "A", "value": "0.01", "unit": "m^2", "meaning": "área de la sección de entrada"},
+            {"symbol": "V", "value": "2", "unit": "m/s", "meaning": "velocidad de entrada"},
+            {"symbol": "dV", "value": "2", "unit": "m/s", "meaning": "cambio de velocidad en la dirección de la corriente"},
+        ],
+        "unknown": "fuerza del fluido sobre el codo, en newtons",
+        "model": [{"name": "Cantidad de movimiento", "latex": r"F = \rho\, A\, V\, \Delta V", "symbolic": "rho*A*V*dV"}],
+        "assumptions": ["flujo estacionario", "fluido incompresible", "presión atmosférica uniforme en la salida"],
+        "steps": [
+            {"text": "La fuerza es el flujo másico por el cambio de velocidad: la masa que pasa por segundo cambia su cantidad de movimiento.", "equation": r"F = \dot{m}\, \Delta V = \rho\, A\, V\, \Delta V"},
+            {"text": "Se sustituyen la densidad, la sección, la velocidad y el cambio de velocidad.", "expression": "998*0.01*2*2", "unit": "N"},
+        ],
+        "result": r"F = 39.92\,\mathrm{N}",
+        "interpretation": "El codo debe anclarse para soportar unos 40 N; la fuerza crece con el cuadrado de la velocidad porque el flujo másico y el cambio de velocidad aumentan a la vez.",
+        "limitations": ["no incluye la fuerza de presión si la sección cambia", "supone régimen estacionario y ausencia de pérdidas"],
+        "mistakes": ["olvidar el flujo másico y usar solo el cambio de velocidad", "aplicar la fórmula a una sección que cambia de área sin corregir"],
+    },
+    "reynolds": {
+        "given": [
+            {"symbol": "rho", "value": "998", "unit": "kg/m^3", "meaning": "densidad del agua a 20 °C"},
+            {"symbol": "V", "value": "2", "unit": "m/s", "meaning": "velocidad media en la tubería"},
+            {"symbol": "D", "value": "0.1", "unit": "m", "meaning": "diámetro interior de la tubería"},
+            {"symbol": "mu", "value": "0.001", "unit": "Pa*s", "meaning": "viscosidad dinámica del agua a 20 °C"},
+        ],
+        "unknown": "número de Reynolds Re, adimensional",
+        "model": [{"name": "Número de Reynolds", "latex": r"\mathrm{Re} = \frac{\rho\, V\, D}{\mu}", "symbolic": "rho*V*D/mu"}],
+        "assumptions": ["viscosidad constante", "el diámetro es la longitud característica", "conducto circular lleno"],
+        "steps": [
+            {"text": "El número de Reynolds compara las fuerzas de inercia con las viscosas.", "equation": r"\mathrm{Re} = \frac{\rho\, V\, D}{\mu}"},
+            {"text": "Se sustituyen las propiedades del agua y los datos de la tubería.", "expression": "998*2*0.1/0.001", "unit": "adimensional"},
+        ],
+        "result": r"\mathrm{Re} = 1.996\times10^{5}",
+        "interpretation": "Con Re próximo a 2×10⁵ el flujo está plenamente turbulento: en una tubería circular la transición se sitúa alrededor de Re = 2300.",
+        "limitations": ["la longitud característica cambia según el problema (diámetro, cuerda, longitud de placa)", "el valor de transición depende del régimen de entrada y de la rugosidad"],
+        "mistakes": ["dejar unidades sin cancelar y obtener un resultado dimensional", "usar el radio en lugar del diámetro como longitud característica"],
+    },
+    "tuberias": {
+        "given": [
+            {"symbol": "Q", "value": "0.02", "unit": "m^3/s", "meaning": "caudal volumétrico"},
+            {"symbol": "A", "value": "0.01", "unit": "m^2", "meaning": "área de la sección recta"},
+        ],
+        "unknown": "velocidad media V, en metros por segundo",
+        "model": [{"name": "Velocidad media", "latex": r"V = \frac{Q}{A}", "symbolic": "Q/A"}],
+        "assumptions": ["flujo estacionario incompresible", "sección constante"],
+        "steps": [
+            {"text": "De la definición de caudal se despeja la velocidad media dividiendo por el área.", "equation": r"V = \frac{Q}{A}"},
+            {"text": "Se sustituyen el caudal y el área.", "expression": "0.02/0.01", "unit": "m/s"},
+        ],
+        "result": r"V = 2.0\,\mathrm{m\,s^{-1}}",
+        "interpretation": "Con esta velocidad media y el diámetro de la tubería se puede comprobar el régimen de flujo con el número de Reynolds.",
+        "limitations": ["la velocidad es la media de la sección; el perfil real es parabólico en régimen laminar", "no tiene en cuenta la rugosidad ni los accidentes de la conducción"],
+        "mistakes": ["multiplicar en lugar de dividir entre el área", "mezclar el caudal en litros por segundo con el área en metros cuadrados"],
+    },
+    "capa-limite": {
+        "given": [
+            {"symbol": "delta", "value": "0.02", "unit": "m", "meaning": "espesor de la capa límite sobre la placa"},
+        ],
+        "unknown": "espesor de desplazamiento delta* , en metros",
+        "model": [{"name": "Espesor de desplazamiento, perfil lineal", "latex": r"\delta^{*} = \frac{\delta}{2}", "symbolic": "delta/2"}],
+        "assumptions": ["perfil de velocidades lineal dentro de la capa", "corriente libre uniforme"],
+        "steps": [
+            {"text": "El déficit de caudal de un perfil lineal respecto al flujo ideal equivale a la mitad del espesor.", "equation": r"\delta^{*} = \int_{0}^{\delta}\left(1 - \frac{y}{\delta}\right) dy = \frac{\delta}{2}"},
+            {"text": "Se sustituye el espesor medido de la capa.", "expression": "0.02/2", "unit": "m"},
+        ],
+        "result": r"\delta^{*} = 0.010\,\mathrm{m}",
+        "interpretation": "La capa límite desplaza hacia fuera del cuerpo el flujo una distancia equivalente a la mitad de su espesor, lo que engrosa la forma efectiva.",
+        "limitations": ["el perfil lineal es una idealización; el perfil real es más afín a una ley de potencias o a Blasius", "no describe la zona separada aguas abajo"],
+        "mistakes": ["confundir el espesor de la capa con el espesor de desplazamiento", "aplicar el factor 1/2 a un perfil que no es lineal"],
+    },
+    "instrumentacion": {
+        "given": [
+            {"symbol": "rho", "value": "1.225", "unit": "kg/m^3", "meaning": "densidad del aire"},
+            {"symbol": "V", "value": "10", "unit": "m/s", "meaning": "velocidad de la corriente de aire"},
+        ],
+        "unknown": "presión dinámica q, en pascales",
+        "model": [{"name": "Presión dinámica", "latex": r"q = \tfrac{1}{2}\, \rho\, V^{2}", "symbolic": "rho*V**2/2"}],
+        "assumptions": ["flujo incompresible", "medición en el punto de remanso isoentrópica"],
+        "steps": [
+            {"text": "La presión dinámica es la energía cinética por unidad de volumen del aire en movimiento.", "equation": r"q = \tfrac{1}{2}\, \rho\, V^{2}"},
+            {"text": "Se sustituyen la densidad del aire y el cuadrado de la velocidad.", "expression": "0.5*1.225*100", "unit": "Pa"},
+        ],
+        "result": r"q = 61.25\,\mathrm{Pa}",
+        "interpretation": "El tubo de Pitot mide esta sobrepresión; con q y la densidad se recupera la velocidad del aire mediante Bernoulli.",
+        "limitations": ["a alta velocidad el aire se comprime y hay que corregir por compresibilidad", "la lectura depende de la alineación de la sonda con la corriente"],
+        "mistakes": ["olvidar elevar la velocidad al cuadrado", "usar la densidad del agua en una corriente de aire"],
+    },
+}
+
+# Typeset intermediate steps for each derivation, keyed by equation id. The
+# symbolic form lets the engine substitute values and check the identity.
+DERIVATION_LATEX: dict[str, dict[str, object]] = {
+    "eq-peso-especifico": {
+        "symbolic": "rho*g",
+        "steps_latex": [
+            r"m = \rho\, V",
+            r"W = m\, g = \rho\, V\, g",
+            r"\gamma = \frac{W}{V} = \rho\, g",
+        ],
+    },
+    "eq-viscosidad-cinematica": {
+        "symbolic": "mu/rho",
+        "steps_latex": [
+            r"\tau = \mu\, \frac{du}{dy}",
+            r"\nu = \frac{\mu}{\rho}",
+        ],
+    },
+    "eq-hidrostatica": {
+        "symbolic": "p0 + rho*g*h",
+        "steps_latex": [
+            r"p\, A - (p + dp)\, A - \rho\, g\, A\, dh = 0",
+            r"\frac{dp}{dh} = -\,\rho\, g",
+            r"p = p_0 + \rho\, g\, h",
+        ],
+    },
+    "eq-continuidad": {
+        "symbolic": "A1*V1",
+        "steps_latex": [
+            r"\rho\, A_1\, V_1 = \rho\, A_2\, V_2",
+            r"A_1\, V_1 = A_2\, V_2",
+            r"V_2 = \frac{A_1}{A_2}\, V_1",
+        ],
+    },
+    "eq-torricelli": {
+        "symbolic": "2*g*h",
+        "steps_latex": [
+            r"p_1 + \tfrac{1}{2}\rho V_1^{2} + \rho g z_1 = p_2 + \tfrac{1}{2}\rho V_2^{2} + \rho g z_2",
+            r"p_{atm} + \rho g h = p_{atm} + \tfrac{1}{2}\rho V^{2}",
+            r"V = \sqrt{2\, g\, h}",
+        ],
+    },
+    "eq-rtt": {
+        "symbolic": None,
+        "steps_latex": [
+            r"\frac{d}{dt}\int_{V_m} \rho\, dV = \frac{\partial}{\partial t}\int_{V} \rho\, dV + \oint_{S} \rho\, \vec{V}\cdot d\vec{S}",
+            r"\frac{D}{Dt}\int_{V} b\, \rho\, dV = \int_{V} \frac{\partial}{\partial t}(b\, \rho)\, dV + \oint_{S} b\, \rho\, \vec{V}\cdot d\vec{S}",
+        ],
+    },
+    "eq-reynolds": {
+        "symbolic": "rho*V*D/mu",
+        "steps_latex": [
+            r"\text{inercia} \sim \rho\, \frac{V^{2}}{D}",
+            r"\text{viscoso} \sim \mu\, \frac{V}{D^{2}}",
+            r"\mathrm{Re} = \frac{\rho V D}{\mu}",
+        ],
+    },
+    "eq-poiseuille": {
+        "symbolic": "pi*dp*r**4/(8*mu*L)",
+        "steps_latex": [
+            r"\pi r^{2}\, \Delta p = 2\pi r L\, \tau",
+            r"\tau = -\,\mu\, \frac{dv}{dr}",
+            r"v(r) = \frac{\Delta p}{4\mu L}\left(r_0^{2} - r^{2}\right)",
+            r"Q = \int_{0}^{r_0} v(r)\, 2\pi r\, dr = \frac{\pi\, \Delta p\, r_0^{4}}{8\mu L}",
+        ],
+    },
+    "eq-espesor-desplazamiento": {
+        "symbolic": None,
+        "steps_latex": [
+            r"Q_{ideal} = U\, \delta",
+            r"Q_{real} = \int_{0}^{\delta} V(y)\, dy",
+            r"\delta^{*} = \int_{0}^{\delta}\left(1 - \frac{V}{U}\right) dy",
+        ],
+    },
+    "eq-pitot": {
+        "symbolic": "2*(pt-ps)/rho",
+        "steps_latex": [
+            r"p_t = p_s + \tfrac{1}{2}\rho V^{2}",
+            r"\tfrac{1}{2}\rho V^{2} = p_t - p_s",
+            r"V = \sqrt{\frac{2\,(p_t - p_s)}{\rho}}",
+        ],
+    },
+}
+
+
 def _academic_parts() -> list[dict[str, object]]:
     sections = {item["id"]: item for item in BLUEPRINT}
     parts: list[dict[str, object]] = []
@@ -1781,6 +2231,21 @@ def _computation(session, section: str, expression: str) -> tuple[str, str]:
     return str(checked["computation"]["id"]), expected
 
 
+def _solution_with_expected(solution: dict[str, object]) -> dict[str, object]:
+    """Deep-copy a solution and fill each computational step's expected value.
+
+    The expected value is derived by the server's own evaluator, so the prose
+    can never quote an arithmetic result the engine did not reproduce.
+    """
+    filled = json.loads(json.dumps(solution, ensure_ascii=False))
+    for step in filled.get("steps", []):
+        if not isinstance(step, dict) or "expression" not in step:
+            continue
+        if "expected" not in step or step["expected"] in (None, ""):
+            step["expected"] = _decimal_answer(evaluate(step["expression"]))
+    return filled
+
+
 def _problem(
     session,
     section: str,
@@ -1791,6 +2256,8 @@ def _problem(
     role: str = "worked",
     difficulty: str | None = None,
     objectives: list[str] | None = None,
+    problem_type: str | None = None,
+    solution: dict[str, object] | None = None,
 ) -> str:
     params: dict[str, object] = {
         "section": section,
@@ -1803,28 +2270,44 @@ def _problem(
         params["difficulty"] = difficulty
     if objectives is not None:
         params["learning_objectives"] = objectives
+    if problem_type is not None:
+        params["problem_type"] = problem_type
+    if solution is not None:
+        params["solution"] = _solution_with_expected(solution)
     recorded = dispatch("studium_problem_record", params, session=session)
     if recorded.get("problem", {}).get("status") != "two_witnesses":
         raise AssertionError(f"problem not two_witnesses: {json.dumps(recorded, ensure_ascii=False)[:1200]}")
-    return str(recorded["problem"]["id"])
+    problem_id = str(recorded["problem"]["id"])
+    if solution is not None:
+        checked = dispatch("studium_problem_check", {"id": problem_id}, session=session)
+        if checked.get("steps_reproduced") is not True:
+            raise AssertionError(f"solution steps not reproduced: {json.dumps(checked, ensure_ascii=False)[:1200]}")
+    return problem_id
 
 
 def _derivation(session, section: str, data: dict[str, object]) -> str:
-    recorded = dispatch(
-        "studium_derivation_record",
-        {
-            "section": section,
-            "name": data["name"],
-            "equation": data["equation"],
-            "equation_id": data["equation_id"],
-            "assumptions": data["assumptions"],
-            "governing_principles": data["governing_principles"],
-            "steps": data["steps"],
-            "variables": data["variables"],
-            "limitations": data["limitations"],
-        },
-        session=session,
-    )
+    merged = dict(data)
+    extra = DERIVATION_LATEX.get(str(data.get("equation_id") or ""))
+    if extra:
+        for key, value in extra.items():
+            if value is not None and key not in merged:
+                merged[key] = value
+    params: dict[str, object] = {
+        "section": section,
+        "name": merged["name"],
+        "equation": merged["equation"],
+        "equation_id": merged["equation_id"],
+        "assumptions": merged["assumptions"],
+        "governing_principles": merged["governing_principles"],
+        "steps": merged["steps"],
+        "variables": merged["variables"],
+        "limitations": merged["limitations"],
+    }
+    if merged.get("steps_latex"):
+        params["steps_latex"] = merged["steps_latex"]
+    if merged.get("symbolic"):
+        params["symbolic"] = merged["symbolic"]
+    recorded = dispatch("studium_derivation_record", params, session=session)
     assert recorded["status"] == "recorded", recorded
     derivation_id = str(recorded["derivation"]["id"])
     check = data.get("check")
@@ -1948,31 +2431,39 @@ def build() -> int:
             _paragraph(session, section_id, text, section_excerpts, concepts, role)
 
         worked = section_data["worked"]
-        computation_id, worked_expected = _computation(session, section_id, worked["expression"])
+        computation_id, _worked_expected = _computation(session, section_id, worked["expression"])
         computation_ids[section_id] = computation_id
         problem_ids.setdefault(section_id, []).append(
             _problem(
                 session,
                 section_id,
-                worked["prompt"],
+                WORKED_PROMPTS.get(section_id, worked["prompt"]),
                 _decimal_answer(evaluate(worked["expression"])),
                 [excerpts[i] for i in worked["excerpts"]],
                 role="worked",
+                difficulty=worked.get("difficulty") or WORKED_DIFFICULTIES.get(section_id),
+                problem_type=WORKED_TYPES.get(section_id),
+                solution=EXTRA_SOLUTIONS.get(section_id),
             )
         )
 
         practices = list(section_data["practice"]) + list(EXTRA_PRACTICE.get(section_id, []))
-        for practice in practices:
+        practice_prompts = PRACTICE_PROMPTS.get(section_id, [])
+        practice_types = PRACTICE_TYPES.get(section_id, [])
+        for index, practice in enumerate(practices):
+            prompt = practice_prompts[index] if index < len(practice_prompts) else practice["prompt"]
+            problem_type = practice_types[index] if index < len(practice_types) else practice.get("problem_type")
             problem_ids.setdefault(section_id, []).append(
                 _problem(
                     session,
                     section_id,
-                    practice["prompt"],
+                    prompt,
                     _decimal_answer(evaluate(practice["expression"])),
                     [excerpts[i] for i in practice["excerpts"]],
                     role="practice",
                     difficulty=practice["difficulty"],
                     objectives=practice["objectives"],
+                    problem_type=problem_type,
                 )
             )
 
@@ -2095,6 +2586,33 @@ def write_quality_report() -> dict[str, object]:
     pages_match = re.search(r"\((\d+) pages", flat)
     pages = pages_match.group(1) if pages_match else "desconocido"
 
+    plan_status = dispatch("studium_depth_plan_status", {}, session=session)
+    length_plan = plan_status.get("plan", {}).get("length") if plan_status.get("status") == "ok" else None
+    match: dict[str, object] | None = None
+    if isinstance(length_plan, dict) and length_plan.get("low") and pages.isdigit():
+        scope = LengthScope(
+            estimate=float(length_plan["estimate"]),
+            floor=float(length_plan["low"]),
+            ceiling=float(length_plan["high"]),
+            preference=str(length_plan["preference"]),
+            breakdown={key: float(value) for key, value in dict(length_plan.get("breakdown", {})).items()},
+        )
+        match = assess_length_match(scope=scope, actual_pages=int(pages))
+
+    length_rows: list[str] = []
+    length_note: list[str] = []
+    if match is not None:
+        length_rows = [
+            f"| Páginas planificadas (rango) | {float(match['floor']):.0f}–{float(match['ceiling']):.0f} |",
+            f"| Veredicto de longitud | {match['verdict']} |",
+        ]
+        length_note = [
+            f"El plan de profundidad declara un ámbito {match['preference']} de "
+            f"{float(match['floor']):.0f}–{float(match['ceiling']):.0f} páginas. "
+            f"El PDF medido tiene {pages} páginas y el veredicto automático de longitud es "
+            f"{match['verdict']}."
+        ]
+
     section_report = dispatch("studium_section_completeness", {}, session=session)
     assert section_report["status"] == "ok", section_report
 
@@ -2128,12 +2646,19 @@ def write_quality_report() -> dict[str, object]:
         f"| Consistencia entre capítulos | {'sí' if report['consistent'] else 'no'} |",
         f"| Contradicciones abiertas | {counts['open_contradictions']} |",
         f"| Páginas medidas del PDF | {pages} |",
+        *length_rows,
         f"| Errores de LaTeX (`!`) | {error_count} |",
         f"| Cajas overfull | {overfull} |",
         "",
-        "## Estados de verificación de las derivaciones",
-        "",
     ]
+    if length_note:
+        lines.extend(["## Longitud medida frente al plan", "", *length_note, ""])
+    lines.extend(
+        [
+            "## Estados de verificación de las derivaciones",
+            "",
+        ]
+    )
     for status, count in sorted(statuses.items()):
         lines.append(f"- {status}: {count}")
     lines.extend(

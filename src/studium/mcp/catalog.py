@@ -1063,8 +1063,18 @@ def _schema(tool: Mapping[str, object]) -> dict[str, object]:
                 },
                 "difficulty": {
                     "type": "string",
-                    "enum": ["FOUNDATIONAL", "INTERMEDIATE", "ADVANCED", "EXAM_LEVEL"],
-                    "description": "Exercise difficulty for the practice set.",
+                    "enum": ["FOUNDATIONAL", "INTERMEDIATE", "ADVANCED", "EXAM_LEVEL", "CHALLENGE"],
+                    "description": "Exercise difficulty for the practice set. CHALLENGE is the extension level.",
+                },
+                "problem_type": {
+                    "type": "string",
+                    "enum": [
+                        "CONCEPTUAL", "NUMERICAL", "SYMBOLIC", "PROOF", "DIMENSIONAL",
+                        "MULTI_STEP", "DESIGN", "PARAMETER_STUDY", "OPTIMIZATION",
+                        "INTERPRETATION", "ERROR_IDENTIFICATION", "ASSUMPTION_VALIDATION",
+                        "APPLICATION", "COMPARATIVE",
+                    ],
+                    "description": "Kind of reasoning the problem exercises. Used to audit exercise variety.",
                 },
                 "learning_objectives": {
                     "type": "array",
@@ -1072,6 +1082,63 @@ def _schema(tool: Mapping[str, object]) -> dict[str, object]:
                     "description": "Academic blueprint concept ids this problem exercises. Unknown ids are rejected.",
                 },
                 "method": {"type": "string", "description": "Short sentence naming the expected solution method."},
+                "solution": {
+                    "type": "object",
+                    "description": (
+                        "Structured multi-step solution for a numeric problem. LaTeX is validated; each step "
+                        "with an expression and expected value is replayed by studium_problem_check. "
+                        "A reproduced step is a calculation, not a proof."
+                    ),
+                    "properties": {
+                        "given": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "symbol": {"type": "string"},
+                                    "value": {"type": ["string", "number"]},
+                                    "unit": {"type": "string"},
+                                    "meaning": {"type": "string"},
+                                },
+                                "required": ["symbol", "value", "unit"],
+                            },
+                        },
+                        "unknown": {"type": "string"},
+                        "model": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "name": {"type": "string"},
+                                    "latex": {"type": "string"},
+                                    "symbolic": {"type": "string"},
+                                },
+                                "required": ["name", "latex"],
+                            },
+                        },
+                        "assumptions": {"type": "array", "items": {"type": "string"}},
+                        "development": {"type": "array", "items": {"type": "string"}},
+                        "substitution": {"type": "string", "description": "LaTeX with values and units in place. Auto-derived from model and given when omitted."},
+                        "steps": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "text": {"type": "string"},
+                                    "equation": {"type": "string"},
+                                    "symbolic": {"type": "string"},
+                                    "expression": {"type": "string"},
+                                    "expected": {"type": ["string", "number"]},
+                                    "unit": {"type": "string"},
+                                },
+                            },
+                        },
+                        "result": {"type": "string"},
+                        "interpretation": {"type": "string"},
+                        "limitations": {"type": "array", "items": {"type": "string"}},
+                        "mistakes": {"type": "array", "items": {"type": "string"}},
+                    },
+                },
             },
             "required": ["section", "prompt"],
             "additionalProperties": True,
@@ -1459,6 +1526,12 @@ def _schema(tool: Mapping[str, object]) -> dict[str, object]:
                 "assumptions": {"type": "array", "items": {"type": "string"}},
                 "governing_principles": {"type": "array", "items": {"type": "string"}},
                 "steps": {"type": "array", "items": {"type": "string"}},
+                "steps_latex": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Typeset LaTeX for the derivation steps. Balanced delimiters; no raw computational operators.",
+                },
+                "symbolic": {"type": "string", "description": "Symbolic form of the final equation, for substitution and checking."},
                 "variables": {"type": "object", "description": "Symbol -> meaning with optional units."},
                 "boundary_conditions": {"type": "array", "items": {"type": "string"}},
                 "applicability": {"type": "array", "items": {"type": "string"}},
