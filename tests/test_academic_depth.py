@@ -562,5 +562,74 @@ def test_new_tools_are_registered_with_annotations():
         assert advertised[tool_name]["annotations"]["class"] in {"READ", "WRITE", "COMPUTE"}
 
 
+# --- regression: false positive detection ------------------------------------
+
+
+def test_symbolic_plus_unverified_is_not_independently_verified(tmp_path, monkeypatch):
+    """SYMBOLICALLY_VERIFIED + UNVERIFIED must not become INDEPENDENTLY_VERIFIED."""
+    monkeypatch.setattr("urllib.request.urlopen", _explode)
+    session, _root = _project(tmp_path)
+    _blueprint(session)
+    derivation_id = _torricelli(session)
+
+    checked = dispatch(
+        "studium_derivation_check",
+        {
+            "id": derivation_id,
+            "symbolic": {
+                "equation_left": "V^2",
+                "equation_right": "2*g*h",
+                "solution": {"V": "sqrt(2*g*h)"},
+            },
+            "dimensions": {
+                "expression": "sqrt(g*h)",
+                "symbol_units": {"g": "invalid_unit_xyz", "h": "m"},
+            },
+        },
+        session=session,
+    )
+    assert checked["status"] == "checked"
+    statuses = {c["status"] for c in checked["derivation"]["verification"]["checks"]}
+    if "UNVERIFIED" in statuses:
+        assert checked["verification_status"] != "INDEPENDENTLY_VERIFIED"
+
+
+def test_failed_derivation_blocks_completeness(tmp_path, monkeypatch):
+    """A FAILED derivation must not satisfy the derivations_checked predicate."""
+    monkeypatch.setattr("urllib.request.urlopen", _explode)
+    session, _root = _project(tmp_path)
+    _blueprint(session)
+    _academic(session)
+    excerpts = _excerpts(session)
+
+    for text in (
+        "En un fluido en reposo la presión aumenta linealmente con la profundidad.",
+        "La medición de la presión se realiza con manómetros que comparan columnas.",
+    ):
+        dispatch(
+            "studium_paragraph_record",
+            {"section": "hidrostatica", "text": text, "excerpts": excerpts, "concepts": ["presion-estatica"]},
+            session=session,
+        )
+
+    derivation_id = _torricelli(session, equation=r"\(V = g h\)")
+    dispatch(
+        "studium_derivation_check",
+        {
+            "id": derivation_id,
+            "symbolic": {
+                "equation_left": "V^2",
+                "equation_right": "2*g*h",
+                "solution": {"V": "g*h"},
+            },
+        },
+        session=session,
+    )
+
+    completeness = dispatch("studium_section_completeness", {"section": "hidrostatica"}, session=session)
+    checks_by_id = {c["id"]: c for c in completeness["sections"][0]["checks"]}
+    assert checks_by_id["derivations_checked"]["met"] is False
+
+
 def _explode(*_args, **_kwargs):
     raise AssertionError("must not fetch")

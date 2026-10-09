@@ -144,12 +144,12 @@ def _section_report(root: Path, section_id: str, context: dict[str, object]) -> 
     check("computation", True, bool(problems_checked), f"{len(problems_checked)} checked problems with a current result")
     if profile == "STEM":
         check("derivation", True, bool(derivations), f"{len(derivations)} recorded derivations")
-        unverified = [
+        unchecked = [
             item
             for item in derivations
-            if isinstance(item.get("verification"), dict) and str(item["verification"].get("status")) == "UNVERIFIED"  # type: ignore[index]
+            if isinstance(item.get("verification"), dict) and str(item["verification"].get("status")) in ("UNVERIFIED", "FAILED")  # type: ignore[index]
         ]
-        check("derivations_checked", True, bool(derivations) and not unverified, f"{len(unverified)} derivations still UNVERIFIED")
+        check("derivations_checked", True, bool(derivations) and not unchecked, f"{len(unchecked)} derivations UNVERIFIED or FAILED")
         check("exercise_difficulties", True, len(difficulties) >= 2, f"{len(difficulties)} exercise difficulty levels recorded")
         check("figures_checked", not figures or profile == "STEM", not figures or len(figures_checked) == len(figures), f"{len(figures_checked)} of {len(figures)} figures checked")
         check("notation", True, notation_count > 0, f"{notation_count} notation entries registered")
