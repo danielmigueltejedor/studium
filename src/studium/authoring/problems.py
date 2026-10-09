@@ -13,6 +13,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from studium.authoring.academic_blueprint import academic_concept_ids
 from studium.authoring.blueprint import current_sections
 from studium.authoring.excerpts import excerpts_by_id
 from studium.authoring.support import corroboration_for_excerpts, paragraph_citation_blockers
@@ -41,6 +42,10 @@ REPRODUCIBILITY_TEXT = (
 RUST_NOT_WORKED_PROBLEM = (
     "A Rust test cannot be the worked problem of a book that is not COMPUTER_SCIENCE."
 )
+PROBLEM_ROLES = frozenset({"worked", "practice"})
+EXERCISE_DIFFICULTIES = frozenset({"FOUNDATIONAL", "INTERMEDIATE", "ADVANCED", "EXAM_LEVEL"})
+_MAX_OBJECTIVES = 20
+_MAX_METHOD = 500
 
 
 def record_problem(
@@ -52,6 +57,10 @@ def record_problem(
     invocation: object = None,
     expected: object = None,
     excerpts: object = None,
+    role: object = None,
+    difficulty: object = None,
+    learning_objectives: object = None,
+    method: object = None,
     actor: dict[str, object] | None = None,
 ) -> dict[str, object]:
     """Store one problem. Does not run it and does not change project state."""
@@ -65,6 +74,18 @@ def record_problem(
     rust, numeric, mode_error = _mode(source_text, invocation, expected, excerpts)
     if mode_error is not None:
         return mode_error
+    problem_role, role_error = _role(role)
+    if role_error is not None:
+        return role_error
+    difficulty_key, difficulty_error = _difficulty(difficulty)
+    if difficulty_error is not None:
+        return difficulty_error
+    objectives, objectives_error = _objectives(root, learning_objectives)
+    if objectives_error is not None:
+        return objectives_error
+    method_text, method_error = _method(method)
+    if method_error is not None:
+        return method_error
     assert section_id is not None and cleaned_prompt is not None
     if directive_changes_policy(cleaned_prompt):
         return _error("policy.overridden", "problem prompt changed policy")
@@ -107,6 +128,14 @@ def record_problem(
                 "content_directives_ignored": contains_directive(cleaned_prompt.encode("utf-8")),
                 "recorded_at": utc_now(),
             }
+            if problem_role is not None:
+                record["role"] = problem_role
+            if difficulty_key is not None:
+                record["difficulty"] = difficulty_key
+            if objectives:
+                record["learning_objectives"] = objectives
+            if method_text is not None:
+                record["method"] = method_text
             if rust is not None:
                 relative = f"problems/{identifier}/main.rs"
                 assert rust_source is not None and rust_invocation is not None
@@ -610,6 +639,15 @@ def _public(record: dict[str, object], root: Path | None = None) -> dict[str, ob
         "classification": "PENDING",
         "correct": record.get("correct") is True,
     }
+    if record.get("role") in PROBLEM_ROLES:
+        visible["role"] = record["role"]
+    if record.get("difficulty") in EXERCISE_DIFFICULTIES:
+        visible["difficulty"] = record["difficulty"]
+    objectives = record.get("learning_objectives")
+    if isinstance(objectives, list):
+        visible["learning_objectives"] = [str(item) for item in objectives if isinstance(item, str)]
+    if isinstance(record.get("method"), str):
+        visible["method"] = record["method"]
     if record.get("kind") == "rust":
         visible["source_path"] = record.get("source_path")
         visible["invocation"] = record.get("invocation")
@@ -672,6 +710,60 @@ def _identifier(value: object) -> str | None:
     if not cleaned or len(cleaned) > 128:
         return None
     return cleaned
+
+
+def _role(value: object) -> tuple[str | None, dict[str, object] | None]:
+    if value is None:
+        return None, None
+    if not isinstance(value, str):
+        return None, _error("mcp.invalid_input", "role must be worked or practice")
+    cleaned = value.strip().lower()
+    if cleaned not in PROBLEM_ROLES:
+        return None, _error("mcp.invalid_input", "role must be worked or practice")
+    return cleaned, None
+
+
+def _difficulty(value: object) -> tuple[str | None, dict[str, object] | None]:
+    if value is None:
+        return None, None
+    if not isinstance(value, str):
+        return None, _error("mcp.invalid_input", "difficulty must be FOUNDATIONAL, INTERMEDIATE, ADVANCED, or EXAM_LEVEL")
+    cleaned = value.strip().upper()
+    if cleaned not in EXERCISE_DIFFICULTIES:
+        return None, _error("mcp.invalid_input", "difficulty must be FOUNDATIONAL, INTERMEDIATE, ADVANCED, or EXAM_LEVEL")
+    return cleaned, None
+
+
+def _objectives(root: Path, value: object) -> tuple[list[str] | None, dict[str, object] | None]:
+    if value is None:
+        return [], None
+    if not isinstance(value, list) or len(value) > _MAX_OBJECTIVES:
+        return None, _error("mcp.invalid_input", "learning_objectives must be academic blueprint concept ids")
+    concept_ids = academic_concept_ids(root)
+    identifiers: list[str] = []
+    for item in value:
+        if not isinstance(item, str) or not item.strip() or len(item.strip()) > 128:
+            return None, _error("mcp.invalid_input", "learning_objectives must be academic blueprint concept ids")
+        cleaned = item.strip()
+        if cleaned not in concept_ids:
+            return None, _error(
+                "problem.objective_unknown",
+                "the learning objective is not a concept of the academic blueprint",
+            )
+        if cleaned not in identifiers:
+            identifiers.append(cleaned)
+    return identifiers, None
+
+
+def _method(value: object) -> tuple[str | None, dict[str, object] | None]:
+    if value is None:
+        return None, None
+    if not isinstance(value, str):
+        return None, _error("mcp.invalid_input", "method must be a short sentence")
+    cleaned = value.strip()
+    if not cleaned or len(cleaned) > _MAX_METHOD:
+        return None, _error("mcp.invalid_input", "method must be a short sentence")
+    return cleaned, None
 
 
 def _rejected(root: Path, blockers: list[dict[str, object]]) -> dict[str, object]:

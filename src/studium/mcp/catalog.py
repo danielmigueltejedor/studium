@@ -10,6 +10,14 @@ from studium.domain.profiles import PROFILES
 
 _PROFILES = PROFILES
 
+_SECTION_OPTIONAL_TOOLS = frozenset(
+    {
+        "studium_expansion_plan",
+        "studium_section_completeness",
+        "studium_source_coverage",
+    }
+)
+
 _TOOLS: tuple[dict[str, object], ...] = (
     {
         "name": "studium_project_create",
@@ -527,6 +535,158 @@ _TOOLS: tuple[dict[str, object], ...] = (
             "Does not fetch the URL and does not mark the excerpt verified or accepted."
         ),
     },
+    {
+        "name": "studium_academic_blueprint_store",
+        "class": "WRITE",
+        "description": (
+            "Store the planned teaching hierarchy: parts, chapters, sections, subsections, and concepts. "
+            "Each concept carries learning objectives, prerequisites, sources, math requirements, "
+            "verification criteria, depth, examples, and exercises. "
+            "It plans what must be taught; the flat outline still drives writing. "
+            "Ids must be unique across the whole tree. Does not write prose and does not release."
+        ),
+    },
+    {
+        "name": "studium_academic_blueprint_get",
+        "class": "READ",
+        "description": "Read the stored planned teaching hierarchy, or null when none is stored.",
+    },
+    {
+        "name": "studium_depth_plan",
+        "class": "WRITE",
+        "description": (
+            "Plan the academic depth and the length the curriculum scope needs, and store the plan. "
+            "academic_depth is one of INTRODUCTORY, UNDERGRADUATE, ADVANCED_UNDERGRADUATE, GRADUATE, RESEARCH. "
+            "length is one of CONCISE, STANDARD, COMPREHENSIVE, EXHAUSTIVE, AUTO; COMPREHENSIVE is the default for a university textbook. "
+            "The page estimate is derived from planned concepts, derivations, examples, and exercises, never from a quota. "
+            "A requested target_pages outside the planned range is explained, not silently accepted. "
+            "Length is a consequence of scope, never a reason to pad."
+        ),
+    },
+    {
+        "name": "studium_depth_plan_status",
+        "class": "READ",
+        "description": "Read the stored depth plan for this edition, or a clear not_planned status.",
+    },
+    {
+        "name": "studium_derivation_record",
+        "class": "WRITE",
+        "description": (
+            "Store one mathematical derivation as structured metadata: section, name, final equation, "
+            "assumptions, governing principles, steps, variables with units, boundary conditions, "
+            "applicability, limitations, and supporting excerpt references. "
+            "It records the derivation; verification is a separate step and no status is claimed here."
+        ),
+    },
+    {
+        "name": "studium_derivation_check",
+        "class": "WRITE",
+        "description": (
+            "Run the deterministic checks requested for one derivation and store their results. "
+            "symbolic is an algebraic identity or an equation with a proposed solution; "
+            "numeric is an expression with substitutions and a claimed value; "
+            "dimensions is an expression with symbol units and an optional expected unit. "
+            "Each check keeps its own status: SYMBOLICALLY_VERIFIED, DIMENSIONALLY_VERIFIED, "
+            "COMPUTATION_REPRODUCED, INDEPENDENTLY_VERIFIED, UNVERIFIED, or FAILED. "
+            "A symbolic identity is not physical validity; a dimensional check is not a proof."
+        ),
+    },
+    {
+        "name": "studium_derivation_list",
+        "class": "READ",
+        "description": "List stored derivations with their verification statuses and check details.",
+    },
+    {
+        "name": "studium_notation_record",
+        "class": "WRITE",
+        "description": (
+            "Register one symbol with one meaning and optional units. "
+            "The same symbol with a different meaning anywhere in the book is rejected as a conflict. "
+            "Does not write prose and does not release."
+        ),
+    },
+    {
+        "name": "studium_notation_list",
+        "class": "READ",
+        "description": "List the registered notation entries.",
+    },
+    {
+        "name": "studium_terminology_record",
+        "class": "WRITE",
+        "description": (
+            "Register one term with its definition. The same term with a different definition "
+            "anywhere in the book is rejected as a conflict. Does not write prose and does not release."
+        ),
+    },
+    {
+        "name": "studium_terminology_list",
+        "class": "READ",
+        "description": "List the registered terminology entries.",
+    },
+    {
+        "name": "studium_expansion_plan",
+        "class": "READ",
+        "description": (
+            "Compare the planned concepts with what the stored paragraphs actually teach, for one "
+            "section or the whole book, and return concrete expansion suggestions: which concept needs "
+            "which kind of content and roughly how much. It plans real gaps only; it never suggests padding."
+        ),
+    },
+    {
+        "name": "studium_section_completeness",
+        "class": "READ",
+        "description": (
+            "The pedagogical checklist for one section or for every section: lead, explanation depth, "
+            "definitions, self-check, worked problem, derivations and their checks, exercise difficulties, "
+            "figures, notation, sources, audits, contradictions, and concept coverage. "
+            "Items that do not apply to this discipline are labeled not applicable, never silently skipped."
+        ),
+    },
+    {
+        "name": "studium_source_coverage",
+        "class": "READ",
+        "description": (
+            "Per-section report of distinct sources behind the cited excerpts and planned concepts the "
+            "paragraphs cover. Thin sections are named. Does not fetch URLs and does not release."
+        ),
+    },
+    {
+        "name": "studium_consistency_report",
+        "class": "READ",
+        "description": (
+            "Book-wide consistency report: notation conflicts, terminology conflicts, duplicate paragraphs, "
+            "equation-identifier conflicts, and open contradictions, each with its stated limitations. "
+            "It reports; it never edits."
+        ),
+    },
+    {
+        "name": "studium_section_context",
+        "class": "READ",
+        "description": (
+            "A compact context packet for one chapter: stored paragraph openings with words and audit "
+            "status, source count, derivations, problems, planned concepts with taught flags, open issues, "
+            "and the next concrete step. Bounded size; paragraph bodies are reduced to their opening sentence."
+        ),
+    },
+    {
+        "name": "studium_resume_packet",
+        "class": "READ",
+        "description": (
+            "Project-level packet for resuming work in a fresh session: project state, counts of every "
+            "record kind, missing sections, unaudited chapters, unverified derivations, open contradictions, "
+            "and ordered next steps. Bounded size."
+        ),
+    },
+    {
+        "name": "studium_quality_report",
+        "class": "READ",
+        "description": (
+            "Metrics counted from stored records only: sections, paragraphs, words, sources, excerpts, "
+            "checked problems, replayed computations, derivations with status breakdown, notation, audits, "
+            "open contradictions, completeness summary, coverage totals, consistency, and the honest "
+            "limitations of this edition. It never claims human instructor review."
+        ),
+    },
 )
 
 
@@ -896,6 +1056,22 @@ def _schema(tool: Mapping[str, object]) -> dict[str, object]:
                     "items": {"type": "string"},
                     "description": "Exactly two stored excerpt ids for a numeric problem.",
                 },
+                "role": {
+                    "type": "string",
+                    "enum": ["worked", "practice"],
+                    "description": "worked is the chapter worked problem; practice goes to the exercise set and the solutions appendix.",
+                },
+                "difficulty": {
+                    "type": "string",
+                    "enum": ["FOUNDATIONAL", "INTERMEDIATE", "ADVANCED", "EXAM_LEVEL"],
+                    "description": "Exercise difficulty for the practice set.",
+                },
+                "learning_objectives": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Academic blueprint concept ids this problem exercises. Unknown ids are rejected.",
+                },
+                "method": {"type": "string", "description": "Short sentence naming the expected solution method."},
             },
             "required": ["section", "prompt"],
             "additionalProperties": True,
@@ -1116,6 +1292,11 @@ def _schema(tool: Mapping[str, object]) -> dict[str, object]:
                     "enum": ["purpose", "explanation", "consejo", "definition", "self_check"],
                     "description": "purpose is the italic lead, explanation is body text, consejo and definition are boxes, self_check is the autoficha. The renderer owns the boxes.",
                 },
+                "concepts": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Academic blueprint concept ids this paragraph teaches. Unknown ids are rejected.",
+                },
             },
             "required": ["section", "text", "excerpts"],
             "additionalProperties": True,
@@ -1139,6 +1320,11 @@ def _schema(tool: Mapping[str, object]) -> dict[str, object]:
                     "type": "string",
                     "enum": ["purpose", "explanation", "consejo", "definition", "self_check"],
                     "description": "purpose is the italic lead, explanation is body text, consejo and definition are boxes, self_check is the autoficha.",
+                },
+                "concepts": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Academic blueprint concept ids this paragraph teaches. Unknown ids are rejected.",
                 },
             },
             "required": ["id", "text", "excerpts"],
@@ -1224,6 +1410,119 @@ def _schema(tool: Mapping[str, object]) -> dict[str, object]:
                 "id": {"type": "string", "description": "Excerpt id returned by studium_excerpt_record."},
             },
             "required": ["id"],
+            "additionalProperties": True,
+        }
+    elif name == "studium_academic_blueprint_store":
+        input_schema = {
+            "type": "object",
+            "properties": {
+                "project": _project_property(),
+                "parts": {
+                    "type": "array",
+                    "description": (
+                        "Parts, each with chapters, sections, subsections, and concepts. "
+                        "Every node needs a unique id and a title."
+                    ),
+                    "items": {"type": "object"},
+                },
+                "subject": {"type": "string"},
+                "profile_key": {"type": "string", "enum": ["INTRODUCTORY", "UNDERGRADUATE", "ADVANCED_UNDERGRADUATE", "GRADUATE", "RESEARCH"]},
+            },
+            "required": ["parts"],
+            "additionalProperties": True,
+        }
+    elif name == "studium_depth_plan":
+        input_schema = {
+            "type": "object",
+            "properties": {
+                "project": _project_property(),
+                "academic_depth": {"type": "string", "enum": ["INTRODUCTORY", "UNDERGRADUATE", "ADVANCED_UNDERGRADUATE", "GRADUATE", "RESEARCH"]},
+                "length": {"type": "string", "enum": ["CONCISE", "STANDARD", "COMPREHENSIVE", "EXHAUSTIVE", "AUTO"]},
+                "curriculum_scope": {"type": "array", "items": {"type": "object"}, "description": "Optional explicit topics with id and title. Wins over the blueprint."},
+                "target_pages": {"type": "integer", "description": "Requested page target. Checked against the planned scope."},
+                "min_pages": {"type": "integer"},
+                "max_pages": {"type": "integer"},
+                "exercises_with_solutions": {"type": "boolean"},
+                "theory_emphasis": {"type": "string", "enum": ["theory", "practice", "AUTO"]},
+            },
+            "additionalProperties": True,
+        }
+    elif name == "studium_derivation_record":
+        input_schema = {
+            "type": "object",
+            "properties": {
+                "project": _project_property(),
+                "section": {"type": "string", "description": "Blueprint section id."},
+                "name": {"type": "string", "description": "Short name of the derivation."},
+                "equation": {"type": "string", "description": "The final equation this derivation arrives at."},
+                "equation_id": {"type": "string", "description": "Registry identifier for the equation."},
+                "assumptions": {"type": "array", "items": {"type": "string"}},
+                "governing_principles": {"type": "array", "items": {"type": "string"}},
+                "steps": {"type": "array", "items": {"type": "string"}},
+                "variables": {"type": "object", "description": "Symbol -> meaning with optional units."},
+                "boundary_conditions": {"type": "array", "items": {"type": "string"}},
+                "applicability": {"type": "array", "items": {"type": "string"}},
+                "limitations": {"type": "array", "items": {"type": "string"}},
+                "references": {"type": "object", "description": "excerpts and/or sources id lists."},
+            },
+            "required": ["section", "name", "equation"],
+            "additionalProperties": True,
+        }
+    elif name == "studium_derivation_check":
+        input_schema = {
+            "type": "object",
+            "properties": {
+                "project": _project_property(),
+                "id": {"type": "string", "description": "Derivation id from studium_derivation_record."},
+                "symbolic": {"type": "object", "description": "left/right or equation_left/equation_right/solution."},
+                "numeric": {"type": "object", "description": "expression, values, claimed."},
+                "dimensions": {"type": "object", "description": "expression, symbol_units, optional expected_unit."},
+            },
+            "required": ["id"],
+            "additionalProperties": True,
+        }
+    elif name == "studium_notation_record":
+        input_schema = {
+            "type": "object",
+            "properties": {
+                "project": _project_property(),
+                "section": {"type": "string", "description": "Blueprint section id."},
+                "symbol": {"type": "string", "description": "The symbol as it appears in the book."},
+                "meaning": {"type": "string", "description": "One meaning for the whole book."},
+                "units": {"type": "string", "description": "Optional units."},
+            },
+            "required": ["section", "symbol", "meaning"],
+            "additionalProperties": True,
+        }
+    elif name == "studium_terminology_record":
+        input_schema = {
+            "type": "object",
+            "properties": {
+                "project": _project_property(),
+                "section": {"type": "string", "description": "Blueprint section id."},
+                "term": {"type": "string"},
+                "definition": {"type": "string", "description": "One definition for the whole book."},
+            },
+            "required": ["section", "term", "definition"],
+            "additionalProperties": True,
+        }
+    elif name == "studium_section_context":
+        input_schema = {
+            "type": "object",
+            "properties": {
+                "project": _project_property(),
+                "section": {"type": "string", "description": "Blueprint section id. Required."},
+            },
+            "required": ["section"],
+            "additionalProperties": True,
+        }
+    elif name in _SECTION_OPTIONAL_TOOLS:
+        input_schema = {
+            "type": "object",
+            "properties": {
+                "project": _project_property(),
+                "section": {"type": "string", "description": "Blueprint section id, or omit for the whole book."},
+            },
             "additionalProperties": True,
         }
     else:

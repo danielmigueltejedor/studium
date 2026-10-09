@@ -1,0 +1,23 @@
+{"schema_version":"1.0.0","id":"SYM-0001","section":"introduccion","symbol":"t","meaning":"tiempo","recorded_at":"2026-10-09T13:10:02Z","units":"s"}
+{"schema_version":"1.0.0","id":"SYM-0002","section":"introduccion","symbol":"x","meaning":"coordenada espacial","recorded_at":"2026-10-09T13:10:02Z","units":"m"}
+{"schema_version":"1.0.0","id":"SYM-0003","section":"propiedades","symbol":"ρ","meaning":"densidad del fluido","recorded_at":"2026-10-09T13:10:02Z","units":"kg/m^3"}
+{"schema_version":"1.0.0","id":"SYM-0004","section":"propiedades","symbol":"μ","meaning":"viscosidad dinámica","recorded_at":"2026-10-09T13:10:02Z","units":"kg/(m*s)"}
+{"schema_version":"1.0.0","id":"SYM-0005","section":"propiedades","symbol":"ν","meaning":"viscosidad cinemática","recorded_at":"2026-10-09T13:10:02Z","units":"m^2/s"}
+{"schema_version":"1.0.0","id":"SYM-0006","section":"estatica","symbol":"p","meaning":"presión estática","recorded_at":"2026-10-09T13:10:02Z","units":"Pa"}
+{"schema_version":"1.0.0","id":"SYM-0007","section":"estatica","symbol":"p0","meaning":"presión en la superficie libre","recorded_at":"2026-10-09T13:10:02Z","units":"Pa"}
+{"schema_version":"1.0.0","id":"SYM-0008","section":"estatica","symbol":"h","meaning":"profundidad bajo la superficie","recorded_at":"2026-10-09T13:10:02Z","units":"m"}
+{"schema_version":"1.0.0","id":"SYM-0009","section":"continuidad","symbol":"Q","meaning":"caudal volumétrico","recorded_at":"2026-10-09T13:10:02Z","units":"m^3/s"}
+{"schema_version":"1.0.0","id":"SYM-0010","section":"continuidad","symbol":"A","meaning":"área de la sección recta","recorded_at":"2026-10-09T13:10:02Z","units":"m^2"}
+{"schema_version":"1.0.0","id":"SYM-0011","section":"bernoulli","symbol":"pt","meaning":"presión total o de estancamiento","recorded_at":"2026-10-09T13:10:02Z","units":"Pa"}
+{"schema_version":"1.0.0","id":"SYM-0012","section":"bernoulli","symbol":"z","meaning":"altura geodésica sobre el plano de referencia","recorded_at":"2026-10-09T13:10:02Z","units":"m"}
+{"schema_version":"1.0.0","id":"SYM-0013","section":"momentum","symbol":"F","meaning":"fuerza resultante sobre el volumen de control","recorded_at":"2026-10-09T13:10:02Z","units":"N"}
+{"schema_version":"1.0.0","id":"SYM-0014","section":"momentum","symbol":"V","meaning":"velocidad del fluido","recorded_at":"2026-10-09T13:10:02Z","units":"m/s"}
+{"schema_version":"1.0.0","id":"SYM-0015","section":"reynolds","symbol":"Re","meaning":"número de Reynolds","recorded_at":"2026-10-09T13:10:02Z","units":"adimensional"}
+{"schema_version":"1.0.0","id":"SYM-0016","section":"reynolds","symbol":"D","meaning":"longitud característica","recorded_at":"2026-10-09T13:10:02Z","units":"m"}
+{"schema_version":"1.0.0","id":"SYM-0017","section":"tuberias","symbol":"Δp","meaning":"caída de presión a lo largo del tubo","recorded_at":"2026-10-09T13:10:02Z","units":"Pa"}
+{"schema_version":"1.0.0","id":"SYM-0018","section":"tuberias","symbol":"r","meaning":"radio interior del conducto","recorded_at":"2026-10-09T13:10:02Z","units":"m"}
+{"schema_version":"1.0.0","id":"SYM-0019","section":"tuberias","symbol":"L","meaning":"longitud del conducto","recorded_at":"2026-10-09T13:10:02Z","units":"m"}
+{"schema_version":"1.0.0","id":"SYM-0020","section":"capa-limite","symbol":"δ","meaning":"espesor de la capa límite","recorded_at":"2026-10-09T13:10:02Z","units":"m"}
+{"schema_version":"1.0.0","id":"SYM-0021","section":"capa-limite","symbol":"δ*","meaning":"espesor de desplazamiento","recorded_at":"2026-10-09T13:10:02Z","units":"m"}
+{"schema_version":"1.0.0","id":"SYM-0022","section":"instrumentacion","symbol":"ps","meaning":"presión estática medida en la corriente","recorded_at":"2026-10-09T13:10:02Z","units":"Pa"}
+{"schema_version":"1.0.0","id":"SYM-0023","section":"instrumentacion","symbol":"q","meaning":"presión dinámica del flujo","recorded_at":"2026-10-09T13:10:02Z","units":"Pa"}

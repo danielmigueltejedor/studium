@@ -38,6 +38,15 @@ def test_unicode_and_delimited_math_stay_in_math_mode():
         assert raw not in tex + spanish + pressure
 
 
+def test_greek_control_words_are_separated_from_following_letters():
+    tex = render_text_run("El incremento Δp y la viscosidad μ son símbolos.")
+    assert r"\(\Delta p\)" in tex
+    assert r"\Deltap" not in tex
+    explicit = render_text_run(r"La caída \(Δp\) se mide.")
+    assert r"\(\Delta p\)" in explicit
+    assert r"\Deltap" not in explicit
+
+
 def test_fenced_code_becomes_a_listing_and_display_math_stays_display():
     src = "Usa el programa.\n\n```c\nint main(void) {\n    return 0;\n}\n```\n"
     tex = "\n".join(emit_prose(src))

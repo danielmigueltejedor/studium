@@ -10,6 +10,7 @@ import subprocess
 from pathlib import Path
 
 from studium.authoring.blueprint import current_sections
+from studium.authoring.derivations import derivations_for_section
 from studium.authoring.excerpts import excerpts_by_id
 from studium.authoring.figures import figures_in_section
 from studium.authoring.languages import (
@@ -19,6 +20,7 @@ from studium.authoring.languages import (
     generic_section_titles,
     messages,
 )
+from studium.authoring.notation import notation_registry
 from studium.authoring.paragraphs import supported_paragraphs
 from studium.authoring.problems import problem_result_current
 from studium.authoring.support import corroboration_for_excerpts, supported_drafts
@@ -26,7 +28,15 @@ from studium.domain.profiles import BOOK_TOPIC
 from studium.research.public_sources import bibliography_counts
 from studium.storage.init_project import book_kind, load_project_toml, load_state_holding_lock
 from studium.storage.locking import ProjectLocked, project_lock
-from studium.storage.records import AUDITS, COMPUTATIONS, FIGURES, PROBLEMS, PUBLIC_BIBLIOGRAPHY, fold_by_id
+from studium.storage.records import (
+    AUDITS,
+    COMPUTATIONS,
+    DERIVATIONS,
+    FIGURES,
+    PROBLEMS,
+    PUBLIC_BIBLIOGRAPHY,
+    fold_by_id,
+)
 
 _TEX_NAME = "draft.tex"
 _PDF_NAME = "draft.pdf"
@@ -379,6 +389,38 @@ _BOX_STYLE = {
     "definition": "studiumdef",
     "worked": "studiumworked",
     "self_check": "studiumcheck",
+    "exercise": "studiumworked",
+    "derivation": "studiumdef",
+}
+
+#: Labels for the two boxes the language catalog does not carry. Spanish
+#: books use Spanish; every other language uses the English default.
+_EXTRA_BOX_LABELS: dict[str, dict[str, str]] = {
+    "spanish": {"exercises": "Ejercicios", "derivations": "Derivaciones", "symbol": "Símbolo", "meaning": "Significado", "units": "Unidades"},
+}
+_EXTRA_BOX_DEFAULTS = {"exercises": "Exercises", "derivations": "Derivations", "symbol": "Symbol", "meaning": "Meaning", "units": "Units"}
+
+#: Verification statuses in prose. The raw enum name stays the fallback so a
+#: status is never softened into a stronger claim.
+_STATUS_PHRASES: dict[str, dict[str, str]] = {
+    "spanish": {
+        "SYMBOLICALLY_VERIFIED": "verificada simbólicamente",
+        "DIMENSIONALLY_VERIFIED": "verificada dimensionalmente",
+        "COMPUTATION_REPRODUCED": "cálculo rehecho",
+        "NUMERICALLY_CROSS_CHECKED": "cruzada numéricamente",
+        "INDEPENDENTLY_VERIFIED": "verificada por comprobaciones independientes",
+        "UNVERIFIED": "sin comprobar",
+        "FAILED": "comprobación fallida",
+    },
+}
+_STATUS_PHRASE_DEFAULTS = {
+    "SYMBOLICALLY_VERIFIED": "symbolically verified",
+    "DIMENSIONALLY_VERIFIED": "dimensionally verified",
+    "COMPUTATION_REPRODUCED": "computation replayed",
+    "NUMERICALLY_CROSS_CHECKED": "numerically cross-checked",
+    "INDEPENDENTLY_VERIFIED": "independently verified",
+    "UNVERIFIED": "unchecked",
+    "FAILED": "check failed",
 }
 _FUNC_WORDS = frozenset(
     {"sin", "cos", "tan", "log", "ln", "exp", "sqrt", "lim", "max", "min", "sum", "det", "gcd"}
@@ -507,14 +549,29 @@ def _dollar_ok(inner: str) -> bool:
 
 
 def _math_chars(text: str) -> str:
-    return "".join(_MATH.get(character, character) for character in text)
+    parts: list[str] = []
+    for index, character in enumerate(text):
+        mapped = _MATH.get(character)
+        if mapped is None:
+            parts.append(character)
+            continue
+        if mapped.startswith("\\") and mapped[-1:].isalpha():
+            following = text[index + 1] if index + 1 < len(text) else ""
+            if following.isascii() and following.isalpha():
+                mapped += " "
+        parts.append(mapped)
+    return "".join(parts)
 
 
 def _formula_tex(span: str) -> str:
     parts: list[str] = []
-    for character in span:
+    for index, character in enumerate(span):
         mapped = _MATH.get(character)
         if mapped is not None:
+            if mapped.startswith("\\") and mapped[-1:].isalpha():
+                following = span[index + 1] if index + 1 < len(span) else ""
+                if following.isascii() and following.isalpha():
+                    mapped += " "
             parts.append(mapped)
             continue
         if character == "%":
@@ -1006,6 +1063,9 @@ def _preamble(footer: str, language: BookLanguage, copy: dict[str, str], *, tikz
             r"  \renewcommand{\headrulewidth}{0pt}",
             r"  \renewcommand{\footrulewidth}{0pt}",
             r"}",
+            r"\usepackage[hyphens]{url}",
+            r"\usepackage[hidelinks]{hyperref}",
+            r"\setlength{\emergencystretch}{1.5em}",
             r"\makeatletter",
             r"\@openrightfalse",
             r"\let\cleardoublepage\clearpage",
@@ -1117,13 +1177,13 @@ def _document(root: Path) -> str:
         [
             r"\appendix",
             r"\chapter{" + latex_escape(copy["notation"]) + "}",
-            r"\noindent " + latex_escape(copy["empty"]),
-            r"\chapter{" + latex_escape(copy["formulas"]) + "}",
-            r"\noindent " + latex_escape(copy["empty"]),
-            r"\chapter{" + latex_escape(copy["solutions"]) + "}",
         ]
     )
-    lines.extend(_solution_lines(root, copy))
+    lines.extend(_notation_lines(root, copy, language))
+    lines.extend([r"\chapter{" + latex_escape(copy["formulas"]) + "}"])
+    lines.extend(_formula_sheet_lines(root, copy))
+    lines.extend([r"\chapter{" + latex_escape(copy["solutions"]) + "}"])
+    lines.extend(_solution_lines(root, copy, language))
     lines.extend([r"\chapter{" + latex_escape(copy["audit"]) + "}"])
     lines.extend(_audit_lines(root, paragraphs, claims, titles, excerpts, sources, copy, kind, counts))
     lines.extend(
@@ -1180,7 +1240,9 @@ def _chapter_lines(
     lines.extend(_box(copy["consejo"], _plain(consejo), "consejo"))
     for text in definitions:
         lines.extend(_box(copy["definition"], _plain([text]), "definition"))
+    lines.extend(_derivation_box(root, section_id, language))
     lines.extend(_worked_box(root, section_id, copy))
+    lines.extend(_exercise_box(root, section_id, language))
     lines.extend(_box(copy["self_check"], _plain(self_check), "self_check"))
     return lines
 
@@ -1295,7 +1357,9 @@ def _domain_profile(root: Path) -> str:
 def _worked_problem_records(root: Path, section_id: str) -> list[dict[str, object]]:
     """Problems that may appear as the chapter's worked problem.
 
-    A Rust test is not the worked problem of a book that is not computer science.
+    A Rust test is not the worked problem of a book that is not computer
+    science. A practice exercise never becomes the worked problem; it belongs
+    to the exercise set.
     """
 
     profile = _domain_profile(root)
@@ -1304,6 +1368,8 @@ def _worked_problem_records(root: Path, section_id: str) -> list[dict[str, objec
         if record.get("section") != section_id:
             continue
         if record.get("kind") == "rust" and profile != "COMPUTER_SCIENCE":
+            continue
+        if record.get("role") == "practice":
             continue
         found.append(record)
     return found
@@ -1358,6 +1424,84 @@ def _labeled(label: str, text: str, *, expression: bool = False, language: str =
         return lines
     lines.extend(emit_prose(text))
     return lines
+
+
+def _extra_label(language: BookLanguage, key: str) -> str:
+    """A box label the language catalog does not carry. Spanish is special-cased."""
+
+    catalog = _EXTRA_BOX_LABELS.get(language.babel, {})
+    return catalog.get(key, _EXTRA_BOX_DEFAULTS[key])
+
+
+def _status_phrase(status: str, language: BookLanguage) -> str:
+    """The stored check status in prose. The raw enum name is the fallback."""
+
+    catalog = _STATUS_PHRASES.get(language.babel, {})
+    return catalog.get(status, _STATUS_PHRASE_DEFAULTS.get(status, status))
+
+
+def _practice_records(root: Path, section_id: str) -> list[dict[str, object]]:
+    return [
+        record
+        for record in fold_by_id(root / PROBLEMS)
+        if record.get("section") == section_id and record.get("role") == "practice"
+    ]
+
+
+def _practice_numbering(root: Path) -> dict[str, int]:
+    """Practice problem id -> its number inside its own chapter."""
+
+    numbering: dict[str, int] = {}
+    per_section: dict[str, int] = {}
+    for record in fold_by_id(root / PROBLEMS):
+        if record.get("role") != "practice":
+            continue
+        section = str(record.get("section") or "")
+        per_section[section] = per_section.get(section, 0) + 1
+        identifier = record.get("id")
+        if isinstance(identifier, str):
+            numbering[identifier] = per_section[section]
+    return numbering
+
+
+def _derivation_box(root: Path, section_id: str, language: BookLanguage) -> list[str]:
+    """The recorded derivations of this chapter with their stored check status."""
+
+    records = derivations_for_section(root, section_id)
+    if not records:
+        return []
+    label = _extra_label(language, "derivations")
+    body: list[str] = []
+    for record in records:
+        name = record.get("name") if isinstance(record.get("name"), str) else ""
+        equation = record.get("equation") if isinstance(record.get("equation"), str) else ""
+        body.extend(["", r"\noindent\textbf{" + latex_escape(name.strip() or label) + "}"])
+        if equation.strip():
+            body.extend(["", *emit_prose(equation.strip())])
+        verification = record.get("verification")
+        status = str(verification.get("status")) if isinstance(verification, dict) else "UNVERIFIED"
+        body.extend(["", r"\noindent\footnotesize " + latex_escape(_status_phrase(status, language)) + "."])
+    return _box(label, body, "derivation")
+
+
+def _exercise_box(root: Path, section_id: str, language: BookLanguage) -> list[str]:
+    """The practice set of this chapter. Solutions live in the appendix."""
+
+    records = _practice_records(root, section_id)
+    if not records:
+        return []
+    label = _extra_label(language, "exercises")
+    body: list[str] = []
+    for index, record in enumerate(records, 1):
+        prompt = record.get("prompt") if isinstance(record.get("prompt"), str) else ""
+        difficulty = record.get("difficulty") if isinstance(record.get("difficulty"), str) else ""
+        head = str(index)
+        if difficulty.strip():
+            head += f" ({difficulty.strip()})"
+        body.extend(["", r"\noindent\textbf{" + latex_escape(head) + "}"])
+        if prompt.strip():
+            body.extend(emit_prose(prompt.strip()))
+    return _box(label, body, "exercise")
 
 
 def _figure_lines(root: Path, section_id: str, _copy: dict[str, str]) -> list[str]:
@@ -1514,12 +1658,66 @@ def _section_has_replay(root: Path, section_id: str) -> bool:
     return False
 
 
-def _solution_lines(root: Path, copy: dict[str, str]) -> list[str]:
+def _notation_lines(root: Path, copy: dict[str, str], language: BookLanguage) -> list[str]:
+    """The notation appendix from the registry: one row per symbol."""
+
+    registry = notation_registry(root)
+    if not registry:
+        return ["", r"\noindent " + latex_escape(copy["empty"])]
+    symbol_head = latex_escape(_extra_label(language, "symbol"))
+    meaning_head = latex_escape(_extra_label(language, "meaning"))
+    units_head = latex_escape(_extra_label(language, "units"))
+    lines = [
+        "",
+        r"\begin{center}",
+        r"\begin{tabular}{@{}cp{7cm}l@{}}",
+        rf"\textbf{{{symbol_head}}} & \textbf{{{meaning_head}}} & \textbf{{{units_head}}} \\",
+        r"\hline",
+    ]
+    for symbol, entry in sorted(registry.items()):
+        meaning = latex_escape(str(entry.get("meaning") or ""))
+        units = latex_escape(str(entry.get("units") or ""))
+        lines.append(rf"{render_text_run(symbol)} & {meaning} & {units} \\")
+    lines.extend([r"\end{tabular}", r"\end{center}"])
+    return lines
+
+
+def _formula_sheet_lines(root: Path, copy: dict[str, str]) -> list[str]:
+    """The formula sheet from the recorded derivations: name and final equation."""
+
+    records = [
+        record
+        for record in fold_by_id(root / DERIVATIONS)
+        if isinstance(record.get("equation"), str) and record["equation"].strip()
+    ]
+    if not records:
+        return ["", r"\noindent " + latex_escape(copy["empty"])]
+    lines: list[str] = []
+    for record in records:
+        name = str(record.get("name") or "").strip()
+        equation = str(record["equation"]).strip()
+        if name:
+            lines.extend(["", r"\noindent\textbf{" + latex_escape(name) + "}"])
+        lines.extend(["", *emit_prose(equation)])
+    return lines
+
+
+def _solution_lines(root: Path, copy: dict[str, str], language: BookLanguage) -> list[str]:
+    """Checked solutions only. Exercises without a checked solution are named, not invented."""
+
     lines: list[str] = []
     profile = _domain_profile(root)
+    numbering = _practice_numbering(root)
+    seen_practice: set[str] = set()
+    solved_practice: set[str] = set()
+    exercise_label = _extra_label(language, "exercises")
     for record in fold_by_id(root / PROBLEMS):
         if record.get("kind") == "rust" and profile != "COMPUTER_SCIENCE":
             continue
+        identifier = record.get("id")
+        is_practice = record.get("role") == "practice"
+        if is_practice and isinstance(identifier, str):
+            seen_practice.add(identifier)
         current = problem_result_current(root, record)
         checked = (
             current
@@ -1533,14 +1731,31 @@ def _solution_lines(root: Path, copy: dict[str, str]) -> list[str]:
         if not checked and not witnessed:
             continue
         prompt = record.get("prompt") if isinstance(record.get("prompt"), str) else ""
-        if prompt.strip():
-            lines.extend(["", *emit_prose(prompt)])
+        if not prompt.strip():
+            continue
+        if is_practice and isinstance(identifier, str):
+            solved_practice.add(identifier)
+            number = numbering.get(identifier, 0)
+            lines.extend(["", r"\noindent\textbf{" + latex_escape(f"{exercise_label} {number}") + "}"])
+        lines.extend(["", *emit_prose(prompt)])
+        expected = record.get("expected") if isinstance(record.get("expected"), str) else ""
+        if expected.strip() and witnessed:
+            lines.extend(
+                ["", r"\noindent\textbf{" + latex_escape(copy["respuesta"]) + "} " + latex_escape(expected.strip())]
+            )
     for record in fold_by_id(root / COMPUTATIONS):
         if record.get("status") != "replayed" or record.get("correct") is not True:
             continue
         expression = record.get("expression") if isinstance(record.get("expression"), str) else ""
         result = record.get("server_result") if isinstance(record.get("server_result"), str) else ""
         lines.extend(["", _formula_line(f"{expression} = {result}")])
+    unsolved = len(seen_practice - solved_practice)
+    if unsolved:
+        if language.babel == "spanish":
+            note = f"{unsolved} ejercicios todavía sin solución comprobada."
+        else:
+            note = f"{unsolved} exercises still without a checked solution."
+        lines.extend(["", r"\noindent\textit{" + latex_escape(note) + "}"])
     if not lines:
         lines.extend(["", r"\noindent " + latex_escape(copy["empty"])])
     return lines
@@ -1598,6 +1813,18 @@ def _visible_label(copy: dict[str, str], label: str) -> str:
     }.get(label, label)
 
 
+def _url_tex(url: str) -> str:
+    """A clickable, breakable URL. ``\\url`` keeps the raw characters and lets
+    TeX break at ``/``, ``.`` and ``-`` so a long address cannot overflow."""
+
+    cleaned = url.strip().replace("\\", "").replace("{", "").replace("}", "").replace("\n", "").replace(" ", "")
+    if not cleaned:
+        return ""
+    if "://" in cleaned or cleaned.startswith("www."):
+        return r"\url{" + cleaned + "}"
+    return latex_escape(cleaned)
+
+
 def _bibliography_lines(root: Path, copy: dict[str, str]) -> list[str]:
     lines: list[str] = []
     index = 0
@@ -1609,7 +1836,13 @@ def _bibliography_lines(root: Path, copy: dict[str, str]) -> list[str]:
         index += 1
         origin = record.get("origin") if isinstance(record.get("origin"), str) else ""
         note = " student_notes." if origin == "student_notes" else ""
-        lines.append(r"\bibitem{src" + str(index) + "} " + latex_escape(f"{title}. {url}.{note}"))
+        parts = [latex_escape(f"{title}.")] if title.strip() else []
+        rendered_url = _url_tex(url)
+        if rendered_url:
+            parts.append(rendered_url)
+        if note:
+            parts.append(latex_escape(note.strip()))
+        lines.append(r"\bibitem{src" + str(index) + "} " + " ".join(parts))
     if not lines:
         lines.append(r"\bibitem{none} " + latex_escape(copy["empty"]))
     return lines

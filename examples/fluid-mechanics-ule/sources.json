@@ -98,6 +98,55 @@
       "url": "https://ocw.mit.edu/courses/2-25-advanced-fluid-mechanics-fall-2013/",
       "license": "CC BY-NC-SA 4.0 (MIT OpenCourseWare)",
       "text": "The Continuum Viewpoint and the Equations of Motion; Fluid Statics; Inviscid Flow and Bernoulli; Control Volume Theorems and Applications; Equations of Viscous Flow; Dimensional Analysis."
+    },
+    {
+      "id": "wiki-navier-stokes",
+      "title": "Ecuaciones de Navier-Stokes — Wikipedia en español",
+      "url": "https://es.wikipedia.org/wiki/Ecuaciones_de_Navier-Stokes",
+      "license": "CC BY-SA 4.0 (Wikipedia)",
+      "text": "En física, las ecuaciones de Navier-Stokes son un conjunto de ecuaciones en derivadas parciales no lineales que describen el movimiento de un fluido viscoso. Estas ecuaciones gobiernan la atmósfera terrestre, las corrientes oceánicas y el flujo alrededor de vehículos o proyectiles y, en general, cualquier fenómeno en el que se involucren fluidos newtonianos."
+    },
+    {
+      "id": "wiki-rtt",
+      "title": "Teorema del transporte de Reynolds — Wikipedia en español",
+      "url": "https://es.wikipedia.org/wiki/Teorema_del_transporte_de_Reynolds",
+      "license": "CC BY-SA 4.0 (Wikipedia)",
+      "text": "El teorema de transporte de Reynolds es un teorema fundamental utilizado en la formulación de las leyes básicas de la mecánica de fluidos, que relaciona la derivada lagrangiana de una integral de volumen de un sistema con una integral en derivadas eulerianas."
+    },
+    {
+      "id": "wiki-poiseuille",
+      "title": "Ley de Poiseuille — Wikipedia en español",
+      "url": "https://es.wikipedia.org/wiki/Ley_de_Poiseuille",
+      "license": "CC BY-SA 4.0 (Wikipedia)",
+      "text": "La ley de Poiseuille es una ley que permite determinar el flujo laminar estacionario de un líquido incompresible y uniformemente viscoso a través de un tubo cilíndrico de sección circular constante. La ley es también muy importante en hemodinámica."
+    },
+    {
+      "id": "wiki-pitot",
+      "title": "Tubo de Pitot — Wikipedia en español",
+      "url": "https://es.wikipedia.org/wiki/Tubo_de_Pitot",
+      "license": "CC BY-SA 4.0 (Wikipedia)",
+      "text": "El tubo de Pitot se utiliza para calcular la presión total, también denominada presión de estancamiento, presión remanente o presión de remanso."
+    },
+    {
+      "id": "wiki-manometro",
+      "title": "Manómetro — Wikipedia en español",
+      "url": "https://es.wikipedia.org/wiki/Man%C3%B3metro",
+      "license": "CC BY-SA 4.0 (Wikipedia)",
+      "text": "El manómetro es un instrumento de medición para la presión de fluidos contenidos en recipientes cerrados. Se distinguen dos tipos de manómetros, según se empleen para medir la presión de líquidos o de gases."
+    },
+    {
+      "id": "wiki-turbulento",
+      "title": "Flujo turbulento — Wikipedia en español",
+      "url": "https://es.wikipedia.org/wiki/Flujo_turbulento",
+      "license": "CC BY-SA 4.0 (Wikipedia)",
+      "text": "En mecánica de los fluidos, se llama flujo turbulento al movimiento de un fluido que se da en forma caótica, en el que las partículas se mueven desordenadamente y las trayectorias de las partículas se encuentran formando remolinos aperiódicos. Incluso en un flujo globalmente estacionario, la velocidad fluctúa alrededor del valor medio en las tres direcciones."
+    },
+    {
+      "id": "wiki-capa-limite",
+      "title": "Capa límite — Wikipedia en español",
+      "url": "https://es.wikipedia.org/wiki/Capa_l%C3%ADmite",
+      "license": "CC BY-SA 4.0 (Wikipedia)",
+      "text": "En mecánica de fluidos, la capa límite o capa fronteriza de un fluido es la zona donde el movimiento de este es perturbado por la presencia de un sólido con el que está en contacto por efecto de la viscosidad y la tensión cortante."
     }
   ]
 }
