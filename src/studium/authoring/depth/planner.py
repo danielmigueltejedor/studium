@@ -16,6 +16,7 @@ from studium.authoring.academic_blueprint import academic_concepts_for_chapter, 
 from studium.authoring.blueprint import current_sections
 from studium.authoring.depth.length import estimate_book_scope, length_preference, validate_length_target
 from studium.authoring.depth.profiles import AcademicProfile, profile_requirements, resolve_depth_profile
+from studium.storage.init_project import domain_profile as _domain_profile
 from studium.storage.init_project import load_project_toml
 from studium.storage.migrate import utc_now
 from studium.storage.records import DEPTH_PLANS, append_jsonl, fold_by_id
@@ -348,14 +349,6 @@ def _subject(root: Path) -> str:
     if isinstance(course, dict) and isinstance(course.get("name"), str) and course["name"].strip():
         return course["name"].strip()
     return "Book"
-
-
-def _domain_profile(root: Path) -> str:
-    document = load_project_toml(root)
-    course = document.get("course")
-    if isinstance(course, dict) and isinstance(course.get("domain_profile"), str):
-        return str(course["domain_profile"])
-    return "GENERAL"
 
 
 def _store(root: Path, plan: dict[str, object]) -> None:

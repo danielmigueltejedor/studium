@@ -22,7 +22,8 @@ from studium.authoring.notation import notation_registry
 from studium.authoring.paragraphs import supported_paragraphs
 from studium.authoring.problems import problem_result_current
 from studium.domain.profiles import depth_thresholds
-from studium.storage.init_project import load_project_toml, load_state_holding_lock
+from studium.storage.init_project import domain_profile as _domain_profile
+from studium.storage.init_project import load_state_holding_lock
 from studium.storage.records import (
     AUDITS,
     COMPUTATIONS,
@@ -130,14 +131,6 @@ def quality_report(root: Path) -> dict[str, object]:
         "verification_statuses_present": _statuses(derivations, computations, checked_problems),
         "limitations": limitations,
     }
-
-
-def _domain_profile(root: Path) -> str:
-    document = load_project_toml(root)
-    course = document.get("course")
-    if isinstance(course, dict) and isinstance(course.get("domain_profile"), str):
-        return str(course["domain_profile"])
-    return "GENERAL"
 
 
 def _statuses(derivations: list[dict[str, object]], computations: list[dict[str, object]], problems: list[dict[str, object]]) -> list[str]:

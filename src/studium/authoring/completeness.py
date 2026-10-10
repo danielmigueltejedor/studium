@@ -18,7 +18,7 @@ from studium.authoring.contradictions import open_contradictions
 from studium.authoring.derivations import derivations_for_section
 from studium.authoring.problems import problem_result_current
 from studium.domain.profiles import depth_thresholds
-from studium.storage.init_project import load_project_toml
+from studium.storage.init_project import domain_profile as _domain_profile
 from studium.storage.records import FIGURES, PROBLEMS, PUBLIC_BIBLIOGRAPHY, fold_by_id
 
 _MIN_PARAGRAPHS = 2
@@ -211,9 +211,3 @@ def _notation_count(root: Path, section_id: str) -> int:
     return sum(1 for row in fold_by_id(root / NOTATION) if row.get("section") == section_id)
 
 
-def _domain_profile(root: Path) -> str:
-    document = load_project_toml(root)
-    course = document.get("course")
-    if isinstance(course, dict) and isinstance(course.get("domain_profile"), str):
-        return str(course["domain_profile"])
-    return "GENERAL"

@@ -42,6 +42,7 @@ from studium.domain.profiles import BOOK_TOPIC, DepthThresholds, depth_threshold
 from studium.research.course_documents import list_course_documents
 from studium.research.public_sources import license_forbids_use
 from studium.storage.init_project import book_kind, load_project_toml, load_state
+from studium.storage.init_project import domain_profile as _profile
 from studium.storage.records import (
     AUDITS,
     BLUEPRINT,
@@ -624,12 +625,6 @@ def _known_source_file(root: Path, state: dict[str, object]) -> str | None:
     return None
 
 
-def _profile(root: Path) -> str:
-    document = load_project_toml(root)
-    course = document.get("course")
-    if isinstance(course, dict) and isinstance(course.get("domain_profile"), str):
-        return str(course["domain_profile"])
-    return "GENERAL"
 
 
 def _draft_is_current(root: Path) -> bool:
