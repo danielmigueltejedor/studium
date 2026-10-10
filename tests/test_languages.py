@@ -2,6 +2,8 @@
 
 import tomllib
 
+import pytest
+
 from studium.authoring.render import find_engine
 from studium.cli.app import main
 from studium.domain.languages import (
@@ -143,6 +145,23 @@ def test_dutch_uses_english_chrome_and_still_renders(tmp_path, monkeypatch):
         assert (root / "latex" / "draft.pdf").read_bytes().startswith(b"%PDF-")
     else:
         assert rendered["status"] == "compiler_missing"
+
+
+_COMPILE_LANGS = [lang for lang in _CATALOG if lang[0] not in {"es", "en"}]
+
+
+@pytest.mark.parametrize("code,babel,statement,preface,contents", _COMPILE_LANGS, ids=[lang[0] for lang in _COMPILE_LANGS])
+def test_catalog_language_compiles_to_pdf(tmp_path, monkeypatch, code, babel, statement, preface, contents):
+    import subprocess
+
+    engine = find_engine()
+    if engine is None:
+        pytest.skip("no LaTeX engine")
+    ldf = subprocess.run(["kpsewhich", f"{babel}.ldf"], capture_output=True, text=True)
+    if ldf.returncode != 0:
+        pytest.skip(f"{babel}.ldf not installed")
+    _tex, rendered = _chrome(tmp_path, monkeypatch, code, slug=f"compile-{code}")
+    assert rendered["status"] == "rendered", f"{code}: {rendered.get('message', rendered.get('status'))}"
 
 
 def test_missing_language_stays_spanish_even_when_the_prose_is_english(tmp_path, monkeypatch):

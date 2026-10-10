@@ -32,7 +32,7 @@ from studium.storage.records import PROBLEMS, allocate_id, append_jsonl, fold_by
 _AUDIT = "audit/audit.jsonl"
 _MAX_PROMPT = 20_000
 _MAX_SOURCE = 200_000
-_TIMEOUT = 20
+_TIMEOUT = 30
 _RUNS = 3
 _FORBIDDEN_CHARS = set(";|&$`\n\r")
 _FORBIDDEN_FLAGS = frozenset({"-L", "--extern", "--sysroot", "--config", "-Z"})
