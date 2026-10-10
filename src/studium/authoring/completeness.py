@@ -17,11 +17,11 @@ from studium.authoring.blueprint import current_sections
 from studium.authoring.contradictions import open_contradictions
 from studium.authoring.derivations import derivations_for_section
 from studium.authoring.problems import problem_result_current
+from studium.domain.profiles import depth_thresholds
 from studium.storage.init_project import load_project_toml
 from studium.storage.records import FIGURES, PROBLEMS, PUBLIC_BIBLIOGRAPHY, fold_by_id
 
 _MIN_PARAGRAPHS = 2
-_MIN_WORDS = 400
 
 _STEM_ONLY = ("derivation", "derivations_checked", "exercise_difficulties", "figures_checked", "notation")
 _ALL_ITEMS = (
@@ -118,6 +118,7 @@ def _section_report(root: Path, section_id: str, context: dict[str, object]) -> 
             covered.update(str(name) for name in names)
     notation_count = _notation_count(root, section_id)
     figures_checked = [item for item in figures if item.get("status") == "checked"]
+    min_words = depth_thresholds(profile).min_explanation_words
 
     checks: list[dict[str, object]] = []
 
@@ -134,8 +135,8 @@ def _section_report(root: Path, section_id: str, context: dict[str, object]) -> 
     check(
         "explanation_depth",
         True,
-        text_words >= _MIN_WORDS,
-        f"{text_words} of about {_MIN_WORDS} words of explanation",
+        text_words >= min_words,
+        f"{text_words} of about {min_words} words of explanation",
     )
     check("definition", bool(paragraphs), "definition" in roles, "a definition-role paragraph" if "definition" in roles else "no definition-role paragraph")
     check("self_check", bool(paragraphs), "self_check" in roles, "a self-check paragraph" if "self_check" in roles else "no self-check paragraph")

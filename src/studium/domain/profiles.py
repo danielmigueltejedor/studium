@@ -2,6 +2,7 @@
 
 import re
 import unicodedata
+from typing import NamedTuple
 
 BOOK_COURSE = "course"
 BOOK_TOPIC = "topic"
@@ -16,6 +17,27 @@ PROFILES: tuple[str, ...] = (
     "LAW",
 )
 PROFILE_CHOICES: tuple[str, ...] = tuple(profile for profile in PROFILES if profile != "GENERAL")
+
+class DepthThresholds(NamedTuple):
+    min_sections: int
+    min_sources: int
+    min_explanation_words: int
+    min_explanation_sections: int
+
+
+_DEPTH: dict[str, DepthThresholds] = {
+    "STEM": DepthThresholds(min_sections=8, min_sources=12, min_explanation_words=400, min_explanation_sections=2),
+    "COMPUTER_SCIENCE": DepthThresholds(min_sections=8, min_sources=12, min_explanation_words=400, min_explanation_sections=2),
+    "HUMANITIES": DepthThresholds(min_sections=6, min_sources=10, min_explanation_words=500, min_explanation_sections=2),
+    "SOCIAL_SCIENCES": DepthThresholds(min_sections=6, min_sources=10, min_explanation_words=400, min_explanation_sections=2),
+    "LAW": DepthThresholds(min_sections=6, min_sources=10, min_explanation_words=500, min_explanation_sections=2),
+    "GENERAL": DepthThresholds(min_sections=8, min_sources=12, min_explanation_words=400, min_explanation_sections=2),
+}
+
+
+def depth_thresholds(profile: str) -> DepthThresholds:
+    return _DEPTH.get(profile, _DEPTH["GENERAL"])
+
 
 TOPIC_BOOK_STATUS = "Topic book exists. Writing is not available yet."
 TOPIC_BOOK_LOCAL_DECISIONS = frozenset({"NONE", "SKIPPED", "AVAILABLE"})

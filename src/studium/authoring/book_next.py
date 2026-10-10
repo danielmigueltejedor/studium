@@ -38,7 +38,7 @@ from studium.authoring.paragraphs import supported_paragraphs, supported_section
 from studium.authoring.problems import REPRODUCIBILITY_TEXT, RUST_NOT_WORKED_PROBLEM, problem_result_current
 from studium.authoring.section_blocks import blocked_ids, blocked_sections, mark_blocked, offers_for, remember_offer
 from studium.authoring.support import draft_source_usable
-from studium.domain.profiles import BOOK_TOPIC
+from studium.domain.profiles import BOOK_TOPIC, DepthThresholds, depth_thresholds
 from studium.research.course_documents import list_course_documents
 from studium.research.public_sources import license_forbids_use
 from studium.storage.init_project import book_kind, load_project_toml, load_state
@@ -61,21 +61,28 @@ from studium.storage.records import (
 
 _ASK = "ask the user"
 _FORMAT = "do not ask the user how to format the page."
-_MIN_SECTIONS = 8
-_MIN_SOURCES = 12
-_MIN_EXPLANATION_WORDS = 400
-_MIN_EXPLANATION_SECTIONS = 2
 _LOCAL_REGISTRY = "sources/registry.jsonl"
 _PIRATE_KINDS = frozenset({"pirate", "pirated", "unauthorized", "unauthorised"})
-_TOO_SHORT = (
-    "The study book is too short. Store at least 8 blueprint sections before writing or rendering."
-)
-_NEED_SOURCES = (
-    "Search open sources and record another source. "
-    "Fewer than 12 distinct sources are stored. "
-    "User-provided local sources and open-web sources both count. "
-    "Pirate copies and forbidden licenses do not. Do not write or render yet."
-)
+
+
+def _thresholds(root: Path) -> DepthThresholds:
+    return depth_thresholds(_profile(root))
+
+
+def _too_short(root: Path) -> str:
+    n = _thresholds(root).min_sections
+    return f"The study book is too short. Store at least {n} blueprint sections before writing or rendering."
+
+
+def _need_sources(root: Path) -> str:
+    n = _thresholds(root).min_sources
+    return (
+        "Search open sources and record another source. "
+        f"Fewer than {n} distinct sources are stored. "
+        "User-provided local sources and open-web sources both count. "
+        "Pirate copies and forbidden licenses do not. Do not write or render yet."
+    )
+
 _RUST_PROBLEM = (
     f"{RUST_NOT_WORKED_PROBLEM} {REPRODUCIBILITY_TEXT} "
     "Record a replayed computation or a numeric result cited from two excerpts."
@@ -165,7 +172,7 @@ def _book_next(root: Path) -> dict[str, object]:
                 "studium_blueprint_store",
                 {"sections": _study_sections(root)},
                 (
-                    f"{_TOO_SHORT} No course guide is stored. Build the study book: roadmap, foundations, "
+                    f"{_too_short(root)} No course guide is stored. Build the study book: roadmap, foundations, "
                     "the topic chapters, worked problems, self-check, a formula or concept sheet, "
                     "and the source audit. Do not invent a citation."
                 ),
@@ -238,7 +245,7 @@ def _book_next(root: Path) -> dict[str, object]:
     for section in sections:
         if _paragraph_count(root, section["id"]) == 0:
             return _unwritten_step(state, root, section, _excerpt_for_section(root, section["id"]))
-        if _explanation_words(root, section["id"]) < _MIN_EXPLANATION_WORDS:
+        if _explanation_words(root, section["id"]) < _thresholds(root).min_explanation_words:
             return _explanation_step(state, root, section)
     audit = _pending_audit(root)
     if audit is not None:
@@ -317,9 +324,9 @@ def _unfinished_step(
             continue
         if not _is_written(root, section["id"]):
             return _unwritten_step(state, root, section, _excerpt_for_section(root, section["id"]))
-        if _explanation_count(root, section["id"]) < _MIN_EXPLANATION_SECTIONS:
+        if _explanation_count(root, section["id"]) < _thresholds(root).min_explanation_sections:
             return _explanation_step(state, root, section, two_sections=True)
-        if _explanation_words(root, section["id"]) < _MIN_EXPLANATION_WORDS:
+        if _explanation_words(root, section["id"]) < _thresholds(root).min_explanation_words:
             return _explanation_step(state, root, section)
         shown = _arithmetic_resolution(root, section["id"])
         if shown is not None:
@@ -352,10 +359,10 @@ def _missing_pieces(root: Path, section: dict[str, str]) -> list[str]:
     missing: list[str] = []
     if not _is_written(root, section_id):
         missing.append("paragraphs")
-    if _explanation_count(root, section_id) < _MIN_EXPLANATION_SECTIONS:
+    if _explanation_count(root, section_id) < _thresholds(root).min_explanation_sections:
         missing.append("two explanation sections")
-    if _explanation_words(root, section_id) < _MIN_EXPLANATION_WORDS:
-        missing.append("400 words of explanation")
+    if _explanation_words(root, section_id) < _thresholds(root).min_explanation_words:
+        missing.append(f"{_thresholds(root).min_explanation_words} words of explanation")
     if _arithmetic_resolution(root, section_id) is not None:
         missing.append("a resolution beyond an arithmetic expression")
     if not _has_role(root, section_id, "purpose"):
@@ -399,7 +406,7 @@ def _unwritten_step(
     """An empty planned chapter is the next action, not a finished render."""
 
     if excerpt_id is None:
-        return _step(state, "studium_public_source_record", {}, _NEED_SOURCES)
+        return _step(state, "studium_public_source_record", {}, _need_sources(root))
     return _step(
         state,
         "studium_paragraph_record",
@@ -655,6 +662,16 @@ def _study_sections(root: Path) -> list[dict[str, str]]:
     course = document.get("course")
     if isinstance(course, dict) and isinstance(course.get("name"), str) and course["name"].strip():
         name = course["name"].strip()
+    profile = _profile(root)
+    if profile in ("HUMANITIES", "SOCIAL_SCIENCES", "LAW"):
+        return [
+            {"id": "roadmap", "title": "Roadmap"},
+            {"id": "foundations", "title": "Foundations"},
+            {"id": "topic", "title": name},
+            {"id": "topic-2", "title": f"{name}, continued"},
+            {"id": "self-check", "title": "Self-check"},
+            {"id": "source-audit", "title": "Source audit"},
+        ]
     return [
         {"id": "roadmap", "title": "Roadmap"},
         {"id": "foundations", "title": "Foundations"},
@@ -674,17 +691,17 @@ def _outline_gate(
 ) -> dict[str, object] | None:
     """The first failure that blocks writing and render: outline, then sources."""
 
-    if len(sections) < _MIN_SECTIONS:
+    if len(sections) < _thresholds(root).min_sections:
         if book_kind(root) == BOOK_TOPIC or not _course_documents(root):
-            return _step(state, "studium_blueprint_store", {"sections": _study_sections(root)}, _TOO_SHORT)
+            return _step(state, "studium_blueprint_store", {"sections": _study_sections(root)}, _too_short(root))
         return _step(
             state,
             "studium_blueprint_store",
             {},
-            f"{_TOO_SHORT} Chapters follow the stored course guide.",
+            f"{_too_short(root)} Chapters follow the stored course guide.",
         )
-    if _usable_source_count(root) < _MIN_SOURCES:
-        return _step(state, "studium_public_source_record", {}, _NEED_SOURCES)
+    if _usable_source_count(root) < _thresholds(root).min_sources:
+        return _step(state, "studium_public_source_record", {}, _need_sources(root))
     return None
 
 
@@ -708,17 +725,17 @@ def _chapter_gate(
     for section in sections:
         if not _is_written(root, section["id"]):
             continue
-        if _explanation_count(root, section["id"]) < _MIN_EXPLANATION_SECTIONS:
+        if _explanation_count(root, section["id"]) < _thresholds(root).min_explanation_sections:
             return _explanation_step(state, root, section, two_sections=True)
     for section in sections:
         if not _is_written(root, section["id"]):
             continue
-        if _explanation_words(root, section["id"]) < _MIN_EXPLANATION_WORDS:
+        if _explanation_words(root, section["id"]) < _thresholds(root).min_explanation_words:
             return _explanation_step(state, root, section)
     for section in sections:
         if not _is_written(root, section["id"]):
             continue
-        if _explanation_words(root, section["id"]) < _MIN_EXPLANATION_WORDS:
+        if _explanation_words(root, section["id"]) < _thresholds(root).min_explanation_words:
             continue
         shown = _arithmetic_resolution(root, section["id"])
         if shown is None:
@@ -737,7 +754,7 @@ def _chapter_gate(
     for section in sections:
         if not _is_written(root, section["id"]):
             continue
-        if _explanation_words(root, section["id"]) < _MIN_EXPLANATION_WORDS or _explanation_count(root, section["id"]) < _MIN_EXPLANATION_SECTIONS:
+        if _explanation_words(root, section["id"]) < _thresholds(root).min_explanation_words or _explanation_count(root, section["id"]) < _thresholds(root).min_explanation_sections:
             continue
         gap = _shape_gap(state, root, section)
         if gap is not None:
@@ -754,7 +771,7 @@ def _explanation_step(
 ) -> dict[str, object]:
     excerpt_id = _excerpt_for_section(root, section["id"])
     if excerpt_id is None:
-        return _step(state, "studium_public_source_record", {}, _NEED_SOURCES)
+        return _step(state, "studium_public_source_record", {}, _need_sources(root))
     if two_sections:
         reason = (
             f"Write another explanation section for {section['id']} ({section['title']}). "
@@ -765,7 +782,7 @@ def _explanation_step(
     else:
         reason = (
             f"Write the explanation for {section['id']} ({section['title']}) as body text. "
-            "This chapter is too short. It needs at least 400 words of explanation. "
+            f"This chapter is too short. It needs at least {_thresholds(root).min_explanation_words} words of explanation. "
             "Search open sources before writing. Cite a stored excerpt. "
             + _chapter()
         )
@@ -827,7 +844,7 @@ def _role_step(
 ) -> dict[str, object]:
     excerpt_id = _excerpt_for_section(root, section["id"])
     if excerpt_id is None:
-        return _step(state, "studium_public_source_record", {}, _NEED_SOURCES)
+        return _step(state, "studium_public_source_record", {}, _need_sources(root))
     return _step(
         state,
         "studium_paragraph_record",
