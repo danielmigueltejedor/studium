@@ -28,6 +28,7 @@ from studium.authoring.support import corroboration_for_excerpts, supported_draf
 from studium.domain.profiles import BOOK_TOPIC
 from studium.research.public_sources import bibliography_counts
 from studium.storage.init_project import book_kind, load_project_toml, load_state_holding_lock
+from studium.storage.init_project import domain_profile as _domain_profile
 from studium.storage.locking import ProjectLocked, project_lock
 from studium.storage.records import (
     AUDITS,
@@ -41,6 +42,16 @@ from studium.storage.records import (
 
 _TEX_NAME = "draft.tex"
 _PDF_NAME = "draft.pdf"
+
+
+def _str_field(record: dict[str, object], key: str, default: str = "") -> str:
+    value = record.get(key)
+    return value if isinstance(value, str) else default
+
+
+def _list_field(record: dict[str, object], key: str) -> list[object]:
+    value = record.get(key)
+    return value if isinstance(value, list) else []
 _LATEX = {
     "\\": r"\textbackslash{}",
     "{": r"\{",
@@ -1270,7 +1281,7 @@ def _chapter_lines(
     body: list[str] = []
     for record in paragraphs:
         role = record.get("role")
-        raw = record.get("text") if isinstance(record.get("text"), str) else ""
+        raw = _str_field(record, "text")
         if not raw.strip():
             continue
         label, rest = _split_box_lead(raw) if language.babel == "spanish" else (None, raw)
@@ -1398,13 +1409,6 @@ def _box(title: str, body: list[str], kind: str) -> list[str]:
     ]
 
 
-def _domain_profile(root: Path) -> str:
-    course = load_project_toml(root).get("course")
-    if isinstance(course, dict) and isinstance(course.get("domain_profile"), str):
-        return str(course["domain_profile"])
-    return "GENERAL"
-
-
 def _worked_problem_records(root: Path, section_id: str) -> list[dict[str, object]]:
     """Problems that may appear as the chapter's worked problem.
 
@@ -1443,11 +1447,11 @@ def _worked_box(root: Path, section_id: str, copy: dict[str, str], language: Boo
         body = _solution_body(problem, solution, copy, language)
         return _box(copy["worked"], body, "worked")
     computation = computations[0] if computations else {}
-    prompt = problem.get("prompt") if isinstance(problem.get("prompt"), str) else ""
-    expected = problem.get("expected") if isinstance(problem.get("expected"), str) else ""
-    source = problem.get("source_text") if isinstance(problem.get("source_text"), str) else ""
-    expression = computation.get("expression") if isinstance(computation.get("expression"), str) else ""
-    result = computation.get("server_result") if isinstance(computation.get("server_result"), str) else ""
+    prompt = _str_field(problem, "prompt")
+    expected = _str_field(problem, "expected")
+    source = _str_field(problem, "source_text")
+    expression = _str_field(computation, "expression")
+    result = _str_field(computation, "server_result")
     statement = prompt.strip() or expression.strip()
     working = expression.strip() if expression.strip() and expression.strip() != statement else source.strip()
     if not working and expression.strip():
@@ -1471,7 +1475,7 @@ def _solution_body(problem: dict[str, object], solution: dict[str, object], copy
     """A structured, multi-step engineering solution: model, substitution, result."""
 
     body: list[str] = []
-    prompt = problem.get("prompt") if isinstance(problem.get("prompt"), str) else ""
+    prompt = _str_field(problem, "prompt")
     if prompt.strip():
         body.extend(_labeled(copy["enunciado"], prompt))
     given = solution.get("given")
@@ -1665,8 +1669,8 @@ def _variables_lines(variables: dict[str, object], language: BookLanguage) -> li
     lines = ["", r"\noindent\textbf{" + latex_escape(_extra_label(language, "variables")) + r"}", r"\begin{itemize}"]
     for name, raw in variables.items():
         if isinstance(raw, dict):
-            meaning = raw.get("meaning") if isinstance(raw.get("meaning"), str) else ""
-            units = raw.get("units") if isinstance(raw.get("units"), str) else ""
+            meaning = _str_field(raw, "meaning")
+            units = _str_field(raw, "units")
         else:
             meaning = raw if isinstance(raw, str) else ""
             units = ""
@@ -1771,8 +1775,8 @@ def _derivation_box(root: Path, section_id: str, language: BookLanguage) -> list
     label = _extra_label(language, "derivations")
     body: list[str] = []
     for record in records:
-        name = record.get("name") if isinstance(record.get("name"), str) else ""
-        equation = record.get("equation") if isinstance(record.get("equation"), str) else ""
+        name = _str_field(record, "name")
+        equation = _str_field(record, "equation")
         body.extend(["", r"\noindent\textbf{" + latex_escape(name.strip() or label) + "}"])
         if equation.strip():
             body.extend(_display_math(equation))
@@ -1813,9 +1817,9 @@ def _exercise_box(root: Path, section_id: str, language: BookLanguage) -> list[s
     label = _extra_label(language, "exercises")
     body: list[str] = []
     for index, record in enumerate(records, 1):
-        prompt = record.get("prompt") if isinstance(record.get("prompt"), str) else ""
-        difficulty = record.get("difficulty") if isinstance(record.get("difficulty"), str) else ""
-        problem_type = record.get("problem_type") if isinstance(record.get("problem_type"), str) else ""
+        prompt = _str_field(record, "prompt")
+        difficulty = _str_field(record, "difficulty")
+        problem_type = _str_field(record, "problem_type")
         tags = [tag for tag in (difficulty.strip(), problem_type.strip()) if tag]
         head = str(index)
         if tags:
@@ -1845,7 +1849,7 @@ def _figure_lines(root: Path, section_id: str, _copy: dict[str, str]) -> list[st
             fitted = _fit_block(body, consume_box=False)
         else:
             fitted = _fit_block(r"\includegraphics{" + output + "}", consume_box=True)
-        caption = record.get("caption") if isinstance(record.get("caption"), str) else ""
+        caption = _str_field(record, "caption")
         lines.extend(
             [
                 "",
@@ -2010,7 +2014,7 @@ def _formula_sheet_lines(root: Path, copy: dict[str, str]) -> list[str]:
     records = [
         record
         for record in fold_by_id(root / DERIVATIONS)
-        if isinstance(record.get("equation"), str) and record["equation"].strip()
+        if _str_field(record, "equation").strip()
     ]
     if not records:
         return ["", r"\noindent " + latex_escape(copy["empty"])]
@@ -2052,7 +2056,7 @@ def _solution_lines(root: Path, copy: dict[str, str], language: BookLanguage) ->
         )
         if not checked and not witnessed:
             continue
-        prompt = record.get("prompt") if isinstance(record.get("prompt"), str) else ""
+        prompt = _str_field(record, "prompt")
         if not prompt.strip():
             continue
         if is_practice and isinstance(identifier, str):
@@ -2060,7 +2064,7 @@ def _solution_lines(root: Path, copy: dict[str, str], language: BookLanguage) ->
             number = numbering.get(identifier, 0)
             lines.extend(["", r"\noindent\textbf{" + latex_escape(f"{exercise_label} {number}") + "}"])
         lines.extend(["", *emit_prose(prompt)])
-        expected = record.get("expected") if isinstance(record.get("expected"), str) else ""
+        expected = _str_field(record, "expected")
         if expected.strip() and witnessed:
             lines.extend(
                 ["", r"\noindent\textbf{" + latex_escape(copy["respuesta"]) + "} " + latex_escape(expected.strip())]
@@ -2068,8 +2072,8 @@ def _solution_lines(root: Path, copy: dict[str, str], language: BookLanguage) ->
     for record in fold_by_id(root / COMPUTATIONS):
         if record.get("status") != "replayed" or record.get("correct") is not True:
             continue
-        expression = record.get("expression") if isinstance(record.get("expression"), str) else ""
-        result = record.get("server_result") if isinstance(record.get("server_result"), str) else ""
+        expression = _str_field(record, "expression")
+        result = _str_field(record, "server_result")
         lines.extend(["", _formula_line(f"{expression} = {result}")])
     unsolved = len(seen_practice - solved_practice)
     if unsolved:
@@ -2102,7 +2106,7 @@ def _audit_lines(
         lines.extend(["", r"\noindent " + latex_escape(_visible_label(copy, label)) + "."])
         lines.extend(_source_notes(paragraph, titles, excerpts, sources, copy, include_text=False))
     for claim in claims:
-        identifier = claim.get("id") if isinstance(claim.get("id"), str) else "claim"
+        identifier = _str_field(claim, "id", "claim")
         label = _audit_label(root, claim)
         lines.extend(["", r"\noindent " + latex_escape(copy["leftover"])])
         lines.extend(["", r"\noindent " + latex_escape(f"{identifier}: {label}")])
@@ -2110,14 +2114,14 @@ def _audit_lines(
     for record in fold_by_id(root / AUDITS):
         if record.get("status") != "recorded":
             continue
-        identifier = record.get("id") if isinstance(record.get("id"), str) else "audit"
-        target = record.get("target") if isinstance(record.get("target"), str) else ""
+        identifier = _str_field(record, "id", "audit")
+        target = _str_field(record, "target")
         if target.startswith("PAR-"):
             target = ""
-        check_kind = record.get("kind") if isinstance(record.get("kind"), str) else ""
+        check_kind = _str_field(record, "kind")
         lines.extend(["", r"\noindent " + latex_escape(f"{identifier}: {target} {check_kind}".strip())])
     for record in fold_by_id(root / FIGURES):
-        identifier = record.get("id") if isinstance(record.get("id"), str) else "figure"
+        identifier = _str_field(record, "id", "figure")
         if _checked_output(root, record) is None:
             lines.extend(["", r"\noindent " + latex_escape(f"{identifier}: {copy['figure_gap']}")])
             continue
@@ -2151,12 +2155,12 @@ def _bibliography_lines(root: Path, copy: dict[str, str]) -> list[str]:
     lines: list[str] = []
     index = 0
     for record in fold_by_id(root / PUBLIC_BIBLIOGRAPHY):
-        title = record.get("title") if isinstance(record.get("title"), str) else ""
-        url = record.get("url") if isinstance(record.get("url"), str) else ""
+        title = _str_field(record, "title")
+        url = _str_field(record, "url")
         if not title and not url:
             continue
         index += 1
-        origin = record.get("origin") if isinstance(record.get("origin"), str) else ""
+        origin = _str_field(record, "origin")
         note = " student_notes." if origin == "student_notes" else ""
         parts = [latex_escape(f"{title}.")] if title.strip() else []
         rendered_url = _url_tex(url)
@@ -2197,11 +2201,11 @@ def _source_notes(
 
     lines: list[str] = []
     if include_text:
-        text = record.get("text") if isinstance(record.get("text"), str) else ""
+        text = _str_field(record, "text")
         if text.strip():
             lines.extend(["", *emit_prose(text)])
-    cited_sources = record.get("sources") if isinstance(record.get("sources"), list) else []
-    excerpt_ids = record.get("excerpts") if isinstance(record.get("excerpts"), list) else []
+    cited_sources = _list_field(record, "sources")
+    excerpt_ids = _list_field(record, "excerpts")
     labels: list[str] = []
     for source_id in cited_sources:
         if not isinstance(source_id, str):

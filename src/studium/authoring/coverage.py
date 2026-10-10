@@ -13,7 +13,7 @@ from studium.authoring.academic_blueprint import academic_concepts
 from studium.authoring.blueprint import current_sections
 from studium.authoring.excerpts import excerpts_by_id
 from studium.authoring.paragraphs import supported_paragraphs
-from studium.storage.init_project import load_project_toml
+from studium.storage.init_project import domain_profile as _domain_profile
 from studium.storage.records import PUBLIC_BIBLIOGRAPHY, fold_by_id
 
 _MIN_SOURCES_PER_SECTION = 1
@@ -99,9 +99,3 @@ def source_coverage(root: Path, section: object = None) -> dict[str, object]:
     }
 
 
-def _domain_profile(root: Path) -> str:
-    document = load_project_toml(root)
-    course = document.get("course")
-    if isinstance(course, dict) and isinstance(course.get("domain_profile"), str):
-        return str(course["domain_profile"])
-    return "GENERAL"

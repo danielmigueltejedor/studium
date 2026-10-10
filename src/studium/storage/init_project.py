@@ -294,6 +294,14 @@ def book_kind(root: Path) -> str:
     return BOOK_COURSE
 
 
+def domain_profile(root: Path) -> str:
+    document = load_project_toml(root)
+    course = document.get("course")
+    if isinstance(course, dict) and isinstance(course.get("domain_profile"), str):
+        return str(course["domain_profile"])
+    return "GENERAL"
+
+
 def load_tasks(root: Path) -> list[dict[str, object]]:
     path = root / "tasks" / "tasks.jsonl"
     folded: dict[str, dict[str, object]] = {}

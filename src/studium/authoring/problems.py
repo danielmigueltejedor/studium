@@ -23,7 +23,8 @@ from studium.authoring.excerpts import excerpts_by_id
 from studium.authoring.mathematics import MathError, substitution_latex, symbol_names_of, validate_latex
 from studium.authoring.support import corroboration_for_excerpts, paragraph_citation_blockers
 from studium.policy.trust import contains_directive, directive_changes_policy
-from studium.storage.init_project import load_project_toml, load_state_holding_lock
+from studium.storage.init_project import domain_profile as _domain_profile
+from studium.storage.init_project import load_state_holding_lock
 from studium.storage.locking import ProjectLocked, project_lock
 from studium.storage.migrate import utc_now
 from studium.storage.records import PROBLEMS, allocate_id, append_jsonl, fold_by_id
@@ -671,14 +672,6 @@ def _two_excerpts(value: object) -> tuple[list[str] | None, dict[str, object] | 
             return None, _error("mcp.invalid_input", "excerpts lists the same id more than once")
         identifiers.append(cleaned)
     return identifiers, None
-
-
-def _domain_profile(root: Path) -> str:
-    document = load_project_toml(root)
-    course = document.get("course")
-    if isinstance(course, dict) and isinstance(course.get("domain_profile"), str):
-        return str(course["domain_profile"])
-    return "GENERAL"
 
 
 def _rust_status_text(root: Path) -> str:

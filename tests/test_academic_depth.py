@@ -562,5 +562,153 @@ def test_new_tools_are_registered_with_annotations():
         assert advertised[tool_name]["annotations"]["class"] in {"READ", "WRITE", "COMPUTE"}
 
 
+# --- regression: false positive detection ------------------------------------
+
+
+def test_symbolic_plus_unverified_is_not_independently_verified(tmp_path, monkeypatch):
+    """SYMBOLICALLY_VERIFIED + UNVERIFIED must not become INDEPENDENTLY_VERIFIED."""
+    monkeypatch.setattr("urllib.request.urlopen", _explode)
+    session, _root = _project(tmp_path)
+    _blueprint(session)
+    derivation_id = _torricelli(session)
+
+    checked = dispatch(
+        "studium_derivation_check",
+        {
+            "id": derivation_id,
+            "symbolic": {
+                "equation_left": "V^2",
+                "equation_right": "2*g*h",
+                "solution": {"V": "sqrt(2*g*h)"},
+            },
+            "dimensions": {
+                "expression": "sqrt(g*h)",
+                "symbol_units": {"g": "invalid_unit_xyz", "h": "m"},
+            },
+        },
+        session=session,
+    )
+    assert checked["status"] == "checked"
+    statuses = {c["status"] for c in checked["derivation"]["verification"]["checks"]}
+    if "UNVERIFIED" in statuses:
+        assert checked["verification_status"] != "INDEPENDENTLY_VERIFIED"
+
+
+def test_failed_derivation_blocks_completeness(tmp_path, monkeypatch):
+    """A FAILED derivation must not satisfy the derivations_checked predicate."""
+    monkeypatch.setattr("urllib.request.urlopen", _explode)
+    session, _root = _project(tmp_path)
+    _blueprint(session)
+    _academic(session)
+    excerpts = _excerpts(session)
+
+    for text in (
+        "En un fluido en reposo la presión aumenta linealmente con la profundidad.",
+        "La medición de la presión se realiza con manómetros que comparan columnas.",
+    ):
+        dispatch(
+            "studium_paragraph_record",
+            {"section": "hidrostatica", "text": text, "excerpts": excerpts, "concepts": ["presion-estatica"]},
+            session=session,
+        )
+
+    derivation_id = _torricelli(session, equation=r"\(V = g h\)")
+    dispatch(
+        "studium_derivation_check",
+        {
+            "id": derivation_id,
+            "symbolic": {
+                "equation_left": "V^2",
+                "equation_right": "2*g*h",
+                "solution": {"V": "g*h"},
+            },
+        },
+        session=session,
+    )
+
+    completeness = dispatch("studium_section_completeness", {"section": "hidrostatica"}, session=session)
+    checks_by_id = {c["id"]: c for c in completeness["sections"][0]["checks"]}
+    assert checks_by_id["derivations_checked"]["met"] is False
+
+
+def test_depth_thresholds_vary_by_profile():
+    from studium.domain.profiles import depth_thresholds
+
+    general = depth_thresholds("GENERAL")
+    humanities = depth_thresholds("HUMANITIES")
+    stem = depth_thresholds("STEM")
+    assert general.min_sections == 8
+    assert general.min_sources == 12
+    assert general.min_explanation_words == 400
+    assert humanities.min_sections == 6
+    assert humanities.min_sources == 10
+    assert humanities.min_explanation_words == 500
+    assert stem.min_sections == 8
+    assert stem.min_sources == 12
+    assert stem.min_explanation_words == 400
+    unknown = depth_thresholds("UNKNOWN_PROFILE")
+    assert unknown == general
+
+
+def test_humanities_book_accepts_six_sections(tmp_path, monkeypatch):
+    monkeypatch.setattr("urllib.request.urlopen", _explode)
+    session = open_workspace(str(tmp_path))
+    dispatch(
+        "studium_project_create",
+        {"slug": "filosofia", "topic": "Filosofía antigua", "profile": "HUMANITIES"},
+        session=session,
+    )
+    for index in range(10):
+        source_id = dispatch(
+            "studium_public_source_record",
+            {"title": f"Source {index}", "url": f"https://open.example/phil-{index}"},
+            session=session,
+        )["candidate"]["id"]
+        dispatch(
+            "studium_excerpt_record",
+            {"source_id": source_id, "url": f"https://open.example/phil-{index}", "text": f"Excerpt {index}."},
+            session=session,
+        )
+    six_sections = [{"id": f"tema-{i}", "title": f"Tema {i}"} for i in range(1, 7)]
+    dispatch("studium_blueprint_store", {"sections": six_sections}, session=session)
+    nxt = dispatch("studium_book_next", {}, session=session)
+    assert nxt["tool"] != "studium_blueprint_store", "6 sections should be enough for HUMANITIES"
+    assert "too short" not in str(nxt.get("reason", "")).lower()
+
+
+def test_humanities_completeness_uses_500_word_threshold(tmp_path, monkeypatch):
+    monkeypatch.setattr("urllib.request.urlopen", _explode)
+    session = open_workspace(str(tmp_path))
+    dispatch(
+        "studium_project_create",
+        {"slug": "filosofia", "topic": "Filosofía antigua", "profile": "HUMANITIES"},
+        session=session,
+    )
+    source_id = dispatch(
+        "studium_public_source_record",
+        {"title": "Source", "url": "https://open.example/phil"},
+        session=session,
+    )["candidate"]["id"]
+    excerpt_id = dispatch(
+        "studium_excerpt_record",
+        {"source_id": source_id, "url": "https://open.example/phil", "text": "A stored excerpt."},
+        session=session,
+    )["excerpt"]["id"]
+    dispatch(
+        "studium_blueprint_store",
+        {"sections": [{"id": "tema-1", "title": "Tema 1"}]},
+        session=session,
+    )
+    dispatch(
+        "studium_paragraph_record",
+        {"section": "tema-1", "role": "explanation", "text": " ".join(["word"] * 450), "excerpts": [excerpt_id]},
+        session=session,
+    )
+    completeness = dispatch("studium_section_completeness", {"section": "tema-1"}, session=session)
+    depth_check = next(c for c in completeness["sections"][0]["checks"] if c["id"] == "explanation_depth")
+    assert depth_check["met"] is False, "450 words should be insufficient for HUMANITIES (needs 500)"
+    assert "500" in depth_check["detail"]
+
+
 def _explode(*_args, **_kwargs):
     raise AssertionError("must not fetch")

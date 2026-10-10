@@ -280,17 +280,12 @@ def _overall(results: list[dict[str, object]]) -> str:
     statuses = {str(item.get("status")) for item in results}
     if "FAILED" in statuses:
         return "FAILED"
-    if "UNVERIFIED" in statuses and len(statuses) == 1:
+    passing = statuses - {"UNVERIFIED", "FAILED"}
+    if not passing:
         return "UNVERIFIED"
-    if "SYMBOLICALLY_VERIFIED" in statuses and len(statuses) > 1:
+    if len(passing) >= 2:
         return "INDEPENDENTLY_VERIFIED"
-    if "SYMBOLICALLY_VERIFIED" in statuses:
-        return "SYMBOLICALLY_VERIFIED"
-    if "DIMENSIONALLY_VERIFIED" in statuses:
-        return "DIMENSIONALLY_VERIFIED"
-    if "COMPUTATION_REPRODUCED" in statuses:
-        return "COMPUTATION_REPRODUCED"
-    return "UNVERIFIED"
+    return passing.pop()
 
 
 def _free_symbols(*texts: str) -> set[str]:
