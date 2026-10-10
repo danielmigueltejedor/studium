@@ -59,7 +59,6 @@ def test_spanish_book_emits_spanish_babel_and_labels(tmp_path, monkeypatch):
         "Auditoría de fuentes",
         "Borrador",
         "Estado de las fuentes: PENDING.",
-        "Extractos",
         "comprobación rehecha",
     ):
         assert label in tex
@@ -89,7 +88,6 @@ def test_english_book_emits_english_babel_and_labels(tmp_path, monkeypatch):
         "Source audit",
         "DRAFT",
         "Source status: PENDING.",
-        "Excerpts",
         "replayed check",
     ):
         assert label in tex

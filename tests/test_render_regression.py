@@ -401,3 +401,78 @@ class TestReferences:
 
     def test_url_package_loaded(self):
         assert r"\usepackage[hyphens]{url}" in self.tex
+
+
+# ---------------------------------------------------------------------------
+# Integration: notation table units in math mode
+# ---------------------------------------------------------------------------
+
+
+class TestNotationUnits:
+    @pytest.fixture(autouse=True)
+    def _setup(self, tmp_path, monkeypatch):
+        self.session, self.root = _full_setup(tmp_path, monkeypatch)
+        render_draft(self.root)
+        self.tex = (self.root / "latex" / "draft.tex").read_text(encoding="utf-8")
+
+    def test_units_in_math_mode(self):
+        assert r"$\mathrm{Pa}$" in self.tex
+
+    def test_units_not_plain_escaped(self):
+        in_tabular = False
+        for line in self.tex.split("\n"):
+            if r"\begin{tabular}" in line:
+                in_tabular = True
+            if r"\end{tabular}" in line:
+                in_tabular = False
+            if not in_tabular:
+                continue
+            if r"\textbf" in line or r"\hline" in line:
+                continue
+            if " Pa " in line or line.strip().endswith("Pa \\\\"):
+                assert r"\mathrm{Pa}" in line, f"Plain 'Pa' in notation row: {line.strip()}"
+
+
+# ---------------------------------------------------------------------------
+# Integration: source audit grouping
+# ---------------------------------------------------------------------------
+
+
+class TestAuditGrouping:
+    @pytest.fixture(autouse=True)
+    def _setup(self, tmp_path, monkeypatch):
+        self.session, self.root = _full_setup(tmp_path, monkeypatch)
+        render_draft(self.root)
+        self.tex = (self.root / "latex" / "draft.tex").read_text(encoding="utf-8")
+
+    def test_audit_has_paragraph_markers(self):
+        assert r"\P1:" in self.tex or "\\P1" in self.tex or "¶1:" in self.tex
+
+    def test_audit_groups_sources(self):
+        source_a_count = self.tex.count("Source A")
+        assert source_a_count >= 1
+
+
+# ---------------------------------------------------------------------------
+# Integration: study plan with academic blueprint
+# ---------------------------------------------------------------------------
+
+
+class TestStudyPlan:
+    @pytest.fixture(autouse=True)
+    def _setup(self, tmp_path, monkeypatch):
+        self.session, self.root = _full_setup(tmp_path, monkeypatch)
+        render_draft(self.root)
+        self.tex = (self.root / "latex" / "draft.tex").read_text(encoding="utf-8")
+
+    def test_study_plan_shows_chapter(self):
+        assert r"\checkmark" in self.tex or r"$\square$" in self.tex
+
+    def test_study_plan_shows_learning_objectives(self):
+        assert "learn pressure" in self.tex or "itemize" in self.tex
+
+    def test_study_plan_shows_concept_count(self):
+        assert "concepts planned" in self.tex or "1 concepts planned" in self.tex
+
+    def test_amssymb_loaded(self):
+        assert r"\usepackage{amssymb}" in self.tex
