@@ -9,6 +9,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from studium.authoring.academic_blueprint import current_academic_blueprint
 from studium.authoring.blueprint import current_sections
 from studium.authoring.derivations import derivations_for_section
 from studium.authoring.excerpts import excerpts_by_id
@@ -985,12 +986,68 @@ def _require_language(root: Path) -> BookLanguage:
     return language
 
 
-def _unwritten_lines(titles: list[str], copy: dict[str, str]) -> list[str]:
-    if not titles:
+def _study_plan_lines(root: Path, unwritten: list[str], written_ids: set[str], copy: dict[str, str]) -> list[str]:
+    """Study plan appendix: academic blueprint structure + progress when available."""
+    blueprint = current_academic_blueprint(root)
+    if blueprint is None:
+        if not unwritten:
+            return ["", r"\noindent " + latex_escape(copy["empty"])]
+        lines: list[str] = []
+        for title in unwritten:
+            lines.extend(["", r"\noindent " + latex_escape(f"{title}: {copy['unwritten']}")])
+        return lines
+
+    lines = []
+    parts = blueprint.get("parts")
+    if not isinstance(parts, list):
         return ["", r"\noindent " + latex_escape(copy["empty"])]
-    lines: list[str] = []
-    for title in titles:
-        lines.extend(["", r"\noindent " + latex_escape(f"{title}: {copy['unwritten']}")])
+
+    for part in parts:
+        if not isinstance(part, dict):
+            continue
+        part_title = _str_field(part, "title")
+        lines.extend(["", r"\section*{" + latex_escape(part_title) + "}"])
+        part_objectives = part.get("learning_objectives")
+        if isinstance(part_objectives, list) and part_objectives:
+            lines.append(r"\begin{itemize}")
+            for obj in part_objectives:
+                if isinstance(obj, str):
+                    lines.append(r"\item " + latex_escape(obj))
+            lines.append(r"\end{itemize}")
+        chapters = part.get("chapters")
+        if not isinstance(chapters, list):
+            continue
+        for chapter in chapters:
+            if not isinstance(chapter, dict):
+                continue
+            ch_id = _str_field(chapter, "id")
+            ch_title = _str_field(chapter, "title")
+            done = ch_id in written_ids
+            marker = r"\checkmark" if done else r"$\square$"
+            lines.extend(["", r"\subsection*{" + marker + " " + latex_escape(ch_title) + "}"])
+            ch_objectives = chapter.get("learning_objectives")
+            if isinstance(ch_objectives, list) and ch_objectives:
+                lines.append(r"\begin{itemize}")
+                for obj in ch_objectives:
+                    if isinstance(obj, str):
+                        lines.append(r"\item " + latex_escape(obj))
+                lines.append(r"\end{itemize}")
+            sections = chapter.get("sections")
+            if not isinstance(sections, list):
+                continue
+            concept_count = 0
+            for sec in sections:
+                if isinstance(sec, dict):
+                    concepts = sec.get("concepts")
+                    if isinstance(concepts, list):
+                        concept_count += len(concepts)
+            if concept_count:
+                lines.append(r"\noindent " + latex_escape(f"{concept_count} concepts planned."))
+
+    if unwritten:
+        lines.extend(["", r"\medskip"])
+        for title in unwritten:
+            lines.append(r"\noindent " + latex_escape(f"{title}: {copy['unwritten']}"))
     return lines
 
 
@@ -1007,6 +1064,7 @@ def _textbook_packages() -> list[str]:
     return [
         r"\usepackage{xcolor}",
         r"\usepackage{amsmath}",
+        r"\usepackage{amssymb}",
         r"\definecolor{studiumInk}{RGB}{28,40,58}",
         r"\definecolor{studiumRule}{RGB}{28,40,58}",
         r"\definecolor{studiumTipBack}{RGB}{232,244,236}",
@@ -1255,7 +1313,8 @@ def _document(root: Path) -> str:
             r"\chapter{" + latex_escape(copy["study"]) + "}",
         ]
     )
-    lines.extend(_unwritten_lines(unwritten, copy))
+    written_ids = set(by_section)
+    lines.extend(_study_plan_lines(root, unwritten, written_ids, copy))
     lines.extend(
         [
             r"\backmatter",
@@ -1986,6 +2045,31 @@ def _section_has_replay(root: Path, section_id: str) -> bool:
     return False
 
 
+def _format_units(raw: str) -> str:
+    """Wrap a plain-text unit string in math-mode ``\\mathrm``."""
+    text = raw.strip()
+    if not text:
+        return ""
+    if "$" in text or r"\(" in text or r"\mathrm" in text:
+        return text
+    parts = text.replace("·", r"\cdot ").split("/")
+    formatted: list[str] = []
+    for idx, part in enumerate(parts):
+        part = part.strip()
+        if not part:
+            continue
+        part = re.sub(r"\^(\d+)", r"^{\1}", part)
+        if idx > 0:
+            if "^{" in part:
+                part = re.sub(r"\^{(\d+)}", lambda m: "^{-" + m.group(1) + "}", part)
+            else:
+                part += "^{-1}"
+            part = r"\," + part
+        formatted.append(part)
+    body = "".join(formatted)
+    return r"$\mathrm{" + body + "}$"
+
+
 def _notation_lines(root: Path, copy: dict[str, str], language: BookLanguage) -> list[str]:
     """The notation appendix from the registry: one row per symbol."""
 
@@ -2004,7 +2088,7 @@ def _notation_lines(root: Path, copy: dict[str, str], language: BookLanguage) ->
     ]
     for symbol, entry in sorted(registry.items()):
         meaning = latex_escape(str(entry.get("meaning") or ""))
-        units = latex_escape(str(entry.get("units") or ""))
+        units = _format_units(str(entry.get("units") or ""))
         lines.append(rf"{render_text_run(symbol)} & {meaning} & {units} \\")
     lines.extend([r"\end{tabular}", r"\end{center}"])
     return lines
@@ -2100,19 +2184,53 @@ def _audit_lines(
     kind: str,
     counts: dict[str, int],
 ) -> list[str]:
-    """Source status lives here. Chapter ids are not repeated."""
+    """Source audit grouped by source, with per-paragraph verification status."""
 
     lines = ["", r"\noindent " + latex_escape(_status_line(kind, counts, copy))]
-    for paragraph in paragraphs:
+
+    # --- per-paragraph verification status (compact) ---
+    for idx, paragraph in enumerate(paragraphs, 1):
         label = _audit_label(root, paragraph)
-        lines.extend(["", r"\noindent " + latex_escape(_visible_label(copy, label)) + "."])
-        lines.extend(_source_notes(paragraph, titles, excerpts, sources, copy, include_text=False))
+        visible = _visible_label(copy, label)
+        lines.append(r"\noindent " + latex_escape(f"¶{idx}: {visible}."))
+
+    # --- evidence grouped by source ---
+    source_paragraphs: dict[str, list[int]] = {}
+    for idx, paragraph in enumerate(paragraphs, 1):
+        for eid in _list_field(paragraph, "excerpts"):
+            if not isinstance(eid, str):
+                continue
+            exc = excerpts.get(eid)
+            sid = exc.get("source_id") if isinstance(exc, dict) else None
+            if isinstance(sid, str):
+                source_paragraphs.setdefault(sid, []).append(idx)
+        for sid in _list_field(paragraph, "sources"):
+            if isinstance(sid, str):
+                source_paragraphs.setdefault(sid, []).append(idx)
+
+    if source_paragraphs:
+        lines.extend(["", r"\medskip"])
+        for sid, par_nums in source_paragraphs.items():
+            title = titles.get(sid, sid)
+            src = sources.get(sid) if isinstance(sources, dict) else None
+            status_parts = [latex_escape(f"{title} (PENDING)")]
+            if isinstance(src, dict) and src.get("open_supplement") is True:
+                status_parts.append(latex_escape(copy["open_supplement"]))
+                if src.get("course_guide_cited") is not True:
+                    status_parts.append(latex_escape(copy["not_guide"]))
+            refs = ", ".join(f"\\P{n}" for n in sorted(set(par_nums)))
+            status_parts.append(refs)
+            lines.append(r"\noindent " + " --- ".join(status_parts) + ".")
+
+    # --- leftover claims ---
     for claim in claims:
         identifier = _str_field(claim, "id", "claim")
         label = _audit_label(root, claim)
         lines.extend(["", r"\noindent " + latex_escape(copy["leftover"])])
         lines.extend(["", r"\noindent " + latex_escape(f"{identifier}: {label}")])
         lines.extend(_source_notes(claim, titles, excerpts, sources, copy, include_text=True))
+
+    # --- audits and figures ---
     for record in fold_by_id(root / AUDITS):
         if record.get("status") != "recorded":
             continue
