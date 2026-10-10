@@ -1102,7 +1102,7 @@ def _preamble(footer: str, language: BookLanguage, copy: dict[str, str], *, tikz
     if language.babel == "spanish":
         lines.append(r"\AtBeginDocument{\spanishdeactivate{" + "\"~<>}}")
     if language.babel == "galician":
-        lines.append(r"\makeatletter\providecommand{\gl@roman}[1]{\romannumeral#1}\makeatother")
+        lines.append(r"\makeatletter\def\gl@roman#1{\romannumeral#1}\makeatother")
     lines.extend(
         [
             r"\usepackage[a4paper,margin=2.5cm]{geometry}",
