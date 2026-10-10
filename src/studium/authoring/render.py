@@ -246,10 +246,28 @@ def _render_status(
 
 def _first_unwritten_title(root: Path) -> str | None:
     covered = {record.get("section") for record in supported_paragraphs(root)}
+    academic = current_academic_blueprint(root)
+    if academic is not None:
+        parts = academic.get("parts")
+        if isinstance(parts, list):
+            for part in parts:
+                if not isinstance(part, dict):
+                    continue
+                for chapter in _iter_list(part.get("chapters")):
+                    ch_id = _str_field(chapter, "id")
+                    if ch_id and ch_id not in covered:
+                        return _display_title(_str_field(chapter, "title"))
+        return None
     for section in current_sections(root):
         if section["id"] not in covered:
             return _display_title(section["title"])
     return None
+
+
+def _iter_list(value: object) -> list[dict[str, object]]:
+    if isinstance(value, list):
+        return [item for item in value if isinstance(item, dict)]
+    return []
 
 
 def find_engine() -> str | None:
@@ -1277,24 +1295,28 @@ def _document(root: Path) -> str:
         r"\noindent " + latex_escape(copy["how_b"]),
         r"\tableofcontents",
         r"\mainmatter",
-        r"\part{" + latex_escape(book) + "}",
     ]
-    if not sections:
-        lines.extend(
-            [
-                r"\chapter{" + latex_escape(copy["blueprint"]) + "}",
-                r"\noindent " + latex_escape(copy["empty"]),
-            ]
-        )
     unwritten: list[str] = []
-    for section in sections:
-        section_paragraphs = by_section.get(section["id"], [])
-        title = _display_title(section["title"])
-        if not section_paragraphs:
-            unwritten.append(title)
-            continue
-        lines.extend(["", r"\chapter{" + latex_escape(title) + "}"])
-        lines.extend(_chapter_lines(root, section["id"], section_paragraphs, copy, language))
+    academic = current_academic_blueprint(root)
+    if academic is not None:
+        lines.extend(_hierarchical_body(root, academic, by_section, unwritten, copy, language))
+    else:
+        lines.append(r"\part{" + latex_escape(book) + "}")
+        if not sections:
+            lines.extend(
+                [
+                    r"\chapter{" + latex_escape(copy["blueprint"]) + "}",
+                    r"\noindent " + latex_escape(copy["empty"]),
+                ]
+            )
+        for section in sections:
+            section_paragraphs = by_section.get(section["id"], [])
+            title = _display_title(section["title"])
+            if not section_paragraphs:
+                unwritten.append(title)
+                continue
+            lines.extend(["", r"\chapter{" + latex_escape(title) + "}"])
+            lines.extend(_chapter_lines(root, section["id"], section_paragraphs, copy, language))
     lines.extend(
         [
             r"\appendix",
@@ -1324,6 +1346,129 @@ def _document(root: Path) -> str:
     lines.extend(_bibliography_lines(root, copy))
     lines.extend([r"\end{thebibliography}", r"\end{document}", ""])
     return "\n".join(lines)
+
+
+def _hierarchical_body(
+    root: Path,
+    academic: dict[str, object],
+    by_section: dict[str, list[dict[str, object]]],
+    unwritten: list[str],
+    copy: dict[str, str],
+    language: BookLanguage,
+) -> list[str]:
+    """Render the main body using the academic blueprint hierarchy.
+
+    Parts become \\part{}, chapters become \\chapter{}, and academic sections
+    become \\section{} within each chapter.  Paragraphs are distributed across
+    sections based on their optional ``subsection`` field; paragraphs without
+    one stay in the chapter body before any sections.
+    """
+    lines: list[str] = []
+    parts = academic.get("parts")
+    if not isinstance(parts, list) or not parts:
+        return lines
+    for part in parts:
+        if not isinstance(part, dict):
+            continue
+        part_title = _str_field(part, "title")
+        lines.extend(["", r"\part{" + latex_escape(part_title) + "}"])
+        chapters = part.get("chapters")
+        if not isinstance(chapters, list):
+            continue
+        for chapter in chapters:
+            if not isinstance(chapter, dict):
+                continue
+            ch_id = _str_field(chapter, "id")
+            ch_title = _display_title(_str_field(chapter, "title"))
+            chapter_paragraphs = by_section.get(ch_id, [])
+            if not chapter_paragraphs:
+                unwritten.append(ch_title)
+                continue
+            lines.extend(["", r"\chapter{" + latex_escape(ch_title) + "}"])
+            bp_sections = chapter.get("sections")
+            if isinstance(bp_sections, list) and bp_sections:
+                lines.extend(
+                    _hierarchical_chapter(root, ch_id, chapter_paragraphs, bp_sections, copy, language)
+                )
+            else:
+                lines.extend(_chapter_lines(root, ch_id, chapter_paragraphs, copy, language))
+    return lines
+
+
+def _hierarchical_chapter(
+    root: Path,
+    chapter_id: str,
+    paragraphs: list[dict[str, object]],
+    bp_sections: list[object],
+    copy: dict[str, str],
+    language: BookLanguage,
+) -> list[str]:
+    """Render a chapter with \\section{} headings from the academic blueprint.
+
+    Paragraphs with a ``subsection`` field matching a blueprint section ID are
+    placed under that \\section{}.  Remaining paragraphs go into the chapter
+    introduction before any sections.
+    """
+    section_ids: list[str] = []
+    section_titles: dict[str, str] = {}
+    section_subsections: dict[str, list[dict[str, object]]] = {}
+    for sec in bp_sections:
+        if not isinstance(sec, dict):
+            continue
+        sec_id = _str_field(sec, "id")
+        if not sec_id:
+            continue
+        section_ids.append(sec_id)
+        section_titles[sec_id] = _str_field(sec, "title")
+        subs = sec.get("subsections")
+        if isinstance(subs, list):
+            section_subsections[sec_id] = [s for s in subs if isinstance(s, dict)]
+
+    assigned: set[int] = set()
+    by_subsection: dict[str, list[dict[str, object]]] = {}
+    intro_paragraphs: list[dict[str, object]] = []
+    for idx, paragraph in enumerate(paragraphs):
+        sub = paragraph.get("subsection")
+        if isinstance(sub, str) and sub in section_titles:
+            by_subsection.setdefault(sub, []).append(paragraph)
+            assigned.add(idx)
+        elif isinstance(sub, str):
+            for sec_id in section_ids:
+                for subsec in section_subsections.get(sec_id, []):
+                    if _str_field(subsec, "id") == sub:
+                        by_subsection.setdefault(sec_id, []).append(paragraph)
+                        assigned.add(idx)
+                        break
+                if idx in assigned:
+                    break
+
+    for idx, paragraph in enumerate(paragraphs):
+        if idx not in assigned:
+            intro_paragraphs.append(paragraph)
+
+    lines: list[str] = []
+    if intro_paragraphs:
+        lines.extend(_chapter_lines(root, chapter_id, intro_paragraphs, copy, language))
+
+    for sec_id in section_ids:
+        sec_paragraphs = by_subsection.get(sec_id, [])
+        title = section_titles[sec_id]
+        if not sec_paragraphs and not intro_paragraphs:
+            continue
+        lines.extend(["", r"\section{" + latex_escape(title) + "}"])
+        if sec_paragraphs:
+            lines.extend(_chapter_lines(root, chapter_id, sec_paragraphs, copy, language))
+        subsections = section_subsections.get(sec_id, [])
+        for subsec in subsections:
+            subsec_id = _str_field(subsec, "id")
+            subsec_title = _str_field(subsec, "title")
+            if not subsec_id or not subsec_title:
+                continue
+            subsec_paragraphs = by_subsection.get(subsec_id, [])
+            if subsec_paragraphs:
+                lines.extend(["", r"\subsection{" + latex_escape(subsec_title) + "}"])
+                lines.extend(_chapter_lines(root, chapter_id, subsec_paragraphs, copy, language))
+    return lines
 
 
 def _chapter_lines(
