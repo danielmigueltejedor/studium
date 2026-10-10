@@ -74,6 +74,8 @@ allowed-confusables = [
 [tool.pyright]
 pythonVersion = "3.11"
 typeCheckingMode = "basic"
+venvPath = "."
+venv = "venv"
 include = ["src/studium"]
 exclude = ["**/__pycache__", "src/studium/authoring/render.py"]
 reportMissingImports = true
