@@ -21,7 +21,8 @@ from studium.authoring.excerpts import excerpts_by_id
 from studium.authoring.notation import notation_registry
 from studium.authoring.paragraphs import supported_paragraphs
 from studium.authoring.problems import problem_result_current
-from studium.storage.init_project import load_state_holding_lock
+from studium.domain.profiles import depth_thresholds
+from studium.storage.init_project import load_project_toml, load_state_holding_lock
 from studium.storage.records import (
     AUDITS,
     COMPUTATIONS,
@@ -40,6 +41,8 @@ def quality_report(root: Path) -> dict[str, object]:
     """Metrics, statuses, and honest limitations for the active edition."""
 
     state = load_state_holding_lock(root)
+    profile = _domain_profile(root)
+    thresholds = depth_thresholds(profile)
     sections = current_sections(root)
     paragraphs = supported_paragraphs(root)
     stored_excerpts = excerpts_by_id(root)
@@ -90,6 +93,13 @@ def quality_report(root: Path) -> dict[str, object]:
         "status": "ok",
         "project_state": state.get("state"),
         "released": state.get("state") == "RELEASED",
+        "domain_profile": profile,
+        "thresholds": {
+            "min_sections": thresholds.min_sections,
+            "min_sources": thresholds.min_sources,
+            "min_explanation_words": thresholds.min_explanation_words,
+            "min_explanation_sections": thresholds.min_explanation_sections,
+        },
         "counts": {
             "sections": len(sections),
             "sections_with_prose": len({str(row.get("section")) for row in paragraphs}),
@@ -120,6 +130,14 @@ def quality_report(root: Path) -> dict[str, object]:
         "verification_statuses_present": _statuses(derivations, computations, checked_problems),
         "limitations": limitations,
     }
+
+
+def _domain_profile(root: Path) -> str:
+    document = load_project_toml(root)
+    course = document.get("course")
+    if isinstance(course, dict) and isinstance(course.get("domain_profile"), str):
+        return str(course["domain_profile"])
+    return "GENERAL"
 
 
 def _statuses(derivations: list[dict[str, object]], computations: list[dict[str, object]], problems: list[dict[str, object]]) -> list[str]:
