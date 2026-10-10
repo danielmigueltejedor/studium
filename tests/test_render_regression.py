@@ -5,8 +5,6 @@ worked problems, derivation boxes, exercise boxes, and full document structure.
 These tests must pass before and after type-safety fixes to render.py.
 """
 
-import json
-from pathlib import Path
 
 import pytest
 

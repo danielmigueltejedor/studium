@@ -27,7 +27,8 @@ from studium.authoring.problems import problem_result_current
 from studium.authoring.support import corroboration_for_excerpts, supported_drafts
 from studium.domain.profiles import BOOK_TOPIC
 from studium.research.public_sources import bibliography_counts
-from studium.storage.init_project import book_kind, domain_profile as _domain_profile, load_project_toml, load_state_holding_lock
+from studium.storage.init_project import book_kind, load_project_toml, load_state_holding_lock
+from studium.storage.init_project import domain_profile as _domain_profile
 from studium.storage.locking import ProjectLocked, project_lock
 from studium.storage.records import (
     AUDITS,
