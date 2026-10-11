@@ -444,10 +444,15 @@ def _next_academic_section(root: Path, chapter_id: str) -> dict[str, object] | N
                 sec_id = sec.get("id")
                 if isinstance(sec_id, str):
                     concepts = sec.get("concepts")
-                    concept_count = len(concepts) if isinstance(concepts, list) else 0
+                    concept_list = concepts if isinstance(concepts, list) else []
+                    concept_titles = [
+                        str(c.get("title")) for c in concept_list
+                        if isinstance(c, dict) and isinstance(c.get("title"), str)
+                    ]
                     section_meta[sec_id] = {
                         "depth": sec.get("depth"),
-                        "concept_count": concept_count,
+                        "concept_count": len(concept_list),
+                        "concept_titles": concept_titles,
                     }
     for s in sections:
         if s["id"] not in written:
@@ -457,6 +462,8 @@ def _next_academic_section(root: Path, chapter_id: str) -> dict[str, object] | N
                 result["depth"] = meta["depth"]
             if meta.get("concept_count"):
                 result["concept_count"] = meta["concept_count"]
+            if meta.get("concept_titles"):
+                result["concept_titles"] = meta["concept_titles"]
             return result
     return None
 
@@ -482,13 +489,17 @@ def _unwritten_step(
     academic = _next_academic_section(root, section["id"])
     if academic is not None:
         arguments["subsection"] = academic["id"]
-        depth_hint = ""
+        extras = ""
         depth = academic.get("depth")
         if isinstance(depth, str):
-            depth_hint = f" Target depth: {depth}."
+            extras += f" Target depth: {depth}."
+        concept_titles = academic.get("concept_titles")
+        if isinstance(concept_titles, list) and concept_titles:
+            names = ", ".join(str(t) for t in concept_titles[:5])
+            extras += f" Concepts to teach: {names}."
         reason = (
             f"Write the next unwritten section: {section['title']} > {academic['title']}. "
-            f"The book is incomplete while {academic['title']} has no paragraphs.{depth_hint}"
+            f"The book is incomplete while {academic['title']} has no paragraphs.{extras}"
         )
     return _step(
         state,
