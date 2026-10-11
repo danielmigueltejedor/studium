@@ -1011,7 +1011,7 @@ def test_explanation_paragraphs_empty_chapters_and_figure_space(tmp_path, monkey
 
 def test_book_next_passes_subsection_with_academic_blueprint(tmp_path, monkeypatch):
     monkeypatch.setattr("urllib.request.urlopen", _explode)
-    session, root = _topic(tmp_path, "physics", "Thermodynamics")
+    session, _root = _topic(tmp_path, "physics", "Thermodynamics")
     for i in range(1, 13):
         src = _source(session, f"https://open.example/thermo{i}")
         _excerpt(session, src, f"https://open.example/thermo{i}")
