@@ -291,6 +291,9 @@ class TestDocumentStructure:
     def test_appendix_present(self):
         assert r"\appendix" in self.tex
 
+    def test_chapter_label(self):
+        assert r"\label{chap:presion}" in self.tex
+
 
 # ---------------------------------------------------------------------------
 # Integration: formulas in LaTeX output
@@ -476,3 +479,50 @@ class TestStudyPlan:
 
     def test_amssymb_loaded(self):
         assert r"\usepackage{amssymb}" in self.tex
+
+
+# ---------------------------------------------------------------------------
+# Integration: LaTeX cross-reference labels
+# ---------------------------------------------------------------------------
+
+
+class TestCrossReferenceLabels:
+    @pytest.fixture(autouse=True)
+    def _setup(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("urllib.request.urlopen", _explode)
+        session, root = _project(tmp_path)
+        dispatch(
+            "studium_blueprint_store",
+            {"sections": [{"id": "thermo", "title": "Thermodynamics"}]},
+            session=session,
+        )
+        excerpts = _excerpts(session)
+        for text in (
+            "Heat flows from hot to cold bodies.",
+            "Energy is conserved in isolated systems.",
+        ):
+            dispatch(
+                "studium_paragraph_record",
+                {"section": "thermo", "text": text, "excerpts": excerpts},
+                session=session,
+            )
+        dispatch(
+            "studium_derivation_record",
+            {
+                "section": "thermo",
+                "name": "Ideal gas law",
+                "equation": r"\(PV = nRT\)",
+                "equation_id": "eq-ideal-gas",
+                "steps": ["Start from kinetic theory"],
+                "variables": {"P": {"meaning": "pressure", "units": "Pa"}},
+            },
+            session=session,
+        )
+        render_draft(root)
+        self.tex = (root / "latex" / "draft.tex").read_text(encoding="utf-8")
+
+    def test_chapter_label_present(self):
+        assert r"\label{chap:thermo}" in self.tex
+
+    def test_equation_label_present(self):
+        assert r"\label{eq:eq-ideal-gas}" in self.tex

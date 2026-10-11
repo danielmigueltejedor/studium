@@ -43,6 +43,7 @@ from studium.storage.records import (
 
 _TEX_NAME = "draft.tex"
 _PDF_NAME = "draft.pdf"
+_LABEL_SAFE = re.compile(r"[^A-Za-z0-9._:-]")
 
 
 def _str_field(record: dict[str, object], key: str, default: str = "") -> str:
@@ -53,6 +54,13 @@ def _str_field(record: dict[str, object], key: str, default: str = "") -> str:
 def _list_field(record: dict[str, object], key: str) -> list[object]:
     value = record.get(key)
     return value if isinstance(value, list) else []
+
+
+def _label(prefix: str, identifier: str) -> str:
+    safe = _LABEL_SAFE.sub("-", identifier)
+    return r"\label{" + prefix + ":" + safe + "}"
+
+
 _LATEX = {
     "\\": r"\textbackslash{}",
     "{": r"\{",
@@ -1173,11 +1181,17 @@ def _preamble(footer: str, language: BookLanguage, copy: dict[str, str], *, tikz
             r"\usepackage{graphicx}",
             *( [r"\usepackage{tikz}"] if tikz else [] ),
             *_textbook_packages(),
+            r"\titleformat{\section}{\Large\bfseries}{\thesection}{0.8em}{}",
+            r"\titleformat{\subsection}{\large\bfseries}{\thesubsection}{0.7em}{}",
+            r"\setcounter{secnumdepth}{3}",
+            r"\setcounter{tocdepth}{2}",
             r"\usepackage{fancyhdr}",
             r"\pagestyle{fancy}",
             r"\fancyhf{}",
+            r"\fancyhead[LE]{\small\thepage\hspace{1.5em}\scshape\nouppercase{\leftmark}}",
+            r"\fancyhead[RO]{\small\scshape\nouppercase{\rightmark}\hspace{1.5em}\thepage}",
             r"\fancyfoot[C]{\small " + mark + "}",
-            r"\renewcommand{\headrulewidth}{0pt}",
+            r"\renewcommand{\headrulewidth}{0.4pt}",
             r"\renewcommand{\footrulewidth}{0pt}",
             r"\fancypagestyle{plain}{%",
             r"  \fancyhf{}",
@@ -1293,7 +1307,7 @@ def _document(root: Path) -> str:
         if not section_paragraphs:
             unwritten.append(title)
             continue
-        lines.extend(["", r"\chapter{" + latex_escape(title) + "}"])
+        lines.extend(["", r"\chapter{" + latex_escape(title) + "}", _label("chap", section["id"])])
         lines.extend(_chapter_lines(root, section["id"], section_paragraphs, copy, language))
     lines.extend(
         [
@@ -1838,9 +1852,12 @@ def _derivation_box(root: Path, section_id: str, language: BookLanguage) -> list
     for record in records:
         name = _str_field(record, "name")
         equation = _str_field(record, "equation")
+        equation_id = _str_field(record, "equation_id")
         body.extend(["", r"\noindent\textbf{" + latex_escape(name.strip() or label) + "}"])
         if equation.strip():
             body.extend(_display_math(equation))
+            if equation_id.strip():
+                body.append(_label("eq", equation_id))
         for key, label_key in (
             ("assumptions", "assumptions"),
             ("governing_principles", "principles"),

@@ -13,7 +13,11 @@ from pathlib import Path
 from typing import BinaryIO
 
 from studium import __version__
-from studium.authoring.academic_blueprint import get_academic_blueprint, store_academic_blueprint
+from studium.authoring.academic_blueprint import (
+    get_academic_blueprint,
+    scaffold_academic_blueprint,
+    store_academic_blueprint,
+)
 from studium.authoring.audit import book_review, contradiction_scan, record_audit
 from studium.authoring.blueprint import get_blueprint, store_blueprint
 from studium.authoring.book_next import book_next
@@ -893,6 +897,14 @@ def _dispatch(session: McpSession, name: str, arguments: Mapping[str, object]) -
         )
     if name == "studium_course_recorded":
         return attempt_course_recorded(root)
+    if name == "studium_academic_blueprint_scaffold":
+        return scaffold_academic_blueprint(
+            root,
+            subject=arguments.get("subject") if "subject" in arguments else None,
+            profile_key=arguments.get("profile_key") if "profile_key" in arguments else None,
+            chapters_per_part=arguments.get("chapters_per_part") if "chapters_per_part" in arguments else None,
+            actor=actor if isinstance(actor, dict) else None,
+        )
     if name == "studium_academic_blueprint_store":
         return store_academic_blueprint(
             root,
