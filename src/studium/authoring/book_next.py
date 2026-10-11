@@ -415,8 +415,17 @@ def _paragraph_count(root: Path, section_id: str) -> int:
 
 
 def _next_academic_section(root: Path, chapter_id: str) -> dict[str, object] | None:
-    """First academic section in this chapter that has no paragraphs yet."""
+    """First academic section in this chapter that has no paragraphs yet.
 
+    Returns a dict with id, title, and optionally depth and concept_count
+    so the agent can adapt its writing to the planned academic level.
+    """
+
+    from studium.authoring.academic_blueprint import current_academic_blueprint
+
+    blueprint = current_academic_blueprint(root)
+    if blueprint is None:
+        return None
     sections = academic_sections_for_chapter(root, chapter_id)
     if not sections:
         return None
@@ -426,10 +435,36 @@ def _next_academic_section(root: Path, chapter_id: str) -> dict[str, object] | N
             sub = record.get("subsection")
             if isinstance(sub, str):
                 written.add(sub)
+    section_meta: dict[str, dict[str, object]] = {}
+    for part in _iter_list(blueprint.get("parts")):
+        for chapter in _iter_list(part.get("chapters")):
+            if chapter.get("id") != chapter_id:
+                continue
+            for sec in _iter_list(chapter.get("sections")):
+                sec_id = sec.get("id")
+                if isinstance(sec_id, str):
+                    concepts = sec.get("concepts")
+                    concept_count = len(concepts) if isinstance(concepts, list) else 0
+                    section_meta[sec_id] = {
+                        "depth": sec.get("depth"),
+                        "concept_count": concept_count,
+                    }
     for s in sections:
         if s["id"] not in written:
-            return s
+            result = dict(s)
+            meta = section_meta.get(str(s["id"]), {})
+            if meta.get("depth"):
+                result["depth"] = meta["depth"]
+            if meta.get("concept_count"):
+                result["concept_count"] = meta["concept_count"]
+            return result
     return None
+
+
+def _iter_list(value: object) -> list[dict[str, object]]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, dict)]
 
 
 def _unwritten_step(
@@ -447,9 +482,13 @@ def _unwritten_step(
     academic = _next_academic_section(root, section["id"])
     if academic is not None:
         arguments["subsection"] = academic["id"]
+        depth_hint = ""
+        depth = academic.get("depth")
+        if isinstance(depth, str):
+            depth_hint = f" Target depth: {depth}."
         reason = (
             f"Write the next unwritten section: {section['title']} > {academic['title']}. "
-            f"The book is incomplete while {academic['title']} has no paragraphs."
+            f"The book is incomplete while {academic['title']} has no paragraphs.{depth_hint}"
         )
     return _step(
         state,
