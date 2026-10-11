@@ -48,6 +48,111 @@ _CONCEPT_KEYS = frozenset(
 )
 
 
+def scaffold_academic_blueprint(
+    root: Path,
+    *,
+    subject: object = None,
+    profile_key: object = None,
+    chapters_per_part: object = None,
+    actor: dict[str, object] | None = None,
+) -> dict[str, object]:
+    """Generate an academic blueprint scaffold from the flat outline.
+
+    Reads the stored flat blueprint sections, groups them into parts, and
+    creates a minimal academic blueprint where each flat section becomes a
+    chapter with one section and one concept. The AI agent can then refine
+    this scaffold by calling store_academic_blueprint with an expanded version.
+
+    Does not fabricate content — titles come from the flat outline.
+    """
+
+    from studium.authoring.blueprint import current_sections
+    from studium.authoring.depth.profiles import resolve_depth_profile
+
+    sections = current_sections(root)
+    if not sections:
+        return _error("mcp.invalid_input", "store a flat blueprint first")
+
+    existing = current_academic_blueprint(root)
+    if existing is not None:
+        return _error(
+            "mcp.invalid_input",
+            "an academic blueprint already exists; use studium_academic_blueprint_store to replace it",
+        )
+
+    profile = None
+    if profile_key is not None:
+        profile, depth_error = resolve_depth_profile(profile_key)
+        if depth_error is not None:
+            return depth_error
+
+    depth_label = profile.key if profile is not None else None
+
+    cpp = 5
+    if isinstance(chapters_per_part, int) and 2 <= chapters_per_part <= 20:
+        cpp = chapters_per_part
+
+    parts = _scaffold_parts(sections, depth_label, cpp)
+    return store_academic_blueprint(
+        root,
+        parts=parts,
+        subject=subject,
+        profile_key=profile_key,
+        actor=actor,
+    )
+
+
+def _scaffold_parts(
+    sections: list[dict[str, str]],
+    depth: str | None,
+    chapters_per_part: int,
+) -> list[dict[str, object]]:
+    """Group flat sections into parts, each with chapters, sections, concepts."""
+
+    parts: list[dict[str, object]] = []
+    chunk_start = 0
+    part_number = 0
+
+    while chunk_start < len(sections):
+        part_number += 1
+        chunk_end = min(chunk_start + chapters_per_part, len(sections))
+        chunk = sections[chunk_start:chunk_end]
+
+        chapters: list[dict[str, object]] = []
+        for sec in chunk:
+            sec_id = f"{sec['id']}.s1"
+            concept_id = f"{sec['id']}.c1"
+            concept: dict[str, object] = {
+                "id": concept_id,
+                "title": sec["title"],
+            }
+            if depth is not None:
+                concept["depth"] = depth
+            section: dict[str, object] = {
+                "id": sec_id,
+                "title": sec["title"],
+                "concepts": [concept],
+            }
+            if depth is not None:
+                section["depth"] = depth
+            chapter: dict[str, object] = {
+                "id": sec["id"],
+                "title": sec["title"],
+                "sections": [section],
+            }
+            chapters.append(chapter)
+
+        part: dict[str, object] = {
+            "id": f"part-{part_number}",
+            "title": f"Part {part_number}",
+            "chapters": chapters,
+        }
+        parts.append(part)
+        chunk_start = chunk_end
+
+    return parts
+
+
 def store_academic_blueprint(
     root: Path,
     *,
