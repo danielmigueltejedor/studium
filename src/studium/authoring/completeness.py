@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from studium.authoring.academic_blueprint import academic_concepts_for_chapter
+from studium.authoring.academic_blueprint import academic_concepts_for_chapter, academic_sections_for_chapter
 from studium.authoring.audit import audited_paragraph_ids
 from studium.authoring.blueprint import current_sections
 from studium.authoring.contradictions import open_contradictions
@@ -167,6 +167,17 @@ def _section_report(root: Path, section_id: str, context: dict[str, object]) -> 
         check("concepts_covered", True, not missing, f"{len(concept_ids) - len(missing)} of {len(concept_ids)} planned concepts covered")
     else:
         check("concepts_covered", False, False, "no academic blueprint concepts planned for this section")
+    academic_secs = academic_sections_for_chapter(root, section_id)
+    if academic_secs:
+        written_subs = {item.get("subsection") for item in paragraphs if isinstance(item.get("subsection"), str)}
+        sec_ids = {str(s["id"]) for s in academic_secs}
+        missing_secs = sec_ids - written_subs
+        check(
+            "sections_covered",
+            True,
+            not missing_secs,
+            f"{len(sec_ids) - len(missing_secs)} of {len(sec_ids)} academic sections have content",
+        )
 
     complete = all(item["met"] is True for item in checks if item["applies"])
     missing = [item["id"] for item in checks if item["applies"] and item["met"] is not True]
