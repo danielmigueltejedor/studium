@@ -1436,7 +1436,7 @@ def _hierarchical_chapter(
             for sec_id in section_ids:
                 for subsec in section_subsections.get(sec_id, []):
                     if _str_field(subsec, "id") == sub:
-                        by_subsection.setdefault(sec_id, []).append(paragraph)
+                        by_subsection.setdefault(sub, []).append(paragraph)
                         assigned.add(idx)
                         break
                 if idx in assigned:
