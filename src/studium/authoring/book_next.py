@@ -22,6 +22,7 @@ from studium.authoring.audit import (
 )
 from studium.authoring.blueprint import current_sections
 from studium.authoring.computation import list_computations
+from studium.authoring.derivations import derivations_for_section
 from studium.authoring.excerpts import excerpts_by_id
 from studium.authoring.languages import (
     BookLanguage,
@@ -253,6 +254,16 @@ def _book_next(root: Path) -> dict[str, object]:
             return _unwritten_step(state, root, section, _excerpt_for_section(root, section["id"]))
         if _explanation_words(root, section["id"]) < _thresholds(root).min_explanation_words:
             return _explanation_step(state, root, section)
+    unchecked_deriv = _pending_derivation_check(root, sections)
+    if unchecked_deriv is not None:
+        return _step(
+            state,
+            "studium_derivation_check",
+            {"id": unchecked_deriv["id"]},
+            f"Verify derivation {unchecked_deriv['id']} in {unchecked_deriv['section']}. "
+            "Run the deterministic symbolic and dimensional checks.",
+            blocked=blocked_sections(root),
+        )
     audit = _pending_audit(root)
     if audit is not None:
         return _step(
@@ -1102,6 +1113,28 @@ def _pending_self_check(
             continue
         remember_offer(root, section_id=section["id"], kind="self_check")
         return section, excerpt_id
+    return None
+
+
+def _pending_derivation_check(
+    root: Path,
+    sections: list[dict[str, str]],
+) -> dict[str, str] | None:
+    """First derivation in any written section that has not been verified."""
+
+    for section in sections:
+        for deriv in derivations_for_section(root, section["id"]):
+            verification = deriv.get("verification")
+            if not isinstance(verification, dict):
+                identifier = deriv.get("id")
+                if isinstance(identifier, str):
+                    return {"id": identifier, "section": section["id"]}
+                continue
+            status = verification.get("status")
+            if status == "UNVERIFIED":
+                identifier = deriv.get("id")
+                if isinstance(identifier, str):
+                    return {"id": identifier, "section": section["id"]}
     return None
 
 
