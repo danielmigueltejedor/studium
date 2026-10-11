@@ -1009,6 +1009,93 @@ def test_explanation_paragraphs_empty_chapters_and_figure_space(tmp_path, monkey
     assert rendered["project_state"] != "RELEASED"
 
 
+def test_book_next_passes_subsection_with_academic_blueprint(tmp_path, monkeypatch):
+    monkeypatch.setattr("urllib.request.urlopen", _explode)
+    session, root = _topic(tmp_path, "physics", "Thermodynamics")
+    for i in range(1, 13):
+        src = _source(session, f"https://open.example/thermo{i}")
+        _excerpt(session, src, f"https://open.example/thermo{i}")
+    sections = [{"id": f"ch{i}", "title": f"Chapter {i}"} for i in range(1, 9)]
+    dispatch("studium_blueprint_store", {"sections": sections}, session=session)
+    dispatch(
+        "studium_academic_blueprint_store",
+        {
+            "profile_key": "ADVANCED_UNDERGRADUATE",
+            "subject": "Thermodynamics",
+            "parts": [
+                {
+                    "id": "p1",
+                    "title": "Fundamentals",
+                    "chapters": [
+                        {
+                            "id": "ch1",
+                            "title": "Chapter 1",
+                            "learning_objectives": ["lo1"],
+                            "sections": [
+                                {
+                                    "id": "ch1.intro",
+                                    "title": "Introduction",
+                                    "concepts": [
+                                        {
+                                            "id": "c1",
+                                            "title": "Temperature",
+                                            "learning_objectives": ["lo1"],
+                                            "depth": "ADVANCED_UNDERGRADUATE",
+                                            "exercises": 1,
+                                        }
+                                    ],
+                                },
+                                {
+                                    "id": "ch1.laws",
+                                    "title": "Laws",
+                                    "concepts": [
+                                        {
+                                            "id": "c2",
+                                            "title": "First Law",
+                                            "learning_objectives": ["lo2"],
+                                            "depth": "ADVANCED_UNDERGRADUATE",
+                                            "exercises": 1,
+                                        }
+                                    ],
+                                },
+                            ],
+                        },
+                        *[
+                            {
+                                "id": f"ch{i}",
+                                "title": f"Chapter {i}",
+                                "learning_objectives": [f"lo{i}"],
+                                "sections": [
+                                    {
+                                        "id": f"ch{i}.s1",
+                                        "title": f"Section {i}.1",
+                                        "concepts": [
+                                            {
+                                                "id": f"c{i}0",
+                                                "title": f"Concept {i}",
+                                                "learning_objectives": [f"lo{i}"],
+                                                "depth": "ADVANCED_UNDERGRADUATE",
+                                                "exercises": 1,
+                                            }
+                                        ],
+                                    }
+                                ],
+                            }
+                            for i in range(2, 9)
+                        ],
+                    ],
+                }
+            ],
+        },
+        session=session,
+    )
+    nxt = dispatch("studium_book_next", {}, session=session)
+    assert nxt["tool"] == "studium_paragraph_record"
+    arguments = nxt["arguments"]
+    assert arguments["section"] == "ch1"
+    assert arguments.get("subsection") == "ch1.intro"
+
+
 def _topic(tmp_path, slug: str, topic: str):
     session = open_workspace(str(tmp_path))
     assert (
