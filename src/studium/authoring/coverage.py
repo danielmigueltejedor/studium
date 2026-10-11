@@ -16,7 +16,15 @@ from studium.authoring.paragraphs import supported_paragraphs
 from studium.storage.init_project import domain_profile as _domain_profile
 from studium.storage.records import PUBLIC_BIBLIOGRAPHY, fold_by_id
 
-_MIN_SOURCES_PER_SECTION = 1
+_MIN_SOURCES: dict[str, int] = {
+    "STEM": 2,
+    "COMPUTER_SCIENCE": 2,
+    "GENERAL": 2,
+    "HUMANITIES": 2,
+    "SOCIAL_SCIENCES": 2,
+    "LAW": 2,
+}
+_DEFAULT_MIN = 2
 
 
 def source_coverage(root: Path, section: object = None) -> dict[str, object]:
@@ -41,6 +49,8 @@ def source_coverage(root: Path, section: object = None) -> dict[str, object]:
         if isinstance(chapter, str):
             concepts_by_chapter.setdefault(chapter, set()).add(str(concept.get("id")))
 
+    profile = _domain_profile(root)
+    min_per_section = _MIN_SOURCES.get(profile, _DEFAULT_MIN)
     per_section: list[dict[str, object]] = []
     used_sources: set[str] = set()
     covered_concepts: set[str] = set()
@@ -68,7 +78,7 @@ def source_coverage(root: Path, section: object = None) -> dict[str, object]:
                 "section": section_id,
                 "paragraphs": count,
                 "sources": len(sources),
-                "sources_ok": len(sources) >= _MIN_SOURCES_PER_SECTION,
+                "sources_ok": len(sources) >= min_per_section,
                 "concepts_planned": len(planned),
                 "concepts_covered": len(planned & concepts),
                 "concept_gaps": sorted(planned - concepts),

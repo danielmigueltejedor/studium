@@ -142,3 +142,41 @@ def test_scaffold_concept_count(tmp_path, monkeypatch):
     result = dispatch("studium_academic_blueprint_scaffold", {}, session=session)
     assert result["status"] == "recorded"
     assert result["concepts"] == 10
+
+
+def test_source_coverage_requires_two_per_section(tmp_path, monkeypatch):
+    """STEM profile requires 2 distinct sources per section for sources_ok."""
+    monkeypatch.setattr("urllib.request.urlopen", _explode)
+    session = _project(tmp_path)
+    _flat_blueprint(session, n=1)
+
+    source = dispatch(
+        "studium_public_source_record",
+        {"title": "Source A", "url": "https://example.com/a", "text": "Open text"},
+        session=session,
+    )
+    source_id = source["candidate"]["id"]
+    dispatch(
+        "studium_public_source_open_supplement",
+        {"id": source_id, "open_supplement": True, "open_licensed": True},
+        session=session,
+    )
+    excerpt = dispatch(
+        "studium_excerpt_record",
+        {"source_id": source_id, "url": "https://example.com/a", "text": "Fluid fact"},
+        session=session,
+    )
+    excerpt_id = excerpt["excerpt"]["id"]
+
+    dispatch(
+        "studium_paragraph_record",
+        {"section": "ch-1", "text": "Paragraph citing one source.", "excerpts": [excerpt_id]},
+        session=session,
+    )
+
+    coverage = dispatch("studium_source_coverage", {}, session=session)
+    assert coverage["status"] == "ok"
+    sections = coverage["sections"]
+    assert len(sections) == 1
+    assert sections[0]["sources"] == 1
+    assert sections[0]["sources_ok"] is False
