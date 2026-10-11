@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from studium.authoring.academic_blueprint import academic_sections_for_chapter
 from studium.authoring.audit import audited_paragraph_ids
 from studium.authoring.blueprint import current_sections
 from studium.authoring.completeness import chapter_completeness
@@ -129,7 +130,38 @@ def quality_report(root: Path) -> dict[str, object]:
         "consistent": consistency.get("consistent"),
         "depth_plan": plan.get("status"),
         "verification_statuses_present": _statuses(derivations, computations, checked_problems),
+        "section_coverage": _section_coverage(root, sections, paragraphs),
         "limitations": limitations,
+    }
+
+
+def _section_coverage(
+    root: Path,
+    sections: list[dict[str, str]],
+    paragraphs: list[dict[str, object]],
+) -> dict[str, object]:
+    """Per-chapter breakdown of academic section coverage."""
+
+    chapters_with_sections = 0
+    total_academic_sections = 0
+    covered_academic_sections = 0
+    for section in sections:
+        academic_secs = academic_sections_for_chapter(root, section["id"])
+        if not academic_secs:
+            continue
+        chapters_with_sections += 1
+        sec_ids = {str(s["id"]) for s in academic_secs}
+        total_academic_sections += len(sec_ids)
+        written = {
+            str(p.get("subsection"))
+            for p in paragraphs
+            if p.get("section") == section["id"] and isinstance(p.get("subsection"), str)
+        }
+        covered_academic_sections += len(sec_ids & written)
+    return {
+        "chapters_with_academic_sections": chapters_with_sections,
+        "academic_sections_total": total_academic_sections,
+        "academic_sections_covered": covered_academic_sections,
     }
 
 
