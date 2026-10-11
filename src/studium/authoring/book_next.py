@@ -9,6 +9,7 @@ import re
 from contextvars import ContextVar
 from pathlib import Path
 
+from studium.authoring.academic_blueprint import academic_sections_for_chapter
 from studium.authoring.audit import (
     audited_paragraph_ids,
     explicit_gap_ids,
@@ -217,10 +218,14 @@ def _book_next(root: Path) -> dict[str, object]:
                 ),
                 blocked=blocked_sections(root),
             )
+        arguments_more: dict[str, object] = {"section": section["id"], "excerpts": [excerpt_id], "role": "explanation"}
+        academic = _next_academic_section(root, section["id"])
+        if academic is not None:
+            arguments_more["subsection"] = academic["id"]
         return _step(
             state,
             "studium_paragraph_record",
-            {"section": section["id"], "excerpts": [excerpt_id], "role": "explanation"},
+            arguments_more,
             (
                 f"Write another explanatory paragraph for {section['id']} ({section['title']}). "
                 "A section of one short paragraph does not count as written. "
@@ -398,6 +403,24 @@ def _paragraph_count(root: Path, section_id: str) -> int:
     return sum(1 for record in supported_paragraphs(root) if record.get("section") == section_id)
 
 
+def _next_academic_section(root: Path, chapter_id: str) -> dict[str, object] | None:
+    """First academic section in this chapter that has no paragraphs yet."""
+
+    sections = academic_sections_for_chapter(root, chapter_id)
+    if not sections:
+        return None
+    written = set()
+    for record in supported_paragraphs(root):
+        if record.get("section") == chapter_id:
+            sub = record.get("subsection")
+            if isinstance(sub, str):
+                written.add(sub)
+    for s in sections:
+        if s["id"] not in written:
+            return s
+    return None
+
+
 def _unwritten_step(
     state: dict[str, object],
     root: Path,
@@ -408,11 +431,20 @@ def _unwritten_step(
 
     if excerpt_id is None:
         return _step(state, "studium_public_source_record", {}, _need_sources(root))
+    arguments: dict[str, object] = {"section": section["id"], "excerpts": [excerpt_id], "role": "explanation"}
+    reason = _unwritten_reason(section)
+    academic = _next_academic_section(root, section["id"])
+    if academic is not None:
+        arguments["subsection"] = academic["id"]
+        reason = (
+            f"Write the next unwritten section: {section['title']} > {academic['title']}. "
+            f"The book is incomplete while {academic['title']} has no paragraphs."
+        )
     return _step(
         state,
         "studium_paragraph_record",
-        {"section": section["id"], "excerpts": [excerpt_id], "role": "explanation"},
-        _named(root, section, _unwritten_reason(section)),
+        arguments,
+        _named(root, section, reason),
         blocked=blocked_sections(root),
     )
 
@@ -781,10 +813,18 @@ def _explanation_step(
             "Search open sources before writing. Cite a stored excerpt. "
             + _chapter()
         )
+    arguments: dict[str, object] = {"section": section["id"], "excerpts": [excerpt_id], "role": "explanation"}
+    academic = _next_academic_section(root, section["id"])
+    if academic is not None:
+        arguments["subsection"] = academic["id"]
+        reason = (
+            f"Write the explanation for {section['title']} > {academic['title']}. "
+            + reason.split(". ", 1)[-1]
+        )
     return _step(
         state,
         "studium_paragraph_record",
-        {"section": section["id"], "excerpts": [excerpt_id], "role": "explanation"},
+        arguments,
         _named(root, section, reason),
         blocked=blocked_sections(root),
     )
@@ -840,10 +880,14 @@ def _role_step(
     excerpt_id = _excerpt_for_section(root, section["id"])
     if excerpt_id is None:
         return _step(state, "studium_public_source_record", {}, _need_sources(root))
+    arguments: dict[str, object] = {"section": section["id"], "excerpts": [excerpt_id], "role": role}
+    academic = _next_academic_section(root, section["id"])
+    if academic is not None:
+        arguments["subsection"] = academic["id"]
     return _step(
         state,
         "studium_paragraph_record",
-        {"section": section["id"], "excerpts": [excerpt_id], "role": role},
+        arguments,
         _named(root, section, reason),
         blocked=blocked_sections(root),
     )
