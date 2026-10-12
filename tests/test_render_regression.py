@@ -610,6 +610,19 @@ class TestSymbolAndUnitTex:
         assert "mathrm" in result
         assert r"\(" not in result
 
+    def test_multi_char_greek_latin_spacing(self):
+        from studium.authoring.render import _symbol_tex
+
+        result = _symbol_tex("Δp")
+        assert result == r"\Delta p"
+        assert r"\Deltap" not in result
+
+    def test_greek_greek_spacing(self):
+        from studium.authoring.render import _symbol_tex
+
+        result = _symbol_tex("ρg")
+        assert result == r"\rho g"
+
 
 # ---------------------------------------------------------------------------
 # Integration: derivation steps with math content
