@@ -9,7 +9,7 @@ import re
 from contextvars import ContextVar
 from pathlib import Path
 
-from studium.authoring.academic_blueprint import current_academic_blueprint
+from studium.authoring.academic_blueprint import academic_concepts_for_chapter, current_academic_blueprint
 from studium.authoring.audit import (
     audited_paragraph_ids,
     explicit_gap_ids,
@@ -356,8 +356,39 @@ def _unfinished_step(
         gap = _shape_gap(state, root, section)
         if gap is not None:
             return gap
+        uncovered = _uncovered_concepts(root, section["id"])
+        if uncovered:
+            return _concept_step(state, root, section, uncovered)
         return _explanation_step(state, root, section)
     return None
+
+
+def _concept_step(
+    state: dict[str, object],
+    root: Path,
+    section: dict[str, str],
+    uncovered: list[str],
+) -> dict[str, object]:
+    """Direct the agent to write content covering uncovered planned concepts."""
+
+    excerpt_id = _excerpt_for_section(root, section["id"])
+    if excerpt_id is None:
+        return _step(state, "studium_public_source_record", {}, _need_sources(root))
+    listing = ", ".join(uncovered[:5])
+    more = f" and {len(uncovered) - 5} more" if len(uncovered) > 5 else ""
+    reason = (
+        f"Write an explanation paragraph for {section['id']} ({section['title']}) "
+        f"covering planned concepts: {listing}{more}. "
+        f"Pass the concept ids in the 'concepts' field of studium_paragraph_record. "
+        "Research from stored excerpts. Do not fabricate sources."
+    )
+    return _step(
+        state,
+        "studium_paragraph_record",
+        {"section": section["id"], "excerpts": [excerpt_id], "role": "explanation"},
+        _named(root, section, reason),
+        blocked=blocked_sections(root),
+    )
 
 
 def _missing_pieces(root: Path, section: dict[str, str]) -> list[str]:
@@ -381,6 +412,9 @@ def _missing_pieces(root: Path, section: dict[str, str]) -> list[str]:
         missing.append("worked problem")
     if not _has_autoficha(root, section_id):
         missing.append(self_check_word(_current_language()))
+    uncovered = _uncovered_concepts(root, section_id)
+    if uncovered:
+        missing.append(f"{len(uncovered)} uncovered concepts")
     return missing
 
 
@@ -949,6 +983,23 @@ def _role_step(
         _named(root, section, reason),
         blocked=blocked_sections(root),
     )
+
+
+def _uncovered_concepts(root: Path, section_id: str) -> list[str]:
+    """Planned concepts for this chapter not yet claimed by any paragraph."""
+
+    planned = academic_concepts_for_chapter(root, section_id)
+    if not planned:
+        return []
+    planned_ids = {str(c["id"]) for c in planned if isinstance(c.get("id"), str)}
+    covered: set[str] = set()
+    for record in supported_paragraphs(root):
+        if record.get("section") != section_id:
+            continue
+        concepts = record.get("concepts")
+        if isinstance(concepts, list):
+            covered.update(str(c) for c in concepts if isinstance(c, str))
+    return sorted(planned_ids - covered)
 
 
 def _is_written(root: Path, section_id: str) -> bool:
