@@ -526,3 +526,115 @@ class TestCrossReferenceLabels:
 
     def test_equation_label_present(self):
         assert r"\label{eq:eq-ideal-gas}" in self.tex
+
+
+# ---------------------------------------------------------------------------
+# Unit: symbol and unit TeX helpers
+# ---------------------------------------------------------------------------
+
+
+class TestSymbolAndUnitTex:
+    def test_greek_symbol_renders_math(self):
+        from studium.authoring.render import _symbol_tex
+
+        assert _symbol_tex("ρ") == r"\rho"
+        assert _symbol_tex("η") == r"\eta"
+
+    def test_ascii_symbol_through_sympy(self):
+        from studium.authoring.render import _symbol_tex
+
+        assert _symbol_tex("p") == "p"
+        assert _symbol_tex("p_0") == "p_{0}"
+        assert _symbol_tex("F_B") == "F_{B}"
+
+    def test_subscript_braces_preserved(self):
+        from studium.authoring.render import _symbol_tex
+
+        result = _symbol_tex("V_{desp}")
+        assert "desp" in result
+        assert r"\{" not in result
+
+    def test_unit_unicode_superscript(self):
+        from studium.authoring.render import _unit_tex
+
+        result = _unit_tex("kg/m³")
+        assert r"\(" not in result
+        assert "mathrm" in result
+
+    def test_unit_unicode_squared(self):
+        from studium.authoring.render import _unit_tex
+
+        result = _unit_tex("m/s²")
+        assert r"\(" not in result
+        assert "mathrm" in result
+
+    def test_unit_ascii_exponent(self):
+        from studium.authoring.render import _unit_tex
+
+        result = _unit_tex("kg/m^3")
+        assert "mathrm" in result
+        assert r"\(" not in result
+
+
+# ---------------------------------------------------------------------------
+# Integration: derivation steps with math content
+# ---------------------------------------------------------------------------
+
+
+class TestDerivationStepMath:
+    @pytest.fixture(autouse=True)
+    def _setup(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("urllib.request.urlopen", _explode)
+        session, root = _project(tmp_path)
+        dispatch(
+            "studium_blueprint_store",
+            {"sections": [{"id": "hydrostat", "title": "Hydrostatics"}]},
+            session=session,
+        )
+        excerpts = _excerpts(session)
+        for text in (
+            "Pressure increases linearly with depth.",
+            "The hydrostatic equation relates pressure to depth.",
+        ):
+            dispatch(
+                "studium_paragraph_record",
+                {"section": "hydrostat", "text": text, "excerpts": excerpts},
+                session=session,
+            )
+        dispatch(
+            "studium_derivation_record",
+            {
+                "section": "hydrostat",
+                "name": "Hydrostatic equation",
+                "equation": r"\(p = p_0 + \rho g h\)",
+                "equation_id": "eq-hydro",
+                "steps": [
+                    r"Start from \(dp/dz = -\rho g\)",
+                    r"Integrate: \(p - p_0 = -\rho g (z - z_0)\)",
+                    r"Define depth \(h = -(z - z_0)\)",
+                    r"Result: \(p = p_0 + \rho g h\)",
+                ],
+                "variables": {
+                    "ρ": {"meaning": "fluid density", "units": "kg/m³"},
+                    "p": {"meaning": "pressure at depth h", "units": "Pa"},
+                    "g": {"meaning": "gravitational acceleration", "units": "m/s²"},
+                },
+            },
+            session=session,
+        )
+        render_draft(root)
+        self.tex = (root / "latex" / "draft.tex").read_text(encoding="utf-8")
+
+    def test_explicit_math_in_steps_preserved(self):
+        assert r"\(p = p_0 + \rho g h\)" in self.tex or r"p = p_0 + \rho g h" in self.tex
+
+    def test_greek_symbol_in_variables_valid(self):
+        assert r"$\rho$" in self.tex
+        assert r"\mathrm{\(\rho\)}" not in self.tex
+
+    def test_unicode_unit_renders_cleanly(self):
+        assert r"\mathrm{\(^{3}\)}" not in self.tex
+        assert r"\mathrm{\(^{2}\)}" not in self.tex
+
+    def test_equation_label_present(self):
+        assert r"\label{eq:eq-hydro}" in self.tex

@@ -1661,14 +1661,49 @@ def _symbol_tex(name: str) -> str:
     try:
         return symbolic_latex(cleaned)
     except MathError:
-        return r"\mathrm{" + latex_escape(cleaned) + "}"
+        pass
+    mapped: list[str] = []
+    for ch in cleaned:
+        token = _MATH.get(ch)
+        if token is not None:
+            mapped.append(token)
+        elif ch == "{":
+            mapped.append("{")
+        elif ch == "}":
+            mapped.append("}")
+        elif ch == "_":
+            mapped.append("_")
+        elif ch == "^":
+            mapped.append("^")
+        else:
+            mapped.append(ch)
+    return "".join(mapped)
 
 
 def _unit_tex(unit: str) -> str:
+    normalized = _normalize_math_text(unit)
     try:
-        return unit_latex(unit)
+        return unit_latex(normalized)
     except MathError:
-        return r"\mathrm{" + latex_escape(unit.strip()) + "}"
+        return r"\mathrm{" + _normalize_math_text(unit.strip()) + "}"
+
+
+def _normalize_math_text(text: str) -> str:
+    """Replace Unicode super/subscripts and Greek with ASCII equivalents."""
+    _SUPER_MAP = {chr(0x2070 + i): str(i) for i in range(10)}
+    _SUPER_MAP.update({"¹": "1", "²": "2", "³": "3"})
+    _SUB_MAP = {chr(0x2080 + i): str(i) for i in range(10)}
+    out: list[str] = []
+    for ch in text:
+        if ch in _SUPER_MAP:
+            out.append("^" + _SUPER_MAP[ch])
+        elif ch in _SUB_MAP:
+            out.append("_" + _SUB_MAP[ch])
+        elif ch in _GREEK:
+            out.append("\\" + _GREEK[ch].lstrip("\\"))
+        else:
+            out.append(ch)
+    return "".join(out)
 
 
 def _display_math(tex: str) -> list[str]:
