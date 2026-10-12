@@ -800,5 +800,87 @@ def _until_tool(session, tool: str | None) -> dict[str, object]:
     raise AssertionError(f"book_next did not reach {tool}: {last.get('tool')}")
 
 
+def test_blueprint_depth_gate_blocks_shallow_blueprint(tmp_path, monkeypatch):
+    """book_next blocks writing when academic blueprint has <2 sections per chapter."""
+    monkeypatch.setattr("urllib.request.urlopen", _explode)
+    session = open_workspace(str(tmp_path))
+    dispatch(
+        "studium_project_create",
+        {"slug": "fluidos", "topic": "Mecánica de Fluidos"},
+        session=session,
+    )
+    sections = [{"id": f"ch-{i}", "title": f"Chapter {i}"} for i in range(1, 9)]
+    dispatch("studium_blueprint_store", {"sections": sections}, session=session)
+
+    # Store a shallow blueprint: 1 section, 1 concept per chapter
+    parts = [{
+        "id": "part-1",
+        "title": "Part 1",
+        "chapters": [{
+            "id": f"ch-{i}",
+            "title": f"Chapter {i}",
+            "sections": [{
+                "id": f"ch-{i}.s1",
+                "title": f"Section {i}.1",
+                "concepts": [{"id": f"ch-{i}.s1.c1", "title": f"Concept {i}.1"}],
+            }],
+        } for i in range(1, 9)],
+    }]
+    stored = dispatch("studium_academic_blueprint_store", {"parts": parts}, session=session)
+    assert stored["status"] == "recorded"
+
+    # Register sources so outline gate doesn't fire
+    for j in range(1, 13):
+        src = dispatch(
+            "studium_public_source_record",
+            {"title": f"Source {j}", "url": f"https://example.com/{j}", "text": "Open text"},
+            session=session,
+        )
+        src_id = src["candidate"]["id"]
+        dispatch("studium_public_source_open_supplement", {"id": src_id, "open_supplement": True, "open_licensed": True}, session=session)
+        dispatch("studium_excerpt_record", {"source_id": src_id, "url": f"https://example.com/{j}", "text": f"Excerpt {j}"}, session=session)
+
+    nxt = dispatch("studium_book_next", {}, session=session)
+    assert nxt["tool"] == "studium_academic_blueprint_store"
+    assert "shallow" in nxt["reason"].lower() or "fewer than" in nxt["reason"].lower()
+
+
+def test_blueprint_depth_gate_passes_deep_blueprint(tmp_path, monkeypatch):
+    """book_next does NOT block when blueprint has >=2 sections, >=3 concepts per chapter."""
+    monkeypatch.setattr("urllib.request.urlopen", _explode)
+    session = open_workspace(str(tmp_path))
+    dispatch(
+        "studium_project_create",
+        {"slug": "fluidos2", "topic": "Mecánica de Fluidos"},
+        session=session,
+    )
+    sections = [{"id": f"ch-{i}", "title": f"Chapter {i}"} for i in range(1, 9)]
+    dispatch("studium_blueprint_store", {"sections": sections}, session=session)
+
+    # Use scaffold which now generates 3 sections × 2 concepts = 6 concepts per chapter
+    result = dispatch(
+        "studium_academic_blueprint_scaffold",
+        {"profile_key": "UNDERGRADUATE"},
+        session=session,
+    )
+    assert result["status"] == "recorded"
+    assert result["concepts"] >= 3 * 8  # at least 3 concepts per chapter
+
+    # Register enough sources
+    for j in range(1, 13):
+        src = dispatch(
+            "studium_public_source_record",
+            {"title": f"Source {j}", "url": f"https://example.com/{j}", "text": "Open text"},
+            session=session,
+        )
+        src_id = src["candidate"]["id"]
+        dispatch("studium_public_source_open_supplement", {"id": src_id, "open_supplement": True, "open_licensed": True}, session=session)
+        dispatch("studium_excerpt_record", {"source_id": src_id, "url": f"https://example.com/{j}", "text": f"Excerpt {j}"}, session=session)
+
+    nxt = dispatch("studium_book_next", {}, session=session)
+    # Should NOT be blocked by blueprint depth — should proceed to writing
+    assert nxt["tool"] != "studium_academic_blueprint_store"
+
+
 def _explode(*_args, **_kwargs):
     raise AssertionError("must not fetch")

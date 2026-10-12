@@ -9,6 +9,7 @@ import re
 from contextvars import ContextVar
 from pathlib import Path
 
+from studium.authoring.academic_blueprint import current_academic_blueprint
 from studium.authoring.audit import (
     audited_paragraph_ids,
     explicit_gap_ids,
@@ -187,6 +188,9 @@ def _book_next(root: Path) -> dict[str, object]:
     outline = _outline_gate(state, root, sections)
     if outline is not None:
         return outline
+    depth_issue = _blueprint_depth_gate(state, root)
+    if depth_issue is not None:
+        return depth_issue
     quality = _chapter_gate(state, root, sections)
     if quality is not None:
         return quality
@@ -282,6 +286,9 @@ def _book_next(root: Path) -> dict[str, object]:
     outline = _outline_gate(state, root, sections)
     if outline is not None:
         return outline
+    depth_issue = _blueprint_depth_gate(state, root)
+    if depth_issue is not None:
+        return depth_issue
     quality = _chapter_gate(state, root, sections)
     if quality is not None:
         return quality
@@ -677,6 +684,101 @@ def _study_sections(root: Path) -> list[dict[str, str]]:
         {"id": "formula-sheet", "title": "Formula or concept sheet"},
         {"id": "source-audit", "title": "Source audit"},
     ]
+
+
+_MIN_SECTIONS_PER_CHAPTER = 2
+_MIN_CONCEPTS_PER_CHAPTER = 3
+
+
+def _blueprint_depth_gate(
+    state: dict[str, object],
+    root: Path,
+) -> dict[str, object] | None:
+    """Block writing when the academic blueprint is too shallow.
+
+    Detects chapters with too few sections or concepts and directs the agent
+    to expand the blueprint before writing content. This is qualitative
+    guidance, not a quantitative threshold on word count.
+    """
+
+    blueprint = current_academic_blueprint(root)
+    if blueprint is None:
+        return None
+
+    parts = blueprint.get("parts")
+    if not isinstance(parts, list):
+        return None
+
+    shallow_chapters: list[str] = []
+    few_concepts: list[str] = []
+    missing_exercises: list[str] = []
+
+    for part in parts:
+        if not isinstance(part, dict):
+            continue
+        for chapter in part.get("chapters", []):
+            if not isinstance(chapter, dict):
+                continue
+            ch_id = chapter.get("id", "?")
+            ch_title = chapter.get("title", ch_id)
+            sections = chapter.get("sections", [])
+            if not isinstance(sections, list):
+                sections = []
+
+            if len(sections) < _MIN_SECTIONS_PER_CHAPTER:
+                shallow_chapters.append(f"{ch_id} ({ch_title})")
+
+            concept_count = 0
+            has_exercises = False
+            for section in sections:
+                if not isinstance(section, dict):
+                    continue
+                for concept in section.get("concepts", []):
+                    if isinstance(concept, dict):
+                        concept_count += 1
+                        if concept.get("exercises"):
+                            has_exercises = True
+                for subsection in section.get("subsections", []):
+                    if isinstance(subsection, dict):
+                        for concept in subsection.get("concepts", []):
+                            if isinstance(concept, dict):
+                                concept_count += 1
+                                if concept.get("exercises"):
+                                    has_exercises = True
+
+            if concept_count < _MIN_CONCEPTS_PER_CHAPTER:
+                few_concepts.append(f"{ch_id} ({ch_title}): {concept_count} concepts")
+            if not has_exercises:
+                missing_exercises.append(ch_id)
+
+    if not shallow_chapters and not few_concepts:
+        return None
+
+    problems: list[str] = []
+    if shallow_chapters:
+        problems.append(
+            f"Chapters with fewer than {_MIN_SECTIONS_PER_CHAPTER} sections: "
+            + ", ".join(shallow_chapters)
+        )
+    if few_concepts:
+        problems.append(
+            f"Chapters with fewer than {_MIN_CONCEPTS_PER_CHAPTER} concepts: "
+            + ", ".join(few_concepts)
+        )
+    if missing_exercises:
+        problems.append(
+            "Chapters with no exercises planned: " + ", ".join(missing_exercises)
+        )
+
+    reason = (
+        "The academic blueprint is too shallow to produce a rigorous textbook. "
+        + " ".join(problems)
+        + ". Expand the blueprint with studium_academic_blueprint_store before writing content. "
+        "Each chapter needs at least 2 sections and 3 concepts with exercises planned. "
+        "Do not fabricate content — derive section and concept titles from the subject matter."
+    )
+
+    return _step(state, "studium_academic_blueprint_store", {}, reason)
 
 
 def _outline_gate(
