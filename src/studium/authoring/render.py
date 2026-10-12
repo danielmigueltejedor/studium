@@ -2141,7 +2141,9 @@ def _notation_lines(root: Path, copy: dict[str, str], language: BookLanguage) ->
     for symbol, entry in sorted(registry.items()):
         meaning = latex_escape(str(entry.get("meaning") or ""))
         units = _format_units(str(entry.get("units") or ""))
-        lines.append(rf"{render_text_run(symbol)} & {meaning} & {units} \\")
+        sym_tex = _symbol_tex(symbol)
+        sym_col = f"${sym_tex}$" if sym_tex else render_text_run(symbol)
+        lines.append(rf"{sym_col} & {meaning} & {units} \\")
     lines.extend([r"\end{tabular}", r"\end{center}"])
     return lines
 

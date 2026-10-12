@@ -340,6 +340,41 @@ class TestNotationTable:
 
 
 # ---------------------------------------------------------------------------
+# Regression: notation table subscript symbols
+# ---------------------------------------------------------------------------
+
+
+class TestNotationSubscriptSymbols:
+    @pytest.fixture(autouse=True)
+    def _setup(self, tmp_path, monkeypatch):
+        self.session, self.root = _full_setup(tmp_path, monkeypatch)
+        dispatch(
+            "studium_notation_record",
+            {"section": "presion", "symbol": "F_B", "meaning": "fuerza de empuje", "units": "N"},
+            session=self.session,
+        )
+        dispatch(
+            "studium_notation_record",
+            {"section": "presion", "symbol": "ρ", "meaning": "densidad del fluido", "units": "kg/m³"},
+            session=self.session,
+        )
+        render_draft(self.root)
+        self.tex = (self.root / "latex" / "draft.tex").read_text(encoding="utf-8")
+
+    def test_subscript_symbol_in_math_mode(self):
+        assert r"$F_{B}$" in self.tex
+
+    def test_subscript_not_escaped(self):
+        assert r"F\_B" not in self.tex
+
+    def test_greek_symbol_in_math_mode(self):
+        assert r"$\rho$" in self.tex
+
+    def test_greek_symbol_not_text_wrapped(self):
+        assert r"\mathrm{\(\rho\)}" not in self.tex
+
+
+# ---------------------------------------------------------------------------
 # Integration: bibliography
 # ---------------------------------------------------------------------------
 
