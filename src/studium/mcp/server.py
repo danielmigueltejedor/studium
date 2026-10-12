@@ -903,6 +903,8 @@ def _dispatch(session: McpSession, name: str, arguments: Mapping[str, object]) -
             subject=arguments.get("subject") if "subject" in arguments else None,
             profile_key=arguments.get("profile_key") if "profile_key" in arguments else None,
             chapters_per_part=arguments.get("chapters_per_part") if "chapters_per_part" in arguments else None,
+            sections_per_chapter=arguments.get("sections_per_chapter") if "sections_per_chapter" in arguments else None,
+            concepts_per_section=arguments.get("concepts_per_section") if "concepts_per_section" in arguments else None,
             actor=actor if isinstance(actor, dict) else None,
         )
     if name == "studium_academic_blueprint_store":

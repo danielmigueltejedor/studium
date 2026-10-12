@@ -63,12 +63,15 @@ def test_scaffold_chapters_have_sections_and_concepts(tmp_path, monkeypatch):
     assert chapter["id"] == "ch-1"
     assert chapter["title"] == "Chapter 1"
     sections = chapter["sections"]
-    assert len(sections) == 1
-    assert sections[0]["id"] == "ch-1.s1"
+    assert len(sections) == 3
+    assert sections[0]["id"] == "ch-1.fundamentos"
+    assert sections[1]["id"] == "ch-1.desarrollo"
+    assert sections[2]["id"] == "ch-1.aplicaciones"
     concepts = sections[0]["concepts"]
-    assert len(concepts) == 1
-    assert concepts[0]["id"] == "ch-1.c1"
+    assert len(concepts) == 2
+    assert concepts[0]["id"] == "ch-1.fundamentos.c1"
     assert concepts[0]["depth"] == "GRADUATE"
+    assert concepts[0]["exercises"] == 3
 
 
 def test_scaffold_custom_chapters_per_part(tmp_path, monkeypatch):
@@ -116,8 +119,9 @@ def test_scaffold_no_depth_when_no_profile(tmp_path, monkeypatch):
 
     result = dispatch("studium_academic_blueprint_scaffold", {}, session=session)
     assert result["status"] == "recorded"
-    concept = result["blueprint"]["parts"][0]["chapters"][0]["sections"][0]["concepts"][0]
-    assert "depth" not in concept
+    first_section = result["blueprint"]["parts"][0]["chapters"][0]["sections"][0]
+    assert "depth" not in first_section
+    assert "depth" not in first_section["concepts"][0]
 
 
 def test_scaffold_subject_stored(tmp_path, monkeypatch):
@@ -141,7 +145,73 @@ def test_scaffold_concept_count(tmp_path, monkeypatch):
 
     result = dispatch("studium_academic_blueprint_scaffold", {}, session=session)
     assert result["status"] == "recorded"
-    assert result["concepts"] == 10
+    # 10 chapters × 3 sections × 2 concepts = 60
+    assert result["concepts"] == 60
+
+
+def test_scaffold_custom_sections_per_chapter(tmp_path, monkeypatch):
+    monkeypatch.setattr("urllib.request.urlopen", _explode)
+    session = _project(tmp_path)
+    _flat_blueprint(session, n=2)
+
+    result = dispatch(
+        "studium_academic_blueprint_scaffold",
+        {"sections_per_chapter": 4, "concepts_per_section": 1},
+        session=session,
+    )
+    assert result["status"] == "recorded"
+    chapter = result["blueprint"]["parts"][0]["chapters"][0]
+    assert len(chapter["sections"]) == 4
+    assert chapter["sections"][3]["id"] == "ch-1.avanzado"
+    for sec in chapter["sections"]:
+        assert len(sec["concepts"]) == 1
+    # 2 chapters × 4 sections × 1 concept = 8
+    assert result["concepts"] == 8
+
+
+def test_scaffold_single_section_backward_compat(tmp_path, monkeypatch):
+    """sections_per_chapter=1 produces minimal scaffold like old behavior."""
+    monkeypatch.setattr("urllib.request.urlopen", _explode)
+    session = _project(tmp_path)
+    _flat_blueprint(session, n=3)
+
+    result = dispatch(
+        "studium_academic_blueprint_scaffold",
+        {"sections_per_chapter": 1, "concepts_per_section": 1},
+        session=session,
+    )
+    assert result["status"] == "recorded"
+    chapter = result["blueprint"]["parts"][0]["chapters"][0]
+    assert len(chapter["sections"]) == 1
+    assert len(chapter["sections"][0]["concepts"]) == 1
+    assert result["concepts"] == 3
+
+
+def test_scaffold_exercises_on_every_concept(tmp_path, monkeypatch):
+    monkeypatch.setattr("urllib.request.urlopen", _explode)
+    session = _project(tmp_path)
+    _flat_blueprint(session, n=2)
+
+    result = dispatch("studium_academic_blueprint_scaffold", {}, session=session)
+    assert result["status"] == "recorded"
+    for part in result["blueprint"]["parts"]:
+        for chapter in part["chapters"]:
+            for section in chapter["sections"]:
+                for concept in section["concepts"]:
+                    assert concept["exercises"] == 3, f"concept {concept['id']} missing exercises"
+
+
+def test_scaffold_concept_titles_derived_from_chapter(tmp_path, monkeypatch):
+    monkeypatch.setattr("urllib.request.urlopen", _explode)
+    session = _project(tmp_path)
+    sections = [{"id": "fluidos", "title": "Propiedades de los fluidos"}]
+    stored = dispatch("studium_blueprint_store", {"sections": sections}, session=session)
+    assert stored["status"] == "recorded"
+
+    result = dispatch("studium_academic_blueprint_scaffold", {}, session=session)
+    assert result["status"] == "recorded"
+    concept = result["blueprint"]["parts"][0]["chapters"][0]["sections"][0]["concepts"][0]
+    assert "Propiedades de los fluidos" in concept["title"]
 
 
 def test_source_coverage_requires_two_per_section(tmp_path, monkeypatch):
