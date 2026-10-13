@@ -836,6 +836,155 @@ class TestSubsectionRouting:
         assert sec_pos < sec_content_pos < subsec_pos
 
 
+class TestChapterBackMatterOnce:
+    """A chapter's derivation and problems render once, at the chapter's end.
+
+    The records are keyed by chapter, but a chapter with several academic
+    sections calls the renderer once per section. Before the fix the derivation,
+    the worked problem and the practice set repeated after every section and the
+    equation label was multiply defined.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _setup(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("urllib.request.urlopen", _explode)
+        self.session, self.root = _project(tmp_path)
+        dispatch(
+            "studium_blueprint_store",
+            {"sections": [{"id": "ch1", "title": "Chapter One"}]},
+            session=self.session,
+        )
+        dispatch(
+            "studium_academic_blueprint_store",
+            {
+                "profile_key": "ADVANCED_UNDERGRADUATE",
+                "subject": "Test",
+                "parts": [
+                    {
+                        "id": "p1",
+                        "title": "Part One",
+                        "chapters": [
+                            {
+                                "id": "ch1",
+                                "title": "Chapter One",
+                                "learning_objectives": ["lo"],
+                                "sections": [
+                                    {
+                                        "id": "ch1.sec1",
+                                        "title": "Sec One",
+                                        "concepts": [
+                                            {
+                                                "id": "c1",
+                                                "title": "C1",
+                                                "learning_objectives": ["lo1"],
+                                                "depth": "ADVANCED_UNDERGRADUATE",
+                                                "exercises": 1,
+                                            }
+                                        ],
+                                    },
+                                    {
+                                        "id": "ch1.sec2",
+                                        "title": "Sec Two",
+                                        "concepts": [
+                                            {
+                                                "id": "c2",
+                                                "title": "C2",
+                                                "learning_objectives": ["lo2"],
+                                                "depth": "ADVANCED_UNDERGRADUATE",
+                                                "exercises": 1,
+                                            }
+                                        ],
+                                    },
+                                ],
+                            }
+                        ],
+                    }
+                ],
+            },
+            session=self.session,
+        )
+        excerpts = _excerpts(self.session)
+        for subsection in ("ch1.sec1", "ch1.sec2"):
+            dispatch(
+                "studium_paragraph_record",
+                {
+                    "section": "ch1",
+                    "subsection": subsection,
+                    "text": f"Explicación almacenada para {subsection} con suficiente longitud.",
+                    "excerpts": excerpts,
+                },
+                session=self.session,
+            )
+        dispatch(
+            "studium_derivation_record",
+            {
+                "section": "ch1",
+                "name": "Ecuación de prueba",
+                "equation": r"\(p = \rho g h\)",
+                "equation_id": "eq-prueba",
+                "steps": ["Point of departure", "Integrate"],
+                "variables": {"p": {"meaning": "presión", "units": "Pa"}},
+            },
+            session=self.session,
+        )
+        from studium.authoring.computation import evaluate
+
+        expression = "2*3*4"
+        expected = f"{float(evaluate(expression)):.12g}"
+        dispatch(
+            "studium_computation_check",
+            {"expression": expression, "result": expected, "section": "ch1"},
+            session=self.session,
+        )
+        dispatch(
+            "studium_problem_record",
+            {
+                "section": "ch1",
+                "prompt": "Calcula el caso resuelto.",
+                "expected": expected,
+                "excerpts": excerpts,
+                "role": "worked",
+            },
+            session=self.session,
+        )
+        dispatch(
+            "studium_problem_record",
+            {
+                "section": "ch1",
+                "prompt": "Resuelve el caso de práctica.",
+                "expected": expected,
+                "excerpts": excerpts,
+                "role": "practice",
+                "difficulty": "INTERMEDIATE",
+                "learning_objectives": ["c1"],
+            },
+            session=self.session,
+        )
+        rendered = render_draft(self.root)
+        assert rendered["status"] in ("rendered", "compiler_missing", "incomplete"), rendered
+        self.tex = (self.root / "latex" / "draft.tex").read_text(encoding="utf-8")
+
+    def test_two_academic_sections_present(self):
+        assert r"\section{Sec One}" in self.tex
+        assert r"\section{Sec Two}" in self.tex
+
+    def test_derivation_box_appears_once(self):
+        assert self.tex.count("title={Derivaciones}") == 1
+
+    def test_equation_label_is_not_multiply_defined(self):
+        assert self.tex.count(r"\label{eq:eq-prueba}") == 1
+
+    def test_worked_and_practice_appear_once(self):
+        main = self.tex[: self.tex.index(r"\appendix")] if r"\appendix" in self.tex else self.tex
+        assert main.count("Calcula el caso resuelto.") == 1
+        assert main.count("Resuelve el caso de práctica.") == 1
+
+    def test_back_matter_comes_after_the_last_section(self):
+        sec_two = self.tex.index(r"\section{Sec Two}")
+        derivation = self.tex.index("title={Derivaciones}")
+        assert sec_two < derivation
+
+
 # ---------------------------------------------------------------------------
 # Integration: study plan with academic blueprint
 # ---------------------------------------------------------------------------

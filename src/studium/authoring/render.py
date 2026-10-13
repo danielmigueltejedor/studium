@@ -1549,7 +1549,9 @@ def _hierarchical_chapter(
     lines: list[str] = []
     figures_shown: set[str] = set()
     if intro_paragraphs:
-        lines.extend(_chapter_lines(root, chapter_id, intro_paragraphs, copy, language, figures_shown))
+        lines.extend(
+            _chapter_lines(root, chapter_id, intro_paragraphs, copy, language, figures_shown, chapter_boxes=False)
+        )
 
     for sec_id in section_ids:
         sec_paragraphs = by_subsection.get(sec_id, [])
@@ -1558,7 +1560,9 @@ def _hierarchical_chapter(
             continue
         lines.extend(["", r"\section{" + latex_escape(title) + "}"])
         if sec_paragraphs:
-            lines.extend(_chapter_lines(root, chapter_id, sec_paragraphs, copy, language, figures_shown))
+            lines.extend(
+                _chapter_lines(root, chapter_id, sec_paragraphs, copy, language, figures_shown, chapter_boxes=False)
+            )
         subsections = section_subsections.get(sec_id, [])
         for subsec in subsections:
             subsec_id = _str_field(subsec, "id")
@@ -1568,7 +1572,12 @@ def _hierarchical_chapter(
             subsec_paragraphs = by_subsection.get(subsec_id, [])
             if subsec_paragraphs:
                 lines.extend(["", r"\subsection{" + latex_escape(subsec_title) + "}"])
-                lines.extend(_chapter_lines(root, chapter_id, subsec_paragraphs, copy, language, figures_shown))
+                lines.extend(
+                    _chapter_lines(
+                        root, chapter_id, subsec_paragraphs, copy, language, figures_shown, chapter_boxes=False
+                    )
+                )
+    lines.extend(_chapter_back_matter(root, chapter_id, copy, language))
     return lines
 
 
@@ -1579,8 +1588,15 @@ def _chapter_lines(
     copy: dict[str, str],
     language: BookLanguage,
     figures_shown: set[str] | None = None,
+    chapter_boxes: bool = True,
 ) -> list[str]:
-    """Lead and explanation stay in the body. Only four kinds are boxes."""
+    """Lead and explanation stay in the body. Only four kinds are boxes.
+
+    ``chapter_boxes`` is False when the caller renders the chapter's derivation,
+    worked problem and practice set once at the end of the chapter instead of
+    after every academic section. Those records are keyed by chapter, so a
+    caller that renders several sections would otherwise repeat them.
+    """
 
     purpose: list[str] = []
     consejo: list[str] = []
@@ -1611,10 +1627,23 @@ def _chapter_lines(
     lines.extend(_box(copy["consejo"], _plain(consejo, figure_ref), "consejo"))
     for text in definitions:
         lines.extend(_box(copy["definition"], _plain([text], figure_ref), "definition"))
-    lines.extend(_derivation_box(root, section_id, language))
-    lines.extend(_worked_box(root, section_id, copy, language))
-    lines.extend(_exercise_box(root, section_id, language))
+    if chapter_boxes:
+        lines.extend(_chapter_back_matter(root, section_id, copy, language))
     lines.extend(_box(copy["self_check"], _plain(self_check, figure_ref), "self_check"))
+    return lines
+
+
+def _chapter_back_matter(root: Path, chapter_id: str, copy: dict[str, str], language: BookLanguage) -> list[str]:
+    """The chapter's derivation, worked problem and practice set, in order.
+
+    They are stored once per chapter, so they belong once at the end of the
+    chapter rather than once after each of its academic sections.
+    """
+
+    lines: list[str] = []
+    lines.extend(_derivation_box(root, chapter_id, language))
+    lines.extend(_worked_box(root, chapter_id, copy, language))
+    lines.extend(_exercise_box(root, chapter_id, language))
     return lines
 
 
