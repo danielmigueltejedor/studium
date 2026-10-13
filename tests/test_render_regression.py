@@ -59,10 +59,34 @@ def test_render_text_run_dollar_math():
     assert "Force is" in result
 
 
+def test_render_text_run_spanish_decimal_dollar_math():
+    # A digit-leading explicit span with braces is math, not currency:
+    # "$0{,}01$" must become \(0{,}01\), never \$0\{,\}01\$.
+    result = render_text_run("por debajo de $0{,}01$ del total")
+    assert r"\(0{,}01\)" in result
+    assert "\\$" not in result
+
+
 def test_render_text_run_escapes_special():
     result = render_text_run("100% done & ready")
     assert r"\%" in result
     assert r"\&" in result
+
+
+def test_render_text_run_groups_consecutive_unicode_superscripts():
+    # A run of Unicode superscripts must become one group: "s⁻¹" -> ^{ -1 },
+    # never "^{-}^{1}", which LaTeX rejects as a double superscript.
+    result = render_text_run("gradiente de 100 s⁻¹ constante")
+    assert "^{-1}" in result
+    assert "^{-}^{" not in result
+
+
+def test_render_text_run_ascii_subscript_with_unicode_superscript():
+    # "V_entrada²" mixes an ASCII subscript with a Unicode superscript and must
+    # stay inside a single formula: V_{entrada}^{2}, not "V_)" + "^{2}".
+    result = render_text_run("como ρ(V_entrada² - V_salida²)/2")
+    assert "_{entrada}" in result
+    assert "V_{entrada}^{2}" in result
 
 
 # ---------------------------------------------------------------------------
@@ -499,6 +523,31 @@ class TestAuditGrouping:
 # ---------------------------------------------------------------------------
 # Integration: hierarchical rendering with academic blueprint
 # ---------------------------------------------------------------------------
+
+
+def test_figure_lines_skips_figures_already_shown(monkeypatch, tmp_path):
+    # A chapter with academic sections calls _chapter_lines once per section,
+    # but its figures are stored per chapter. The shared ``shown`` set must stop
+    # the same drawing from being emitted again for every section.
+    from studium.authoring import render as render_mod
+
+    record = {
+        "id": "FIG-1",
+        "section": "ch1",
+        "kind": "tikz",
+        "source": r"\draw (0,0) -- (1,1);",
+        "caption": "A line.",
+    }
+    monkeypatch.setattr(render_mod, "figures_in_section", lambda root, section_id: [record])
+    monkeypatch.setattr(render_mod, "_checked_output", lambda root, item: tmp_path / "figure.pdf")
+
+    shown: set[str] = set()
+    first = render_mod._figure_lines(tmp_path, "ch1", {}, shown)
+    second = render_mod._figure_lines(tmp_path, "ch1", {}, shown)
+
+    assert first, "the first call must emit the figure"
+    assert second == [], "a figure already shown must not be emitted again"
+    assert shown == {"FIG-1"}
 
 
 class TestHierarchicalRendering:

@@ -626,13 +626,19 @@ def _match_explicit(text: str, index: int) -> tuple[int, int, str] | None:
 def _dollar_ok(inner: str) -> bool:
     if not inner.strip() or "\n" in inner or len(inner) > 300:
         return False
-    if inner.lstrip()[:1].isdigit() and "=" not in inner and "\\" not in inner:
+    if (
+        inner.lstrip()[:1].isdigit()
+        and "=" not in inner
+        and "\\" not in inner
+        and "{" not in inner
+        and "}" not in inner
+    ):
         return False
     if any(character in _MATH for character in inner) or re.search(r"[=^_\\]", inner):
         return True
     if re.search(r"[A-Za-z]{3,}", inner):
         return False
-    return re.fullmatch(r"[A-Za-z0-9 +\-*/().,^_]+", inner) is not None and bool(
+    return re.fullmatch(r"[A-Za-z0-9 +\-*/().,^_{}]+", inner) is not None and bool(
         re.search(r"[A-Za-z0-9]", inner)
     )
 
@@ -652,16 +658,51 @@ def _math_chars(text: str) -> str:
     return "".join(parts)
 
 
+def _script_content(mapping: dict[str, str], character: str) -> str:
+    """The LaTeX payload of a subscript/superscript character, e.g. "^{-}" -> "-"."""
+
+    return mapping[character][2:-1]
+
+
 def _formula_tex(span: str) -> str:
     parts: list[str] = []
-    for index, character in enumerate(span):
+    index = 0
+    length = len(span)
+    while index < length:
+        character = span[index]
+        if character in _SUPERSCRIPTS:
+            group: list[str] = []
+            while index < length and span[index] in _SUPERSCRIPTS:
+                group.append(_script_content(_SUPERSCRIPTS, span[index]))
+                index += 1
+            parts.append("^{" + "".join(group) + "}")
+            continue
+        if character in _SUBSCRIPTS:
+            group = []
+            while index < length and span[index] in _SUBSCRIPTS:
+                group.append(_script_content(_SUBSCRIPTS, span[index]))
+                index += 1
+            parts.append("_{" + "".join(group) + "}")
+            continue
+        if character in "_^":
+            index += 1
+            run_start = index
+            while index < length and span[index].isascii() and span[index].isalnum():
+                index += 1
+            payload = span[run_start:index]
+            if payload:
+                parts.append(character + "{" + payload + "}")
+            else:
+                parts.append("\\" + character)
+            continue
         mapped = _MATH.get(character)
         if mapped is not None:
             if mapped.startswith("\\") and mapped[-1:].isalpha():
-                following = span[index + 1] if index + 1 < len(span) else ""
+                following = span[index + 1] if index + 1 < length else ""
                 if following.isascii() and following.isalpha():
                     mapped += " "
             parts.append(mapped)
+            index += 1
             continue
         if character == "%":
             parts.append(r"\%")
@@ -673,6 +714,7 @@ def _formula_tex(span: str) -> str:
             parts.append(r"\backslash ")
         else:
             parts.append(character)
+        index += 1
     return "\\(" + "".join(parts) + "\\)"
 
 
@@ -787,6 +829,13 @@ def _tokenize(text: str) -> list[tuple[int, int, str]]:
         if character in _MATH:
             tokens.append((index, index + 1, "math"))
             index += 1
+            continue
+        if character in "_^" and index + 1 < len(text) and text[index + 1].isascii() and text[index + 1].isalnum():
+            end = index + 1
+            while end < len(text) and text[end].isascii() and text[end].isalnum():
+                end += 1
+            tokens.append((index, end, "math"))
+            index = end
             continue
         if character in _ASCII_OPERATORS:
             tokens.append((index, index + 1, "op"))
@@ -1465,8 +1514,9 @@ def _hierarchical_chapter(
             intro_paragraphs.append(paragraph)
 
     lines: list[str] = []
+    figures_shown: set[str] = set()
     if intro_paragraphs:
-        lines.extend(_chapter_lines(root, chapter_id, intro_paragraphs, copy, language))
+        lines.extend(_chapter_lines(root, chapter_id, intro_paragraphs, copy, language, figures_shown))
 
     for sec_id in section_ids:
         sec_paragraphs = by_subsection.get(sec_id, [])
@@ -1475,7 +1525,7 @@ def _hierarchical_chapter(
             continue
         lines.extend(["", r"\section{" + latex_escape(title) + "}"])
         if sec_paragraphs:
-            lines.extend(_chapter_lines(root, chapter_id, sec_paragraphs, copy, language))
+            lines.extend(_chapter_lines(root, chapter_id, sec_paragraphs, copy, language, figures_shown))
         subsections = section_subsections.get(sec_id, [])
         for subsec in subsections:
             subsec_id = _str_field(subsec, "id")
@@ -1485,7 +1535,7 @@ def _hierarchical_chapter(
             subsec_paragraphs = by_subsection.get(subsec_id, [])
             if subsec_paragraphs:
                 lines.extend(["", r"\subsection{" + latex_escape(subsec_title) + "}"])
-                lines.extend(_chapter_lines(root, chapter_id, subsec_paragraphs, copy, language))
+                lines.extend(_chapter_lines(root, chapter_id, subsec_paragraphs, copy, language, figures_shown))
     return lines
 
 
@@ -1495,6 +1545,7 @@ def _chapter_lines(
     paragraphs: list[dict[str, object]],
     copy: dict[str, str],
     language: BookLanguage,
+    figures_shown: set[str] | None = None,
 ) -> list[str]:
     """Lead and explanation stay in the body. Only four kinds are boxes."""
 
@@ -1522,7 +1573,7 @@ def _chapter_lines(
             body.append(raw)
     lines: list[str] = []
     lines.extend(_italic(purpose))
-    lines.extend(_body_lines(root, section_id, body, copy))
+    lines.extend(_body_lines(root, section_id, body, copy, figures_shown))
     lines.extend(_box(copy["consejo"], _plain(consejo), "consejo"))
     for text in definitions:
         lines.extend(_box(copy["definition"], _plain([text]), "definition"))
@@ -1533,7 +1584,13 @@ def _chapter_lines(
     return lines
 
 
-def _body_lines(root: Path, section_id: str, body: list[str], copy: dict[str, str]) -> list[str]:
+def _body_lines(
+    root: Path,
+    section_id: str,
+    body: list[str],
+    copy: dict[str, str],
+    figures_shown: set[str] | None = None,
+) -> list[str]:
     """Consecutive explanation paragraphs are one body. A new section uses the paragraph's own title."""
 
     lines: list[str] = []
@@ -1544,10 +1601,10 @@ def _body_lines(root: Path, section_id: str, body: list[str], copy: dict[str, st
             continue
         lines.extend(_plain([value]))
         if not placed:
-            lines.extend(_figure_lines(root, section_id, copy))
+            lines.extend(_figure_lines(root, section_id, copy, figures_shown))
             placed = True
     if not placed:
-        lines.extend(_figure_lines(root, section_id, copy))
+        lines.extend(_figure_lines(root, section_id, copy, figures_shown))
     return lines
 
 
@@ -2096,14 +2153,30 @@ def _exercise_box(root: Path, section_id: str, language: BookLanguage) -> list[s
     return _box(label, body, "exercise")
 
 
-def _figure_lines(root: Path, section_id: str, _copy: dict[str, str]) -> list[str]:
-    """Checked drawings inline. No float, so a short drawing does not take a page."""
+def _figure_lines(
+    root: Path,
+    section_id: str,
+    _copy: dict[str, str],
+    shown: set[str] | None = None,
+) -> list[str]:
+    """Checked drawings inline. No float, so a short drawing does not take a page.
+
+    ``shown`` carries the figure ids already emitted for this chapter. A chapter
+    with academic sections calls :func:`_chapter_lines` once per section, but its
+    figures are stored per chapter, so without this set every section would
+    repeat the same drawings.
+    """
 
     lines: list[str] = []
     for record in figures_in_section(root, section_id):
+        identifier = record.get("id")
+        if shown is not None and isinstance(identifier, str) and identifier in shown:
+            continue
         output = _checked_output(root, record)
         if output is None:
             continue
+        if shown is not None and isinstance(identifier, str):
+            shown.add(identifier)
         if record.get("kind") == "tikz" and isinstance(record.get("source"), str):
             body = "\n".join(
                 [
