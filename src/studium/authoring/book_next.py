@@ -28,7 +28,7 @@ from studium.authoring.blueprint import current_sections
 from studium.authoring.computation import list_computations
 from studium.authoring.derivations import derivations_for_section
 from studium.authoring.excerpts import excerpts_by_id
-from studium.authoring.figures import figure_reference_map, unresolved_figure_references
+from studium.authoring.figures import figure_reference_map, uncited_figures, unresolved_figure_references
 from studium.authoring.languages import (
     BookLanguage,
     active_language,
@@ -558,6 +558,20 @@ def _unwritten_step(
     )
 
 
+def _render_reason(root: Path) -> str:
+    """The render step's message, naming any checked figure that no prose cites."""
+
+    reason = "Render the DRAFT once. Do not stop mid-book for a preview. Do not request release."
+    uncited = uncited_figures(root)
+    if uncited:
+        keys = sorted(str(record.get("key") or record.get("id")) for record in uncited)
+        reason += (
+            f" {len(uncited)} checked figure(s) have no reference from the prose ({', '.join(keys)}); "
+            "cite each with a {{fig:key}} marker from a paragraph, or remove the figure."
+        )
+    return reason
+
+
 def _render_step(
     state: dict[str, object],
     root: Path,
@@ -572,7 +586,7 @@ def _render_step(
         state,
         "studium_render",
         {},
-        "Render the DRAFT once. Do not stop mid-book for a preview. Do not request release.",
+        _render_reason(root),
         blocked=blocked_sections(root),
     )
 

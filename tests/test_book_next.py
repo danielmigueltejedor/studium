@@ -610,6 +610,33 @@ def test_contract_complete_book_may_render_once_and_stays_unreleased(tmp_path, m
     assert status["state"] != "RELEASED"
 
 
+def test_render_reason_names_uncited_figures(tmp_path, monkeypatch):
+    """A checked figure that no prose cites is named on the render step.
+
+    The MCP track shipped ten checked figures that no paragraph referenced; the
+    only warning was in the final quality report. The render step now says so
+    before the draft is rendered.
+    """
+
+    from studium.authoring import book_next as bn
+
+    monkeypatch.setattr(bn, "uncited_figures", lambda root: [{"id": "FIG-0001", "key": "flujo"}])
+    reason = bn._render_reason(tmp_path)
+    assert "1 checked figure(s)" in reason
+    assert "flujo" in reason
+    assert "{{fig:key}}" in reason
+    assert "Do not request release." in reason
+
+
+def test_render_reason_is_plain_without_uncited_figures(tmp_path, monkeypatch):
+    from studium.authoring import book_next as bn
+
+    monkeypatch.setattr(bn, "uncited_figures", lambda root: [])
+    assert bn._render_reason(tmp_path) == (
+        "Render the DRAFT once. Do not stop mid-book for a preview. Do not request release."
+    )
+
+
 def _assert_writes_the_chapter(nxt: dict[str, object], title: str) -> None:
     assert nxt["tool"] == "studium_paragraph_record"
     assert nxt["tool"] != "studium_render"
