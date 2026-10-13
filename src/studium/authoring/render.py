@@ -1663,7 +1663,7 @@ def _symbol_tex(name: str) -> str:
     except MathError:
         pass
     mapped: list[str] = []
-    for i, ch in enumerate(cleaned):
+    for ch in cleaned:
         token = _MATH.get(ch)
         if token is not None:
             if mapped and mapped[-1].startswith("\\") and mapped[-1][-1].isalpha() and (token[0].isalpha() or token.startswith("\\")):
