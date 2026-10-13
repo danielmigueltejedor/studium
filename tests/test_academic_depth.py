@@ -196,6 +196,8 @@ def test_depth_plan_uses_the_scope_and_stores_the_plan(tmp_path, monkeypatch):
     assert planned["source"] == "academic_blueprint"
     assert planned["academic_depth"]["profile"] == "ADVANCED_UNDERGRADUATE"
     assert planned["length"]["estimate"] > 0
+    assert planned["curriculum"]["figures"] > 0
+    assert all(chapter["figures"] >= 1 for chapter in planned["chapters"])
     assert planned["validation"]
 
     status = dispatch("studium_depth_plan_status", {}, session=session)
@@ -409,6 +411,66 @@ def test_expansion_completeness_and_consistency_reports(tmp_path, monkeypatch):
 
     unknown = dispatch("studium_expansion_plan", {"section": "no-existe"}, session=session)
     assert unknown["status"] == "expansion.section_unknown"
+
+
+def test_depth_plan_declares_a_figure_target_for_every_chapter(tmp_path, monkeypatch):
+    monkeypatch.setattr("urllib.request.urlopen", _explode)
+    session, root = _project(tmp_path)
+    _blueprint(session)
+    _academic(session, concepts=("presion-estatica", "manometria"))
+
+    planned = dispatch("studium_depth_plan", {"academic_depth": "ADVANCED_UNDERGRADUATE"}, session=session)
+    assert planned["status"] == "planned", planned
+    assert planned["curriculum"]["figures"] > 0
+    assert planned["curriculum"]["figures"] == sum(chapter["figures"] for chapter in planned["chapters"])
+    assert all(chapter["figures"] >= 1 for chapter in planned["chapters"])
+    assert planned["length"]["breakdown"]["figures"] > 0
+
+    from studium.authoring.depth.planner import planned_figures_for_chapter
+
+    assert planned_figures_for_chapter(root, "hidrostatica") == planned["chapters"][0]["figures"]
+    assert planned_figures_for_chapter(root, "no-existe") == 0
+
+
+def test_a_stem_chapter_needs_a_checked_figure(tmp_path, monkeypatch):
+    monkeypatch.setattr("urllib.request.urlopen", _explode)
+    session, _root = _project(tmp_path)
+    _blueprint(session)
+    _academic(session, concepts=("presion-estatica", "manometria"))
+    excerpts = _excerpts(session)
+
+    def figures_check():
+        report = dispatch("studium_section_completeness", {"section": "hidrostatica"}, session=session)
+        checks = {check["id"]: check for check in report["sections"][0]["checks"]}
+        return checks["figures_checked"]
+
+    # A figure is an educational component: its absence is a real gap, not "not applicable".
+    assert figures_check()["applies"] is True
+    assert figures_check()["met"] is False
+
+    png = (
+        "89504e470d0a1a0a0000000d49484452000000010000000108000000003a7e9b55"
+        "0000000a49444154789c63f80f0001010100b138f6140000000049454e44ae426082"
+    )
+    plot = "import pathlib\n" f'pathlib.Path("figure.png").write_bytes(bytes.fromhex("{png}"))\n'
+    recorded = dispatch(
+        "studium_figure_record",
+        {
+            "section": "hidrostatica",
+            "caption": "A control volume drawn around a fluid element.",
+            "kind": "python",
+            "source": plot,
+            "excerpts": [excerpts[0]],
+        },
+        session=session,
+    )
+    assert recorded["status"] == "recorded", recorded
+    # Recorded but not yet re-run: the drawing still does not count.
+    assert figures_check()["met"] is False
+
+    checked = dispatch("studium_figure_check", {"id": recorded["figure"]["id"]}, session=session)
+    assert checked["status"] == "checked", checked
+    assert figures_check()["met"] is True
 
 
 def test_resume_packet_and_quality_report_are_honest(tmp_path, monkeypatch):

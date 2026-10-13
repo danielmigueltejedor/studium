@@ -68,6 +68,7 @@ def quality_report(root: Path) -> dict[str, object]:
     coverage = source_coverage(root)
     consistency = consistency_report(root)
     plan = depth_plan_status(root)
+    figures_planned = _planned_figures(plan)
 
     limitations: list[str] = []
     limitations.append(
@@ -90,6 +91,10 @@ def quality_report(root: Path) -> dict[str, object]:
     ]
     if unverified:
         limitations.append(f"{len(unverified)} derivations carry no deterministic check result")
+    if figures_planned and len(figures_checked) < figures_planned:
+        limitations.append(
+            f"{len(figures_checked)} of {figures_planned} planned figures are recorded and checked"
+        )
 
     return {
         "status": "ok",
@@ -117,6 +122,7 @@ def quality_report(root: Path) -> dict[str, object]:
             "derivations": len(derivations),
             "figures": len(figures),
             "figures_checked": len(figures_checked),
+            "figures_planned": figures_planned,
             "notation_entries": len(fold_by_id(root / NOTATION)),
             "notation_symbols": len(notation_registry(root)),
             "terminology_entries": len(fold_by_id(root / TERMINOLOGY)),
@@ -163,6 +169,24 @@ def _section_coverage(
         "academic_sections_total": total_academic_sections,
         "academic_sections_covered": covered_academic_sections,
     }
+
+
+def _planned_figures(plan: dict[str, object]) -> int:
+    """Total figure target the stored depth plan declares, or 0 without a plan."""
+
+    inner = plan.get("plan")
+    if not isinstance(inner, dict):
+        return 0
+    chapters = inner.get("chapters")
+    if not isinstance(chapters, list):
+        return 0
+    total = 0
+    for chapter in chapters:
+        if isinstance(chapter, dict):
+            value = chapter.get("figures")
+            if isinstance(value, int) and not isinstance(value, bool):
+                total += value
+    return total
 
 
 def _statuses(derivations: list[dict[str, object]], computations: list[dict[str, object]], problems: list[dict[str, object]]) -> list[str]:
