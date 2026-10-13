@@ -444,6 +444,90 @@ class TestExercisesAndProblems:
 
 
 # ---------------------------------------------------------------------------
+# Integration: the solutions appendix is a manual, not a list of raw floats
+# ---------------------------------------------------------------------------
+
+
+def _solutions_setup(tmp_path, monkeypatch):
+    """A worked problem and a practice problem that carry a stored solution."""
+
+    from studium.authoring.excerpts import excerpts_by_id
+
+    session, root = _full_setup(tmp_path, monkeypatch)
+    excerpts = list(excerpts_by_id(root))[:2]
+    dispatch(
+        "studium_problem_record",
+        {
+            "section": "presion",
+            "prompt": "Explica el método y calcula la presión a 4.905 m.",
+            "expected": "48118.05",
+            "excerpts": excerpts,
+            "role": "practice",
+            "difficulty": "INTERMEDIATE",
+            "learning_objectives": ["pressure"],
+            "solution": {
+                "given": [{"symbol": "h", "value": "4.905", "unit": "m", "meaning": "profundidad"}],
+                "unknown": "presión manométrica en el fondo",
+                "model": [{"name": "Hidrostática", "latex": r"p = \rho g h"}],
+                "assumptions": ["el fluido está en reposo"],
+                "steps": [{"text": "Se aplica la ecuación fundamental.", "equation": r"p = \rho g h"}],
+                "result": r"p = 4{,}81\times10^{4}\ \mathrm{Pa}",
+                "interpretation": "La presión crece de forma lineal con la profundidad.",
+            },
+        },
+        session=session,
+    )
+    dispatch(
+        "studium_problem_record",
+        {
+            "section": "presion",
+            "prompt": "Caso resuelto cuya respuesta está tipografiada.",
+            "expected": "5.0",
+            "excerpts": excerpts,
+            "role": "worked",
+            "solution": {
+                "given": [{"symbol": "p", "value": "5.0", "unit": "Pa", "meaning": "presión"}],
+                "unknown": "comprobación del resultado",
+                "model": [{"name": "Modelo de prueba", "latex": r"p = 5"}],
+                "steps": [{"text": "Se lee el resultado.", "equation": r"p = 5"}],
+                "result": r"p = 5{,}0\ \mathrm{Pa}",
+            },
+        },
+        session=session,
+    )
+    return session, root
+
+
+class TestSolutionsAppendix:
+    """A practice problem with a stored solution renders the full solution."""
+
+    @pytest.fixture(autouse=True)
+    def _setup(self, tmp_path, monkeypatch):
+        self.session, self.root = _solutions_setup(tmp_path, monkeypatch)
+        render_draft(self.root)
+        self.tex = (self.root / "latex" / "draft.tex").read_text(encoding="utf-8")
+
+    def test_practice_solution_rendered(self):
+        # The structured solution body, not just the prompt of the exercise.
+        assert r"\noindent\textbf{Datos}" in self.tex
+        assert r"\noindent\textbf{Modelo físico}" in self.tex
+
+    def test_practice_solution_result_is_typeset(self):
+        # The author's typeset result reaches the appendix.
+        assert r"4{,}81\times10^{4}" in self.tex
+
+    def test_worked_appendix_answer_is_typeset(self):
+        # A worked problem with a structured solution prints its typeset result
+        # instead of a raw machine value.
+        assert r"5{,}0\ \mathrm{Pa}" in self.tex
+
+    def test_problem_without_solution_keeps_bare_answer(self):
+        # Backwards compatibility: a problem with no structured solution still
+        # prints its replayed expected value.
+        assert "96236.1" in self.tex
+
+
+# ---------------------------------------------------------------------------
 # Integration: references (no PAR- ids leak into output)
 # ---------------------------------------------------------------------------
 

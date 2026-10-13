@@ -2525,12 +2525,30 @@ def _solution_lines(root: Path, copy: dict[str, str], language: BookLanguage) ->
             solved_practice.add(identifier)
             number = numbering.get(identifier, 0)
             lines.extend(["", r"\noindent\textbf{" + latex_escape(f"{exercise_label} {number}") + "}"])
+        solution = record.get("solution")
+        if is_practice and isinstance(solution, dict) and solution:
+            # A practice problem with a stored solution gets the same full
+            # engineering solution the worked problem does, so the appendix is a
+            # real solutions manual instead of a bare answer list.
+            lines.extend(_solution_body(record, solution, copy, language))
+            continue
         lines.extend(["", *emit_prose(prompt)])
-        expected = _str_field(record, "expected")
-        if expected.strip() and witnessed:
-            lines.extend(
-                ["", r"\noindent\textbf{" + latex_escape(copy["respuesta"]) + "} " + latex_escape(expected.strip())]
-            )
+        if witnessed:
+            result = solution.get("result") if isinstance(solution, dict) else None
+            if isinstance(result, str) and result.strip():
+                # A problem with a structured solution already typesets its
+                # answer; reuse it so the appendix never prints a raw float.
+                lines.extend(["", r"\noindent\textbf{" + latex_escape(copy["respuesta"]) + "}"])
+                lines.extend(_display_math(result))
+            else:
+                expected = _str_field(record, "expected")
+                if expected.strip():
+                    lines.extend(
+                        [
+                            "",
+                            r"\noindent\textbf{" + latex_escape(copy["respuesta"]) + "} " + latex_escape(expected.strip()),
+                        ]
+                    )
     for record in fold_by_id(root / COMPUTATIONS):
         if record.get("status") != "replayed" or record.get("correct") is not True:
             continue
