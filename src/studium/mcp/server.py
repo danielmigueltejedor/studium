@@ -755,6 +755,7 @@ def _dispatch(session: McpSession, name: str, arguments: Mapping[str, object]) -
             source=arguments.get("source") if "source" in arguments else None,
             kind=arguments.get("kind") if "kind" in arguments else None,
             excerpts=arguments.get("excerpts") if "excerpts" in arguments else None,
+            key=arguments.get("key") if "key" in arguments else None,
             actor=actor if isinstance(actor, dict) else None,
         )
     if name == "studium_figure_check":

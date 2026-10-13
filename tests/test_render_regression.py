@@ -1031,3 +1031,206 @@ class TestDerivationStepMath:
 
     def test_equation_label_present(self):
         assert r"\label{eq:eq-hydro}" in self.tex
+
+
+# ---------------------------------------------------------------------------
+# Unit: figure numbering and in-text references
+# ---------------------------------------------------------------------------
+
+
+def test_figure_caption_prefix_numbers_and_labels():
+    from studium.authoring.render import _figure_caption_prefix
+
+    prefix = _figure_caption_prefix({"id": "FIG-3", "key": "flujo"}, {"figure_ref": "figura"})
+    assert r"\refstepcounter{studiumfigure}" in prefix
+    assert r"\label{fig:flujo}" in prefix
+    assert r"Figura~\thestudiumfigure." in prefix
+
+
+def test_figure_caption_prefix_falls_back_to_the_id():
+    from studium.authoring.render import _figure_caption_prefix
+
+    prefix = _figure_caption_prefix({"id": "FIG-3"}, {"figure_ref": "figura"})
+    assert r"\label{fig:fig-3}" in prefix
+
+
+def test_figure_caption_prefix_speaks_the_book_language():
+    from studium.authoring.render import _figure_caption_prefix
+
+    prefix = _figure_caption_prefix({"id": "FIG-1", "key": "x"}, {"figure_ref": "Abbildung"})
+    assert "Abbildung~" in prefix
+
+
+def test_figure_caption_prefix_empty_without_key_or_id():
+    from studium.authoring.render import _figure_caption_prefix
+
+    assert _figure_caption_prefix({}, {"figure_ref": "figura"}) == ""
+
+
+def test_emit_prose_resolves_figure_reference():
+    lines = emit_prose("Como muestra la {{fig:flujo}}, la velocidad cae.", figure_ref="figura")
+    joined = "\n".join(lines)
+    assert r"figura~\ref{fig:flujo}" in joined
+    assert "{{fig:" not in joined
+
+
+def test_emit_prose_leaves_marker_literal_without_label():
+    lines = emit_prose("Ver {{fig:flujo}}.")
+    joined = "\n".join(lines)
+    assert r"\{\{" in joined
+    assert r"\ref" not in joined
+
+
+def test_figure_reference_key_is_lowercased_for_the_label():
+    from studium.authoring.render import _figure_label_key
+
+    assert _figure_label_key("Flujo-Tuberia") == "flujo-tuberia"
+    assert _figure_label_key("FIG-0001") == "fig-0001"
+
+
+# ---------------------------------------------------------------------------
+# Integration: figure keys, unresolved references, uncited figures
+# ---------------------------------------------------------------------------
+
+
+def _figure_project(tmp_path, monkeypatch):
+    monkeypatch.setattr("urllib.request.urlopen", _explode)
+    session, root = _project(tmp_path)
+    dispatch(
+        "studium_blueprint_store",
+        {"sections": [{"id": "ch", "title": "Chapter"}]},
+        session=session,
+    )
+    excerpts = _excerpts(session)
+    dispatch(
+        "studium_paragraph_record",
+        {
+            "section": "ch",
+            "text": "Como se ve en la {{fig:flujo}}, la presión sube con la profundidad.",
+            "excerpts": excerpts,
+        },
+        session=session,
+    )
+    return session, root, excerpts
+
+
+class TestFigureReferences:
+    def test_a_key_is_stored_and_reported(self, tmp_path, monkeypatch):
+        session, _root, excerpts = _figure_project(tmp_path, monkeypatch)
+        created = dispatch(
+            "studium_figure_record",
+            {
+                "section": "ch",
+                "caption": "Perfil de presión.",
+                "kind": "tikz",
+                "source": r"\draw (0,0) -- (1,1);",
+                "excerpts": excerpts,
+                "key": "flujo",
+            },
+            session=session,
+        )
+        assert created["status"] == "recorded", created
+        assert created["figure"]["key"] == "flujo"
+
+    def test_invalid_key_is_rejected(self, tmp_path, monkeypatch):
+        session, _root, excerpts = _figure_project(tmp_path, monkeypatch)
+        bad = dispatch(
+            "studium_figure_record",
+            {
+                "section": "ch",
+                "caption": "Perfil.",
+                "kind": "tikz",
+                "source": r"\draw (0,0) -- (1,1);",
+                "excerpts": excerpts,
+                "key": "Not A Slug",
+            },
+            session=session,
+        )
+        assert bad["status"] == "figure.key_invalid"
+
+    def test_duplicate_key_is_rejected(self, tmp_path, monkeypatch):
+        session, _root, excerpts = _figure_project(tmp_path, monkeypatch)
+        first = dispatch(
+            "studium_figure_record",
+            {"section": "ch", "caption": "A.", "kind": "tikz", "source": r"\draw (0,0)--(1,1);", "excerpts": excerpts, "key": "flujo"},
+            session=session,
+        )
+        assert first["status"] == "recorded", first
+        second = dispatch(
+            "studium_figure_record",
+            {"section": "ch", "caption": "B.", "kind": "tikz", "source": r"\draw (0,0)--(2,2);", "excerpts": excerpts, "key": "flujo"},
+            session=session,
+        )
+        assert second["status"] == "figure.key_taken"
+
+    def test_missing_reference_is_reported(self, tmp_path, monkeypatch):
+        from studium.authoring.figures import unresolved_figure_references
+
+        _session, root, _ = _figure_project(tmp_path, monkeypatch)
+        items = unresolved_figure_references(root)
+        assert [item["key"] for item in items] == ["flujo"]
+        assert items[0]["reason"] == "missing"
+
+    def test_unchecked_reference_is_reported(self, tmp_path, monkeypatch):
+        from studium.authoring.figures import unresolved_figure_references
+
+        session, root, excerpts = _figure_project(tmp_path, monkeypatch)
+        dispatch(
+            "studium_figure_record",
+            {"section": "ch", "caption": "Perfil.", "kind": "tikz", "source": r"\draw (0,0)--(1,1);", "excerpts": excerpts, "key": "flujo"},
+            session=session,
+        )
+        items = unresolved_figure_references(root)
+        assert [item["reason"] for item in items] == ["unchecked"]
+
+    def test_reference_resolves_after_record_with_key(self, tmp_path, monkeypatch):
+        from studium.authoring.figures import figure_reference_map, referenced_figure_keys
+
+        session, root, excerpts = _figure_project(tmp_path, monkeypatch)
+        dispatch(
+            "studium_figure_record",
+            {"section": "ch", "caption": "Perfil.", "kind": "tikz", "source": r"\draw (0,0)--(1,1);", "excerpts": excerpts, "key": "flujo"},
+            session=session,
+        )
+        assert referenced_figure_keys(root) == ["flujo"]
+        assert "flujo" in figure_reference_map(root)
+
+
+class TestFigureRendering:
+    """The rendered LaTeX numbers the figure and links the reference to it."""
+
+    @pytest.fixture(autouse=True)
+    def _setup(self, tmp_path, monkeypatch):
+        from studium.authoring import render as render_mod
+
+        self.session, self.root, excerpts = _figure_project(tmp_path, monkeypatch)
+        dispatch(
+            "studium_figure_record",
+            {
+                "section": "ch",
+                "caption": "Perfil de presión con la profundidad.",
+                "kind": "tikz",
+                "source": r"\draw (0,0) -- (2,2);",
+                "excerpts": excerpts,
+                "key": "flujo",
+            },
+            session=self.session,
+        )
+        # Force the drawing to count as rendered without invoking pdflatex.
+        monkeypatch.setattr(render_mod, "_checked_output", lambda root, record: "figures/FIG-x/figure.pdf")
+        rendered = render_draft(self.root)
+        assert rendered["status"] in ("rendered", "compiler_missing", "incomplete"), rendered
+        self.tex = (self.root / "latex" / "draft.tex").read_text(encoding="utf-8")
+
+    def test_counter_declared_in_preamble(self):
+        assert r"\newcounter{studiumfigure}" in self.tex
+
+    def test_figure_label_uses_the_stable_key(self):
+        assert r"\label{fig:flujo}" in self.tex
+
+    def test_prose_reference_is_numbered_by_latex(self):
+        assert r"figura~\ref{fig:flujo}" in self.tex
+
+    def test_caption_carries_the_localized_number(self):
+        assert r"Figura~\thestudiumfigure." in self.tex
+

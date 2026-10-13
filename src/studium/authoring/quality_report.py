@@ -19,6 +19,7 @@ from studium.authoring.contradictions import open_contradictions
 from studium.authoring.coverage import source_coverage
 from studium.authoring.depth.planner import depth_plan_status
 from studium.authoring.excerpts import excerpts_by_id
+from studium.authoring.figures import referenced_figure_keys, uncited_figures, unresolved_figure_references
 from studium.authoring.notation import notation_registry
 from studium.authoring.paragraphs import supported_paragraphs
 from studium.authoring.problems import problem_result_current
@@ -69,6 +70,9 @@ def quality_report(root: Path) -> dict[str, object]:
     consistency = consistency_report(root)
     plan = depth_plan_status(root)
     figures_planned = _planned_figures(plan)
+    figure_references = referenced_figure_keys(root)
+    uncited = uncited_figures(root)
+    unresolved = unresolved_figure_references(root)
 
     limitations: list[str] = []
     limitations.append(
@@ -95,6 +99,12 @@ def quality_report(root: Path) -> dict[str, object]:
         limitations.append(
             f"{len(figures_checked)} of {figures_planned} planned figures are recorded and checked"
         )
+    if unresolved:
+        limitations.append(
+            f"{len(unresolved)} in-text figure references do not resolve to a checked figure"
+        )
+    if uncited:
+        limitations.append(f"{len(uncited)} checked figures are not referenced from the prose")
 
     return {
         "status": "ok",
@@ -123,6 +133,8 @@ def quality_report(root: Path) -> dict[str, object]:
             "figures": len(figures),
             "figures_checked": len(figures_checked),
             "figures_planned": figures_planned,
+            "figure_references": len(figure_references),
+            "figures_uncited": len(uncited),
             "notation_entries": len(fold_by_id(root / NOTATION)),
             "notation_symbols": len(notation_registry(root)),
             "terminology_entries": len(fold_by_id(root / TERMINOLOGY)),

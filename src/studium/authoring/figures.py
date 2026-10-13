@@ -8,6 +8,7 @@ two excerpts or a replayed computation.
 
 import hashlib
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -26,6 +27,12 @@ _MAX_SOURCE = 100_000
 _MAX_EXCERPTS = 40
 _TIMEOUT = 20
 _KINDS = frozenset({"tikz", "python"})
+# A stable, author-chosen figure key. Lowercase slug so a reference is easy to
+# type and the LaTeX label is predictable: ``{{fig:flujo-tuberia}}``.
+_FIGURE_KEY = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
+# In-text figure reference. The renderer turns each match into localized text
+# plus a numbered ``\ref``, so authors never write a figure number by hand.
+FIGURE_REF = re.compile(r"\{\{\s*fig:\s*([A-Za-z0-9][A-Za-z0-9._-]{0,63})\s*\}\}")
 _PY_FORBIDDEN = (
     "http://",
     "https://",
@@ -169,6 +176,7 @@ def record_figure(
     source: object,
     kind: object,
     excerpts: object,
+    key: object = None,
     actor: dict[str, object] | None = None,
 ) -> dict[str, object]:
     """Store one figure. Does not run it, fetch a URL, or change project state."""
@@ -188,6 +196,9 @@ def record_figure(
     excerpt_ids, excerpt_error = _excerpts(excerpts)
     if excerpt_error is not None:
         return excerpt_error
+    figure_key, key_error = _figure_key(key)
+    if key_error is not None:
+        return key_error
     assert section_id is not None and cleaned_caption is not None and figure_kind is not None
     assert cleaned_source is not None and excerpt_ids is not None
     if directive_changes_policy(cleaned_caption) or directive_changes_policy(cleaned_source):
@@ -201,6 +212,8 @@ def record_figure(
             fresh = paragraph_citation_blockers(root, excerpt_ids)
             if fresh:
                 return _rejected_state(state, fresh)
+            if figure_key is not None and _key_taken(root, figure_key):
+                return _error("figure.key_taken", "another stored figure already uses that key")
             identifier = allocate_id(root, "FIG")
             record: dict[str, object] = {
                 "schema_version": "1.0.0",
@@ -219,6 +232,8 @@ def record_figure(
                 "content_directives_ignored": contains_directive(cleaned_caption.encode("utf-8")),
                 "recorded_at": utc_now(),
             }
+            if figure_key is not None:
+                record["key"] = figure_key
             append_jsonl(root / FIGURES, record)
             _audit(root, record=record, actor=actor, operation="record_figure")
             fresh_state = load_state_holding_lock(root)
@@ -364,6 +379,108 @@ def figures_in_section(root: Path, section_id: str) -> list[dict[str, object]]:
     """Stored figures for one blueprint section, newest record per id."""
 
     return [record for record in fold_by_id(root / FIGURES) if record.get("section") == section_id]
+
+
+def _live_figures(root: Path) -> list[dict[str, object]]:
+    """Newest record per id, with removed figures dropped."""
+
+    return [record for record in fold_by_id(root / FIGURES) if record.get("deleted") is not True]
+
+
+def _effective_key(record: dict[str, object]) -> str:
+    """The key an author references: the stored key, else the figure id."""
+
+    key = record.get("key")
+    if isinstance(key, str) and key.strip():
+        return key.strip()
+    identifier = record.get("id")
+    return identifier if isinstance(identifier, str) else ""
+
+
+def figure_reference_map(root: Path) -> dict[str, dict[str, object]]:
+    """Map every stable key and every figure id to its live record.
+
+    Lookup is case-insensitive so ``{{fig:Flujo-Tuberia}}`` still finds
+    ``flujo-tuberia``. An explicit key wins over an id that folds to the same
+    string.
+    """
+
+    mapping: dict[str, dict[str, object]] = {}
+    for record in _live_figures(root):
+        identifier = record.get("id")
+        if isinstance(identifier, str):
+            mapping.setdefault(identifier.lower(), record)
+    for record in _live_figures(root):
+        key = record.get("key")
+        if isinstance(key, str) and key.strip():
+            mapping[key.strip().lower()] = record
+    return mapping
+
+
+def referenced_figure_keys(root: Path) -> list[str]:
+    """Every figure key named by an in-text reference, in reading order."""
+
+    from studium.authoring.paragraphs import supported_paragraphs
+
+    keys: list[str] = []
+    for record in supported_paragraphs(root):
+        text = record.get("text")
+        if isinstance(text, str):
+            keys.extend(match.group(1) for match in FIGURE_REF.finditer(text))
+    return keys
+
+
+def unresolved_figure_references(root: Path) -> list[dict[str, str]]:
+    """In-text references that name no checked, rendered figure.
+
+    ``reason`` is ``missing`` when no figure carries the key and ``unchecked``
+    when the figure exists but its drawing is not rendered.
+    """
+
+    from studium.authoring.paragraphs import supported_paragraphs
+
+    mapping = figure_reference_map(root)
+    unresolved: list[dict[str, str]] = []
+    for record in supported_paragraphs(root):
+        text = record.get("text")
+        if not isinstance(text, str):
+            continue
+        identifier = record.get("id")
+        paragraph_id = identifier if isinstance(identifier, str) else ""
+        for match in FIGURE_REF.finditer(text):
+            key = match.group(1)
+            target = mapping.get(key.lower())
+            if target is None:
+                unresolved.append({"paragraph": paragraph_id, "key": key, "reason": "missing"})
+            elif not (target.get("status") == "checked" and target.get("correct") is True):
+                unresolved.append({"paragraph": paragraph_id, "key": key, "reason": "unchecked"})
+    return unresolved
+
+
+def uncited_figures(root: Path) -> list[dict[str, object]]:
+    """Checked figures that no paragraph references from its prose."""
+
+    mapping = figure_reference_map(root)
+    cited: set[str] = set()
+    for key in referenced_figure_keys(root):
+        target = mapping.get(key.lower())
+        identifier = target.get("id") if target is not None else None
+        if isinstance(identifier, str):
+            cited.add(identifier)
+    return [
+        record
+        for record in _live_figures(root)
+        if record.get("id") not in cited
+        and record.get("status") == "checked"
+        and record.get("correct") is True
+    ]
+
+
+def _key_taken(root: Path, key: str) -> bool:
+    """True when a live figure already answers to this key or its id."""
+
+    wanted = key.lower()
+    return any(_effective_key(record).lower() == wanted for record in _live_figures(root))
 
 
 def _run_tikz(engine: str, work: Path, source: str) -> tuple[int, str]:
@@ -517,6 +634,8 @@ def _public(record: dict[str, object]) -> dict[str, object]:
         "proves_science": False,
         "caption_corroboration": record.get("caption_corroboration"),
     }
+    if isinstance(record.get("key"), str) and record["key"]:
+        visible["key"] = record["key"]
     if isinstance(record.get("output"), str):
         visible["output"] = record["output"]
     return visible
@@ -598,6 +717,22 @@ def _identifier(value: object) -> str | None:
     if not cleaned or len(cleaned) > 128:
         return None
     return cleaned
+
+
+def _figure_key(value: object) -> tuple[str | None, dict[str, object] | None]:
+    """A stable slug, or None when the author did not give one. Not required."""
+
+    if value is None:
+        return None, None
+    if not isinstance(value, str) or not value.strip():
+        return None, None
+    cleaned = value.strip().lower()
+    if not _FIGURE_KEY.fullmatch(cleaned):
+        return None, _error(
+            "figure.key_invalid",
+            "a figure key is a short lower-case slug like 'flujo-tuberia'",
+        )
+    return cleaned, None
 
 
 def _rejected(root: Path, blockers: list[dict[str, object]]) -> dict[str, object]:

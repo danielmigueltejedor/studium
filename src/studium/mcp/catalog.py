@@ -323,7 +323,8 @@ _TOOLS: tuple[dict[str, object], ...] = (
         "class": "WRITE",
         "description": (
             "Store a figure for a blueprint section: caption, executable TikZ or Python source, "
-            "and the excerpt ids it illustrates. "
+            "and the excerpt ids it illustrates. Give it a stable key to reference it from prose "
+            "as {{fig:key}}; the renderer supplies the number and a hyperlink. "
             "Reject a figure with no executable source. "
             "Does not run the source, does not fetch URLs, and does not move the book to RELEASED. "
             "The model describing a drawing is not a check. A figure does not prove the science."
@@ -1248,6 +1249,13 @@ def _schema(tool: Mapping[str, object]) -> dict[str, object]:
                     "type": "array",
                     "items": {"type": "string"},
                     "description": "Stored excerpt ids the figure illustrates.",
+                },
+                "key": {
+                    "type": "string",
+                    "description": (
+                        "Stable author-chosen slug, e.g. 'flujo-tuberia'. Reference it in prose as {{fig:flujo-tuberia}}; "
+                        "the renderer writes the number. Lower-case letters, digits, dot, underscore, hyphen."
+                    ),
                 },
             },
             "required": ["section", "caption", "kind", "source", "excerpts"],

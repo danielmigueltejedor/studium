@@ -59,6 +59,7 @@ _KEYS = (
     "guide_topic",
     "guide_course",
     "not_cited",
+    "figure_ref",
 )
 
 SPANISH_TWO_SECTIONS = (
@@ -362,6 +363,7 @@ _SPANISH = _entry(
     guide_topic="Un libro de tema no usa una guía universitaria, así que no citada no es una regla de apoyo.",
     guide_course="Las fuentes que la guía almacenada no cita quedan fuera.",
     not_cited="Recuento de no citadas: {n}.",
+    figure_ref="figura",
 )
 _ENGLISH = _entry(
     preface="Preface",
@@ -415,6 +417,7 @@ _ENGLISH = _entry(
     guide_topic="A topic book does not use a university guide, so not cited is not a support rule.",
     guide_course="Sources not cited by the stored course guide stay excluded.",
     not_cited="Not cited count: {n}.",
+    figure_ref="figure",
 )
 _FRENCH = _entry(
     preface="Préface",
@@ -475,6 +478,7 @@ _FRENCH = _entry(
     guide_topic="Un livre de sujet n'utilise pas de guide universitaire, donc non cité n'est pas une règle d'appui.",
     guide_course="Les sources que le guide enregistré ne cite pas restent exclues.",
     not_cited="Nombre de non citées : {n}.",
+    figure_ref="figure",
 )
 _GERMAN = _entry(
     preface="Vorwort",
@@ -535,6 +539,7 @@ _GERMAN = _entry(
     guide_topic="Ein Themenbuch nutzt keinen Universitätsleitfaden, daher ist nicht zitiert keine Stützungsregel.",
     guide_course="Quellen, die der gespeicherte Leitfaden nicht zitiert, bleiben ausgeschlossen.",
     not_cited="Anzahl der nicht zitierten: {n}.",
+    figure_ref="Abbildung",
 )
 _PORTUGUESE = _entry(
     preface="Prefácio",
@@ -595,6 +600,7 @@ _PORTUGUESE = _entry(
     guide_topic="Um livro de tema não usa um guia universitário, por isso não citada não é uma regra de apoio.",
     guide_course="As fontes que o guia armazenado não cita ficam de fora.",
     not_cited="Contagem de não citadas: {n}.",
+    figure_ref="figura",
 )
 _ITALIAN = _entry(
     preface="Prefazione",
@@ -655,6 +661,7 @@ _ITALIAN = _entry(
     guide_topic="Un libro di argomento non usa una guida universitaria, quindi non citato non è una regola di supporto.",
     guide_course="Le fonti che la guida memorizzata non cita restano escluse.",
     not_cited="Conteggio delle non citate: {n}.",
+    figure_ref="figura",
 )
 _CATALAN = _entry(
     preface="Prefaci",
@@ -715,6 +722,7 @@ _CATALAN = _entry(
     guide_topic="Un llibre de tema no fa servir una guia universitària, així que no citada no és una regla de suport.",
     guide_course="Les fonts que la guia emmagatzemada no cita queden fora.",
     not_cited="Recompte de no citades: {n}.",
+    figure_ref="figura",
 )
 _GALICIAN = _entry(
     preface="Prefacio",
@@ -775,6 +783,7 @@ _GALICIAN = _entry(
     guide_topic="Un libro de tema non usa unha guía universitaria, así que non citada non é unha regra de apoio.",
     guide_course="As fontes que a guía almacenada non cita quedan fóra.",
     not_cited="Reconto de non citadas: {n}.",
+    figure_ref="figura",
 )
 _CATALOG = {
     "es": _SPANISH,

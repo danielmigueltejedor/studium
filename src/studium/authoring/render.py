@@ -13,7 +13,7 @@ from studium.authoring.academic_blueprint import current_academic_blueprint
 from studium.authoring.blueprint import current_sections
 from studium.authoring.derivations import derivations_for_section
 from studium.authoring.excerpts import excerpts_by_id
-from studium.authoring.figures import figures_in_section
+from studium.authoring.figures import FIGURE_REF, figures_in_section
 from studium.authoring.languages import (
     INVALID_LANGUAGE,
     BookLanguage,
@@ -539,8 +539,13 @@ def render_text_run(value: str) -> str:
     return "".join(parts)
 
 
-def emit_prose(value: str, *, italic: bool = False) -> list[str]:
-    """Turn stored paragraphs into paragraphs, display math, and listings."""
+def emit_prose(value: str, *, italic: bool = False, figure_ref: str = "") -> list[str]:
+    """Turn stored paragraphs into paragraphs, display math, and listings.
+
+    ``figure_ref`` is the localized figure word (``figura``). When it is set,
+    a ``{{fig:key}}`` marker becomes ``figura~\\ref{fig:key}``, so the number is
+    produced by LaTeX and the author never maintains it.
+    """
 
     text = value.replace("\r\n", "\n").replace("\r", "\n")
     lines: list[str] = []
@@ -553,7 +558,7 @@ def emit_prose(value: str, *, italic: bool = False) -> list[str]:
         text_buf.clear()
         paragraphs = [part.strip() for part in re.split(r"\n\s*\n", chunk) if part.strip()]
         for paragraph in paragraphs:
-            rendered = render_text_run(paragraph)
+            rendered = _render_figure_refs(paragraph, figure_ref)
             if _pure_inline_formula(paragraph, rendered):
                 inner = rendered.strip()[2:-2].strip()
                 lines.append("\\[\n" + inner + "\n\\]")
@@ -574,6 +579,33 @@ def emit_prose(value: str, *, italic: bool = False) -> list[str]:
             lines.append(payload)
     flush()
     return lines
+
+
+def _figure_label_key(key: str) -> str:
+    """The LaTeX-safe label fragment two sides of a reference must agree on."""
+
+    return _LABEL_SAFE.sub("-", key.strip().lower())
+
+
+def _figure_ref_text(key: str, label: str) -> str:
+    """Localized word plus a hyperlinked, auto-numbered ``\\ref``."""
+
+    return latex_escape(label) + "~\\ref{fig:" + _figure_label_key(key) + "}"
+
+
+def _render_figure_refs(paragraph: str, figure_ref: str) -> str:
+    """Escape prose, resolving ``{{fig:key}}`` into a numbered reference."""
+
+    if not figure_ref or "{{" not in paragraph:
+        return render_text_run(paragraph)
+    parts: list[str] = []
+    cursor = 0
+    for match in FIGURE_REF.finditer(paragraph):
+        parts.append(render_text_run(paragraph[cursor : match.start()]))
+        parts.append(_figure_ref_text(match.group(1), figure_ref))
+        cursor = match.end()
+    parts.append(render_text_run(paragraph[cursor:]))
+    return "".join(parts)
 
 
 def _pure_inline_formula(original: str, rendered: str) -> bool:
@@ -1140,6 +1172,7 @@ def _textbook_packages() -> list[str]:
         r"\usepackage{xcolor}",
         r"\usepackage{amsmath}",
         r"\usepackage{amssymb}",
+        r"\newcounter{studiumfigure}",
         r"\definecolor{studiumInk}{RGB}{28,40,58}",
         r"\definecolor{studiumRule}{RGB}{28,40,58}",
         r"\definecolor{studiumTipBack}{RGB}{232,244,236}",
@@ -1572,15 +1605,16 @@ def _chapter_lines(
         else:
             body.append(raw)
     lines: list[str] = []
-    lines.extend(_italic(purpose))
+    figure_ref = copy.get("figure_ref", "")
+    lines.extend(_italic(purpose, figure_ref))
     lines.extend(_body_lines(root, section_id, body, copy, figures_shown))
-    lines.extend(_box(copy["consejo"], _plain(consejo), "consejo"))
+    lines.extend(_box(copy["consejo"], _plain(consejo, figure_ref), "consejo"))
     for text in definitions:
-        lines.extend(_box(copy["definition"], _plain([text]), "definition"))
+        lines.extend(_box(copy["definition"], _plain([text], figure_ref), "definition"))
     lines.extend(_derivation_box(root, section_id, language))
     lines.extend(_worked_box(root, section_id, copy, language))
     lines.extend(_exercise_box(root, section_id, language))
-    lines.extend(_box(copy["self_check"], _plain(self_check), "self_check"))
+    lines.extend(_box(copy["self_check"], _plain(self_check, figure_ref), "self_check"))
     return lines
 
 
@@ -1595,11 +1629,12 @@ def _body_lines(
 
     lines: list[str] = []
     placed = False
+    figure_ref = copy.get("figure_ref", "")
     for kind, value in _body_chunks(body):
         if kind == "section":
             lines.extend(["", r"\section{" + latex_escape(value) + "}"])
             continue
-        lines.extend(_plain([value]))
+        lines.extend(_plain([value], figure_ref))
         if not placed:
             lines.extend(_figure_lines(root, section_id, copy, figures_shown))
             placed = True
@@ -1658,19 +1693,19 @@ def _box_body(raw: str, label: str | None, rest: str, kind: str | None, language
     return raw
 
 
-def _italic(chunks: list[str]) -> list[str]:
+def _italic(chunks: list[str], figure_ref: str = "") -> list[str]:
     lines: list[str] = []
     for text in chunks:
-        emitted = emit_prose(text, italic=True)
+        emitted = emit_prose(text, italic=True, figure_ref=figure_ref)
         if emitted:
             lines.extend(["", *emitted])
     return lines
 
 
-def _plain(chunks: list[str]) -> list[str]:
+def _plain(chunks: list[str], figure_ref: str = "") -> list[str]:
     lines: list[str] = []
     for text in chunks:
-        emitted = emit_prose(text)
+        emitted = emit_prose(text, figure_ref=figure_ref)
         if emitted:
             lines.extend(["", *emitted])
     return lines
@@ -2156,10 +2191,15 @@ def _exercise_box(root: Path, section_id: str, language: BookLanguage) -> list[s
 def _figure_lines(
     root: Path,
     section_id: str,
-    _copy: dict[str, str],
+    copy: dict[str, str],
     shown: set[str] | None = None,
 ) -> list[str]:
     """Checked drawings inline. No float, so a short drawing does not take a page.
+
+    Each drawn figure advances ``studiumfigure`` and carries ``\\label{fig:key}``
+    (the author's stable key, or the figure id when none was given). A
+    ``{{fig:key}}`` reference in the prose therefore resolves to the same
+    number without the author maintaining it.
 
     ``shown`` carries the figure ids already emitted for this chapter. A chapter
     with academic sections calls :func:`_chapter_lines` once per section, but its
@@ -2189,6 +2229,7 @@ def _figure_lines(
         else:
             fitted = _fit_block(r"\includegraphics{" + output + "}", consume_box=True)
         caption = _str_field(record, "caption")
+        prefix = _figure_caption_prefix(record, copy)
         lines.extend(
             [
                 "",
@@ -2199,7 +2240,7 @@ def _figure_lines(
         )
         lines.extend(fitted)
         if caption.strip():
-            lines.extend([r"\par\nopagebreak", r"{\small " + render_text_run(caption) + r"\par}"])
+            lines.extend([r"\par\nopagebreak", r"{\small " + prefix + render_text_run(caption) + r"\par}"])
         lines.extend(
             [
                 r"\end{minipage}",
@@ -2207,6 +2248,32 @@ def _figure_lines(
             ]
         )
     return lines
+
+
+def _figure_caption_prefix(record: dict[str, object], copy: dict[str, str]) -> str:
+    """Advance the figure counter, set the label, and print ``Figura N.``.
+
+    Empty when the record has no usable key, so an old project without keys
+    still renders a plain caption.
+    """
+
+    key = record.get("key")
+    if not isinstance(key, str) or not key.strip():
+        identifier = record.get("id")
+        key = identifier if isinstance(identifier, str) else ""
+    if not key.strip():
+        return ""
+    label = copy.get("figure_ref", "figura")
+    word = latex_escape(label[:1].upper() + label[1:])
+    return (
+        r"\refstepcounter{studiumfigure}"
+        + r"\label{fig:"
+        + _figure_label_key(key)
+        + r"}"
+        + r"\textbf{"
+        + word
+        + r"~\thestudiumfigure.} "
+    )
 
 
 def _checked_tikz(root: Path) -> bool:

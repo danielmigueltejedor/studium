@@ -24,6 +24,7 @@ from studium.authoring.contradictions import (
     writer_edition,
 )
 from studium.authoring.excerpts import excerpts_by_id
+from studium.authoring.figures import unresolved_figure_references
 from studium.authoring.paragraphs import supported_paragraphs
 from studium.authoring.problems import problem_input_sha256, problem_result_current
 from studium.authoring.section_blocks import blocked_ids
@@ -182,6 +183,10 @@ def review_blockers(root: Path) -> list[str]:
         if not _figure_checked(root, figure):
             identifier = figure.get("id") if isinstance(figure.get("id"), str) else "figure"
             reasons.append(f"{identifier} is not a checked figure")
+    for reference in unresolved_figure_references(root):
+        target = "is not stored" if reference["reason"] == "missing" else "is not a checked figure"
+        paragraph = reference["paragraph"] or "a paragraph"
+        reasons.append(f"figure reference {reference['key']} in {paragraph} {target}")
     return reasons
 
 
