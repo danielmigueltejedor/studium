@@ -1990,6 +1990,8 @@ def _display_math(tex: str) -> list[str]:
         return ["", r"\[" + stripped[2:-2] + r"\]"]
     if stripped.startswith("$") and stripped.endswith("$") and len(stripped) > 2:
         return ["", r"\[" + stripped[1:-1] + r"\]"]
+    if "\\" not in stripped:
+        return ["", r"\[", _formula_tex(stripped)[2:-2], r"\]"]
     return ["", r"\[", stripped, r"\]"]
 
 
@@ -2486,7 +2488,7 @@ def _formula_sheet_lines(root: Path, copy: dict[str, str]) -> list[str]:
         equation = str(record["equation"]).strip()
         if name:
             lines.extend(["", r"\noindent\textbf{" + latex_escape(name) + "}"])
-        lines.extend(["", *emit_prose(equation)])
+        lines.extend(_display_math(equation))
     return lines
 
 

@@ -28,7 +28,7 @@ from studium.authoring.consistency import consistency_report
 from studium.authoring.context import chapter_context, resume_packet
 from studium.authoring.coverage import source_coverage
 from studium.authoring.depth.planner import build_depth_plan, depth_plan_status
-from studium.authoring.derivations import check_derivation, list_derivations, record_derivation
+from studium.authoring.derivations import check_derivation, list_derivations, record_derivation, remove_derivation
 from studium.authoring.excerpts import get_excerpt, list_excerpts, record_excerpt
 from studium.authoring.expansion import expansion_plan
 from studium.authoring.figures import check_figure, record_figure, remove_figure
@@ -965,6 +965,12 @@ def _dispatch(session: McpSession, name: str, arguments: Mapping[str, object]) -
         )
     if name == "studium_derivation_list":
         return list_derivations(root)
+    if name == "studium_derivation_remove":
+        return remove_derivation(
+            root,
+            arguments.get("id") if "id" in arguments else None,
+            actor=actor if isinstance(actor, dict) else None,
+        )
     if name == "studium_notation_record":
         return record_notation(
             root,

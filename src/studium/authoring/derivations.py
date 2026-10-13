@@ -11,6 +11,7 @@ simplification is never reported as a physical proof.
 
 from __future__ import annotations
 
+import hashlib
 import re
 from pathlib import Path
 from typing import NamedTuple
@@ -34,6 +35,7 @@ _MAX_LINE = 500
 _MAX_STEPS = 30
 _MAX_ENTRIES = 30
 _MAX_VARIABLES = 50
+_AUDIT = "audit/audit.jsonl"
 
 VERIFICATION_STATUSES = frozenset(
     {
@@ -178,6 +180,53 @@ def record_derivation(
             return _body(fresh, record, status="recorded")
     except ProjectLocked:
         return _error("storage.locked", "project is locked")
+
+
+def remove_derivation(
+    root: Path,
+    derivation_id: object,
+    *,
+    actor: dict[str, object] | None = None,
+) -> dict[str, object]:
+    """Delete one stored derivation. Sources, paragraphs, and excerpts stay.
+
+    A missing id is an error. This does not change project state and does not
+    release the book.
+    """
+
+    identifier = _derivation_id(derivation_id)
+    if identifier is None:
+        return _error("mcp.invalid_input", "id is required")
+    current = _find(root, identifier)
+    if current is None:
+        return _error("derivation.not_found", "no stored derivation with that id")
+    try:
+        with project_lock(root):
+            again = _find(root, identifier)
+            if again is None:
+                return _error("derivation.not_found", "no stored derivation with that id")
+            append_jsonl(
+                root / DERIVATIONS,
+                {
+                    "schema_version": "1.0.0",
+                    "id": identifier,
+                    "deleted": True,
+                    "recorded_at": utc_now(),
+                },
+            )
+            _audit(root, record=again, actor=actor, operation="remove_derivation")
+            fresh = load_state_holding_lock(root)
+    except ProjectLocked:
+        return _error("storage.locked", "project is locked")
+    return {
+        "status": "removed",
+        "derivation_id": identifier,
+        "message": "The derivation is removed from the book. Sources, paragraphs, and excerpts are unchanged.",
+        "released": fresh.get("state") == "RELEASED",
+        "applied": False,
+        "project_state": fresh.get("state"),
+        "local_sources": _local(fresh),
+    }
 
 
 def check_derivation(
@@ -567,6 +616,31 @@ def _derivation_id(value: object) -> str | None:
     if not cleaned or len(cleaned) > 128:
         return None
     return cleaned
+
+
+def _audit(
+    root: Path,
+    *,
+    record: dict[str, object],
+    actor: dict[str, object] | None,
+    operation: str,
+) -> None:
+    digest = hashlib.sha256(str(record.get("equation", "")).encode("utf-8")).hexdigest()
+    append_jsonl(
+        root / _AUDIT,
+        {
+            "schema_version": "1.0.0",
+            "timestamp": utc_now(),
+            "source_id": record.get("id"),
+            "operation": operation,
+            "origin": None,
+            "actor": {"kind": actor.get("kind")} if isinstance(actor, dict) and isinstance(actor.get("kind"), str) else None,
+            "previous_hash": None,
+            "new_hash": digest,
+            "result": record.get("status"),
+            "tool": operation,
+        },
+    )
 
 
 def _find(root: Path, identifier: str) -> dict[str, object] | None:

@@ -587,6 +587,7 @@ _TOOLS: tuple[dict[str, object], ...] = (
             "Store one mathematical derivation as structured metadata: section, name, final equation, "
             "assumptions, governing principles, steps, variables with units, boundary conditions, "
             "applicability, limitations, and supporting excerpt references. "
+            "The final equation is LaTeX and is typeset as display math; math delimiters ($...$, \\(...\\), \\[...\\]) are optional. "
             "It records the derivation; verification is a separate step and no status is claimed here."
         ),
     },
@@ -607,6 +608,15 @@ _TOOLS: tuple[dict[str, object], ...] = (
         "name": "studium_derivation_list",
         "class": "READ",
         "description": "List stored derivations with their verification statuses and check details.",
+    },
+    {
+        "name": "studium_derivation_remove",
+        "class": "WRITE",
+        "description": (
+            "Delete one stored derivation by id. Later renders omit it from the chapter box and the formula sheet. "
+            "Does not delete sources, paragraphs, or excerpts. "
+            "A missing id is an error. Does not move the book to RELEASED."
+        ),
     },
     {
         "name": "studium_notation_record",
@@ -1559,7 +1569,10 @@ def _schema(tool: Mapping[str, object]) -> dict[str, object]:
                 "project": _project_property(),
                 "section": {"type": "string", "description": "Blueprint section id."},
                 "name": {"type": "string", "description": "Short name of the derivation."},
-                "equation": {"type": "string", "description": "The final equation this derivation arrives at."},
+                "equation": {
+                    "type": "string",
+                    "description": "The final equation, in LaTeX. Delimiters optional; the renderer typesets it as display math.",
+                },
                 "equation_id": {"type": "string", "description": "Registry identifier for the equation."},
                 "assumptions": {"type": "array", "items": {"type": "string"}},
                 "governing_principles": {"type": "array", "items": {"type": "string"}},
@@ -1588,6 +1601,19 @@ def _schema(tool: Mapping[str, object]) -> dict[str, object]:
                 "symbolic": {"type": "object", "description": "left/right or equation_left/equation_right/solution."},
                 "numeric": {"type": "object", "description": "expression, values, claimed."},
                 "dimensions": {"type": "object", "description": "expression, symbol_units, optional expected_unit."},
+            },
+            "required": ["id"],
+            "additionalProperties": True,
+        }
+    elif name == "studium_derivation_remove":
+        input_schema = {
+            "type": "object",
+            "properties": {
+                "project": _project_property(),
+                "id": {
+                    "type": "string",
+                    "description": "Derivation id to delete. Sources, paragraphs, and excerpts are not deleted.",
+                },
             },
             "required": ["id"],
             "additionalProperties": True,

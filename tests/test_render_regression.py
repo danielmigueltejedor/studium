@@ -9,6 +9,7 @@ These tests must pass before and after type-safety fixes to render.py.
 import pytest
 
 from studium.authoring.render import (
+    _display_math,
     emit_prose,
     latex_escape,
     render_draft,
@@ -79,6 +80,33 @@ def test_render_text_run_groups_consecutive_unicode_superscripts():
     result = render_text_run("gradiente de 100 s⁻¹ constante")
     assert "^{-1}" in result
     assert "^{-}^{" not in result
+
+
+def test_display_math_translates_unicode_formula():
+    """Regression: a stored result in Unicode becomes LaTeX math.
+
+    ``_display_math`` wraps stored solution strings in display math but used to
+    emit them raw, so a result like ``F = 1,8·10⁻³ N`` failed to compile. It must
+    translate Unicode operators and group consecutive superscripts.
+    """
+
+    rendered = "\n".join(_display_math("F = 1,8·10⁻³ N"))
+    assert r"\cdot" in rendered
+    assert "10^{-3}" in rendered
+    assert "⁻" not in rendered
+    assert "^{-}^{" not in rendered
+
+
+def test_display_math_keeps_bare_latex():
+    """Regression: a stored equation in bare LaTeX is passed through unchanged.
+
+    Bare LaTeX must not be routed through the Unicode translator, which would
+    turn ``\\frac`` into ``\\backslash frac``.
+    """
+
+    rendered = "\n".join(_display_math(r"Re = \frac{\rho V L}{\mu}"))
+    assert r"\frac{\rho V L}{\mu}" in rendered
+    assert r"\backslash" not in rendered
 
 
 def test_render_text_run_ascii_subscript_with_unicode_superscript():
@@ -339,6 +367,54 @@ class TestFormulaRendering:
 
     def test_derivation_box_present(self):
         assert r"\begin{tcolorbox}" in self.tex
+
+    def test_formula_sheet_typesets_bare_latex(self):
+        """Regression: a bare-LaTeX equation is display math, not escaped prose.
+
+        The formula sheet previously passed the stored equation through
+        ``emit_prose``, which turned ``\\frac`` into ``\\textbackslash{}frac``
+        and broke the LaTeX build. The chapter derivation box already used
+        ``_display_math``; the formula sheet must agree with it.
+        """
+
+        dispatch(
+            "studium_derivation_record",
+            {
+                "section": "presion",
+                "name": "Número de Reynolds",
+                "equation": r"Re = \frac{\rho V L}{\mu}",
+            },
+            session=self.session,
+        )
+        render_draft(self.root)
+        tex = (self.root / "latex" / "draft.tex").read_text(encoding="utf-8")
+        assert r"\frac{\rho V L}{\mu}" in tex
+        assert r"\textbackslash{}frac" not in tex
+
+
+class TestDerivationRemove:
+    def test_remove_derivation_hides_it_everywhere(self, tmp_path, monkeypatch):
+        session, root = _full_setup(tmp_path, monkeypatch)
+        recorded = dispatch(
+            "studium_derivation_record",
+            {"section": "presion", "name": "Borrable", "equation": r"e = m c^2"},
+            session=session,
+        )
+        derivation_id = recorded["derivation"]["id"]
+        state_before = (root / ".studium" / "state.json").read_bytes()
+        paragraphs_before = (root / "draft" / "paragraphs.jsonl").read_bytes()
+        removed = dispatch("studium_derivation_remove", {"id": derivation_id}, session=session)
+        assert removed["status"] == "removed"
+        assert removed["derivation_id"] == derivation_id
+        assert removed["released"] is False
+        assert (root / ".studium" / "state.json").read_bytes() == state_before
+        assert (root / "draft" / "paragraphs.jsonl").read_bytes() == paragraphs_before
+        listed = dispatch("studium_derivation_list", {}, session=session)
+        assert all(item["id"] != derivation_id for item in listed["derivations"])
+        missing = dispatch("studium_derivation_remove", {"id": "DER-9999"}, session=session)
+        assert missing["status"] == "derivation.not_found"
+        blank = dispatch("studium_derivation_remove", {}, session=session)
+        assert blank["status"] == "mcp.invalid_input"
 
 
 # ---------------------------------------------------------------------------
