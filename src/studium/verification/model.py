@@ -41,6 +41,28 @@ INDEPENDENT_STATUSES: frozenset[VerificationStatus] = frozenset(
     {VerificationStatus.INDEPENDENTLY_VERIFIED}
 )
 
+#: Methods that actually prove a mathematical identity. Numeric sampling,
+#: number replay, and dimensional consistency corroborate a claim but are not
+#: proofs of it. ``INDEPENDENTLY_VERIFIED`` requires at least one of these
+#: methods plus a second distinct method; two corroborating checks alone do not
+#: earn the status.
+PROOF_METHODS: frozenset[str] = frozenset(
+    {
+        "symbolic",
+        "symbolic_equivalence",
+        "symbolic_equation",
+        "symbolic_derivative",
+        "symbolic_integral",
+        "symbolic_limit",
+    }
+)
+
+
+def is_proof_method(method: str) -> bool:
+    """Whether ``method`` is a mathematical proof rather than corroboration."""
+
+    return method in PROOF_METHODS or method.startswith("symbolic")
+
 #: Statuses strong enough to stand in for a worked numerical problem.
 WORKED_STATUSES: frozenset[VerificationStatus] = frozenset(
     {
@@ -86,9 +108,13 @@ class VerificationResult:
 def combine(method_results: list[VerificationResult]) -> VerificationResult:
     """Combine several methods over the same claim into one status.
 
-    Two or more distinct passing methods become ``INDEPENDENTLY_VERIFIED``. A
-    single passing method keeps its own status. Any failure dominates: if one
-    method finds a counterexample, the combined result is ``FAILED``.
+    ``INDEPENDENTLY_VERIFIED`` needs two or more distinct passing methods
+    *and* at least one of them to be a mathematical proof
+    (:data:`PROOF_METHODS`). Several corroborating checks that are all numeric
+    or dimensional keep the strongest single status; agreement between two
+    non-proof methods is corroboration, not independent verification. A single
+    passing method keeps its own status. Any failure dominates: if one method
+    finds a counterexample, the combined result is ``FAILED``.
     """
 
     if not method_results:
@@ -110,7 +136,7 @@ def combine(method_results: list[VerificationResult]) -> VerificationResult:
         )
     passing = [result for result in method_results if result.ok]
     distinct = {result.method for result in passing}
-    if len(distinct) >= 2:
+    if len(distinct) >= 2 and any(is_proof_method(result.method) for result in passing):
         strongest = max(passing, key=lambda result: _RANK[result.status])
         return VerificationResult(
             status=VerificationStatus.INDEPENDENTLY_VERIFIED,
@@ -122,7 +148,24 @@ def combine(method_results: list[VerificationResult]) -> VerificationResult:
             methods_used=tuple(sorted(distinct)),
         )
     if passing:
-        return passing[0]
+        strongest = max(passing, key=lambda result: _RANK[result.status])
+        if len(distinct) >= 2:
+            corroboration = f"corroborated by non-proof methods: {', '.join(sorted(distinct))}"
+            return VerificationResult(
+                status=strongest.status,
+                method=strongest.method,
+                detail=f"{strongest.detail}; {corroboration}" if strongest.detail else corroboration,
+                inputs=dict(strongest.inputs),
+                outputs=dict(strongest.outputs),
+                assumptions=tuple(dict.fromkeys(a for r in passing for a in r.assumptions)),
+                limitations=tuple(
+                    dict.fromkeys(
+                        [*strongest.limitations, "agreeing checks that are not proofs are corroboration, not independent verification"]
+                    )
+                ),
+                methods_used=tuple(sorted(distinct)),
+            )
+        return strongest
     return VerificationResult(
         status=VerificationStatus.UNVERIFIED,
         method="combine",

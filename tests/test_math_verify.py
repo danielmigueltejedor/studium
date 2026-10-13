@@ -77,6 +77,21 @@ def _rank(status: VerificationStatus) -> int:
     return order.index(status)
 
 
+def test_numeric_and_dimensional_are_corroboration_not_proof():
+    """Two non-proof checks that agree are corroboration, not independent proof."""
+    numeric = verify_numeric_cross_check("x**2+2*x+1", "(x+1)**2", symbols={"x"})
+    dimensional = verify_dimensions("F/m", {"F": "N", "m": "kg"}, expected_unit="m/s**2")
+    combined = combine([numeric, dimensional])
+    assert combined.status is not VerificationStatus.INDEPENDENTLY_VERIFIED
+    assert combined.status == VerificationStatus.DIMENSIONALLY_VERIFIED
+    assert "corroborat" in combined.detail
+    assert any("not independent verification" in limitation for limitation in combined.limitations)
+    # Only a mathematical proof method can lift a combination to INDEPENDENTLY_VERIFIED.
+    symbolic = verify_algebraic_equivalence("(a+b)**2", "a**2+2*a*b+b**2")
+    assert combine([symbolic, numeric]).status == VerificationStatus.INDEPENDENTLY_VERIFIED
+    assert combine([numeric]).status == VerificationStatus.NUMERICALLY_CROSS_CHECKED
+
+
 def test_failures_are_failed_and_indecision_is_unverified():
     assert verify_algebraic_equivalence("a+b", "a-b").status == VerificationStatus.FAILED
     assert verify_substitution("x**2", values={"x": 2}, claimed=9).status == VerificationStatus.FAILED

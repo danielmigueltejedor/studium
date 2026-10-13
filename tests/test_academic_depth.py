@@ -299,6 +299,41 @@ def test_derivation_checks_combine_into_independent_verification(tmp_path, monke
     assert listed["derivations"][0]["id"] == derivation_id
 
 
+def test_numeric_and_dimensional_agreement_is_not_independent_proof(tmp_path, monkeypatch):
+    """Numeric substitution plus dimensional consistency is corroboration.
+
+    Neither check proves the identity, so the combined status must stay at the
+    strongest single method rather than claiming INDEPENDENTLY_VERIFIED.
+    """
+    monkeypatch.setattr("urllib.request.urlopen", _explode)
+    session, _root = _project(tmp_path)
+    _blueprint(session, [{"id": "hidrostatica", "title": "Presión hidrostática"}])
+    derivation_id = _torricelli(session)
+
+    checked = dispatch(
+        "studium_derivation_check",
+        {
+            "id": derivation_id,
+            "numeric": {
+                "expression": "sqrt(2*g*h)",
+                "values": {"g": 9.81, "h": 4.905},
+                "claimed": 9.81,
+            },
+            "dimensions": {
+                "expression": "sqrt(g*h)",
+                "symbol_units": {"g": "m/s^2", "h": "m"},
+                "expected_unit": "m/s",
+            },
+        },
+        session=session,
+    )
+    assert checked["status"] == "checked", checked
+    assert checked["verification_status"] != "INDEPENDENTLY_VERIFIED"
+    assert checked["verification_status"] == "DIMENSIONALLY_VERIFIED"
+    methods = {check["method"] for check in checked["derivation"]["verification"]["checks"]}
+    assert methods == {"numeric_substitution", "dimensional"}
+
+
 def test_a_failed_derivation_check_is_not_softened(tmp_path, monkeypatch):
     monkeypatch.setattr("urllib.request.urlopen", _explode)
     session, _root = _project(tmp_path)

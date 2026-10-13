@@ -418,8 +418,10 @@ _TOOLS: tuple[dict[str, object], ...] = (
             "Inputs are allowlisted expressions; arbitrary code is never executed. "
             "The statuses are distinct: COMPUTATION_REPRODUCED replays, NUMERICALLY_CROSS_CHECKED samples "
             "two numeric methods, SYMBOLICALLY_VERIFIED proves an identity, DIMENSIONALLY_VERIFIED checks "
-            "units, INDEPENDENTLY_VERIFIED needs two of those to agree. A symbolic identity is not "
-            "physical truth and is not an academic review. "
+            "units, INDEPENDENTLY_VERIFIED needs at least one proof method (equivalence, derivative, "
+            "integral, equation, or limit) plus a second distinct method. Numeric substitution and "
+            "dimensional consistency corroborate a claim but never become an independent proof on their "
+            "own. A symbolic identity is not physical truth and is not an academic review. "
             "Does not fetch URLs and does not move the book to RELEASED."
         ),
     },
@@ -599,7 +601,9 @@ _TOOLS: tuple[dict[str, object], ...] = (
             "dimensions is an expression with symbol units and an optional expected unit. "
             "Each check keeps its own status: SYMBOLICALLY_VERIFIED, DIMENSIONALLY_VERIFIED, "
             "COMPUTATION_REPRODUCED, INDEPENDENTLY_VERIFIED, UNVERIFIED, or FAILED. "
-            "A symbolic identity is not physical validity; a dimensional check is not a proof."
+            "INDEPENDENTLY_VERIFIED needs a proof check (symbolic identity or solved equation) "
+            "plus a second distinct check; numeric substitution and dimensions alone corroborate "
+            "but never prove. A symbolic identity is not physical validity; a dimensional check is not a proof."
         ),
     },
     {

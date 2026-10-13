@@ -29,6 +29,7 @@ from studium.verification.engine import (
     verify_equation,
     verify_substitution,
 )
+from studium.verification.model import VerificationResult, VerificationStatus, combine
 
 _MAX_LINE = 500
 _MAX_STEPS = 30
@@ -277,15 +278,25 @@ def derivations_for_section(root: Path, section_id: str) -> list[dict[str, objec
 
 
 def _overall(results: list[dict[str, object]]) -> str:
-    statuses = {str(item.get("status")) for item in results}
-    if "FAILED" in statuses:
-        return "FAILED"
-    passing = statuses - {"UNVERIFIED", "FAILED"}
-    if not passing:
-        return "UNVERIFIED"
-    if len(passing) >= 2:
-        return "INDEPENDENTLY_VERIFIED"
-    return passing.pop()
+    """The combined status of the checks that ran.
+
+    Delegates to :func:`studium.verification.model.combine` so the derivation
+    layer cannot drift from the verification layer: numeric substitution and
+    dimensional agreement alone are corroboration, not independent proof.
+    """
+
+    verification: list[VerificationResult] = []
+    for item in results:
+        status = str(item.get("status"))
+        if status not in VerificationStatus.__members__:
+            continue
+        verification.append(
+            VerificationResult(
+                status=VerificationStatus[status],
+                method=str(item.get("method") or ""),
+            )
+        )
+    return combine(verification).status.value
 
 
 def _free_symbols(*texts: str) -> set[str]:
