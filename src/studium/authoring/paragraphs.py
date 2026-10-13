@@ -32,6 +32,7 @@ def record_paragraph(
     excerpts: object,
     role: object = None,
     concepts: object = None,
+    subsection: object = None,
     actor: dict[str, object] | None = None,
 ) -> dict[str, object]:
     """Store one draft paragraph for a blueprint section. Does not change state."""
@@ -51,6 +52,7 @@ def record_paragraph(
     concept_ids, concept_error = _concepts(root, concepts)
     if concept_error is not None:
         return concept_error
+    subsection_id = _subsection(subsection)
     assert section_id is not None and cleaned_text is not None and excerpt_ids is not None and concept_ids is not None
     if directive_changes_policy(cleaned_text):
         return _error("policy.overridden", "paragraph text changed policy")
@@ -83,6 +85,8 @@ def record_paragraph(
                 record["role"] = paragraph_role
             if concept_ids:
                 record["concepts"] = concept_ids
+            if subsection_id is not None:
+                record["subsection"] = subsection_id
             append_jsonl(root / PARAGRAPHS, record)
             _audit(root, record=record, actor=actor)
             fresh = load_state_holding_lock(root)
@@ -383,6 +387,17 @@ def _concepts(root: Path, value: object) -> tuple[list[str] | None, dict[str, ob
         if cleaned not in identifiers:
             identifiers.append(cleaned)
     return identifiers, None
+
+
+def _subsection(value: object) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        return None
+    cleaned = value.strip()
+    if not cleaned or len(cleaned) > 128:
+        return None
+    return cleaned
 
 
 def _body(state: dict[str, object], record: dict[str, object], *, status: str) -> dict[str, object]:
