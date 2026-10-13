@@ -325,6 +325,8 @@ _TOOLS: tuple[dict[str, object], ...] = (
             "Store a figure for a blueprint section: caption, executable TikZ or Python source, "
             "and the excerpt ids it illustrates. Give it a stable key to reference it from prose "
             "as {{fig:key}}; the renderer supplies the number and a hyperlink. "
+            "For TikZ, give the picture body only; the server wraps it in a tikzpicture and a document. "
+            "A full tikzpicture is accepted and its wrapper is removed. "
             "Reject a figure with no executable source. "
             "Does not run the source, does not fetch URLs, and does not move the book to RELEASED. "
             "The model describing a drawing is not a check. A figure does not prove the science."
@@ -623,6 +625,7 @@ _TOOLS: tuple[dict[str, object], ...] = (
         "class": "WRITE",
         "description": (
             "Register one symbol with one meaning and optional units. "
+            "Omit units for a dimensionless quantity; an empty units string means the same. "
             "The same symbol with a different meaning anywhere in the book is rejected as a conflict. "
             "Does not write prose and does not release."
         ),
@@ -1626,7 +1629,7 @@ def _schema(tool: Mapping[str, object]) -> dict[str, object]:
                 "section": {"type": "string", "description": "Blueprint section id."},
                 "symbol": {"type": "string", "description": "The symbol as it appears in the book."},
                 "meaning": {"type": "string", "description": "One meaning for the whole book."},
-                "units": {"type": "string", "description": "Optional units."},
+                "units": {"type": "string", "description": "Optional units. Omit or leave empty for a dimensionless quantity."},
             },
             "required": ["section", "symbol", "meaning"],
             "additionalProperties": True,

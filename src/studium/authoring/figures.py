@@ -682,9 +682,28 @@ def _kind(value: object) -> tuple[str | None, dict[str, object] | None]:
     return value.strip().lower(), None
 
 
+def _unwrap_tikz(value: str) -> str | None:
+    """Return the inner body of a full tikzpicture, or None when not wrapped.
+
+    The server wraps a stored source in ``\\begin{tikzpicture}…\\end{tikzpicture}``
+    before compiling it, so an author who pastes a complete picture should not be
+    rejected for the wrapper the server adds itself.
+    """
+
+    begin = r"\begin{tikzpicture}"
+    end = r"\end{tikzpicture}"
+    if value.startswith(begin) and value.endswith(end) and len(value) > len(begin) + len(end):
+        return value[len(begin):-len(end)].strip()
+    return None
+
+
 def _source(value: object, kind: str | None) -> tuple[str | None, dict[str, object] | None]:
     if not isinstance(value, str) or not value.strip():
         return None, _error("mcp.invalid_input", "a figure needs executable source")
+    if kind == "tikz":
+        unwrapped = _unwrap_tikz(value.strip())
+        if unwrapped is not None:
+            value = unwrapped
     if len(value) > _MAX_SOURCE:
         return None, _error("mcp.invalid_input", "a figure needs executable source")
     forbidden = _TIKZ_FORBIDDEN if kind == "tikz" else _PY_FORBIDDEN

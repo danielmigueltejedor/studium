@@ -361,6 +361,37 @@ def test_notation_and_terminology_reject_conflicts(tmp_path, monkeypatch):
     assert terminology["entries"][0]["term"] == "manómetro"
 
 
+def test_notation_empty_units_means_dimensionless(tmp_path, monkeypatch):
+    """An empty units string is dimensionless, not a contradictory error.
+
+    units is documented as optional; passing "" used to fail with "units is
+    required", forcing an author to know the magic word "adimensional".
+    """
+
+    monkeypatch.setattr("urllib.request.urlopen", _explode)
+    session, _root = _project(tmp_path)
+    _blueprint(session)
+
+    omitted = dispatch(
+        "studium_notation_record",
+        {"section": "hidrostatica", "symbol": "Re", "meaning": "número de Reynolds"},
+        session=session,
+    )
+    assert omitted["status"] == "recorded", omitted
+    assert not omitted["entry"].get("units")
+
+    blank = dispatch(
+        "studium_notation_record",
+        {"section": "hidrostatica", "symbol": "Fr", "meaning": "número de Froude", "units": ""},
+        session=session,
+    )
+    assert blank["status"] == "recorded", blank
+    assert not blank["entry"].get("units")
+
+    entries = {row["symbol"]: row for row in dispatch("studium_notation_list", {}, session=session)["entries"]}
+    assert set(entries) == {"Re", "Fr"}
+
+
 # --- completeness and consistency reports ------------------------------------
 
 
@@ -501,6 +532,9 @@ def test_resume_packet_and_quality_report_are_honest(tmp_path, monkeypatch):
     assert report["status"] == "ok"
     assert report["counts"]["derivations"] == 1
     assert report["derivation_statuses"] == {"UNVERIFIED": 1}
+    difficulties = report["exercise_difficulties"]
+    assert isinstance(difficulties, dict)
+    assert sum(difficulties.values()) == report["counts"]["problems"]
     assert any("ACADEMICALLY_REVIEWED" in item for item in report["limitations"])
 
 

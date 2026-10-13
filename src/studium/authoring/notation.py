@@ -39,9 +39,12 @@ def record_notation(
     cleaned_meaning, meaning_error = _line(meaning, "meaning")
     if meaning_error is not None:
         return meaning_error
-    cleaned_units, units_error = _line(units, "units") if units is not None else (None, None)
-    if units_error is not None:
-        return units_error
+    if units is None or (isinstance(units, str) and not units.strip()):
+        cleaned_units = None
+    else:
+        cleaned_units, units_error = _line(units, "units")
+        if units_error is not None:
+            return units_error
     if contains_directive(f"{cleaned_symbol} {cleaned_meaning}".encode()):
         return {"status": "policy.directive", "message": "the notation changed or requested policy"}
     assert section_id is not None and cleaned_symbol is not None and cleaned_meaning is not None

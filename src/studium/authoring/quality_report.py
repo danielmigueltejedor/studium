@@ -64,6 +64,10 @@ def quality_report(root: Path) -> dict[str, object]:
         derivation_statuses[status] = derivation_statuses.get(status, 0) + 1
     figures = fold_by_id(root / FIGURES)
     figures_checked = [row for row in figures if row.get("status") == "checked"]
+    exercise_difficulties: dict[str, int] = {}
+    for row in problems:
+        key = str(row.get("difficulty") or "UNSPECIFIED")
+        exercise_difficulties[key] = exercise_difficulties.get(key, 0) + 1
     words = sum(len(str(row.get("text") or "").split()) for row in paragraphs)
     completeness = chapter_completeness(root)
     coverage = source_coverage(root)
@@ -143,6 +147,7 @@ def quality_report(root: Path) -> dict[str, object]:
             "open_contradictions": len(contradictions),
         },
         "derivation_statuses": derivation_statuses,
+        "exercise_difficulties": exercise_difficulties,
         "completeness": completeness.get("summary"),
         "coverage": coverage.get("totals"),
         "consistent": consistency.get("consistent"),
