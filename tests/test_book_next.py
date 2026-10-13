@@ -933,8 +933,9 @@ def test_concept_coverage_blocks_chapter_completion(tmp_path, monkeypatch):
     )
 
     # Check: unfinished_chapter should list uncovered concepts
-    from studium.authoring.book_next import unfinished_chapter
     from pathlib import Path
+
+    from studium.authoring.book_next import unfinished_chapter
     root = Path(tmp_path) / "concepts"
     result = unfinished_chapter(root)
     assert result is not None, "Chapter should be unfinished"
