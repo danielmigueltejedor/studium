@@ -334,6 +334,50 @@ def test_numeric_and_dimensional_agreement_is_not_independent_proof(tmp_path, mo
     assert methods == {"numeric_substitution", "dimensional"}
 
 
+def test_references_validation_messages_are_actionable(tmp_path, monkeypatch):
+    monkeypatch.setattr("urllib.request.urlopen", _explode)
+    session, _root = _project(tmp_path)
+    _blueprint(session, [{"id": "hidrostatica", "title": "Presión hidrostática"}])
+    base = {
+        "section": "hidrostatica",
+        "name": "Torricelli",
+        "equation": r"\(V = \sqrt{2gh}\)",
+    }
+
+    not_object = dispatch(
+        "studium_derivation_record", {**base, "references": ["EVD-0001"]}, session=session
+    )
+    assert not_object["status"] == "mcp.invalid_input"
+    assert '{"excerpts"' in not_object["message"]
+    assert "a list of 1 item" in not_object["message"]
+
+    unknown_key = dispatch(
+        "studium_derivation_record",
+        {**base, "references": {"excerpt_ids": ["EVD-0001"]}},
+        session=session,
+    )
+    assert unknown_key["status"] == "mcp.invalid_input"
+    assert "excerpt_ids" in unknown_key["message"]
+    assert "excerpts" in unknown_key["message"]
+
+    not_list = dispatch(
+        "studium_derivation_record",
+        {**base, "references": {"excerpts": "EVD-0001"}},
+        session=session,
+    )
+    assert not_list["status"] == "mcp.invalid_input"
+    assert "excerpts must be a list" in not_list["message"]
+    assert "a str" in not_list["message"]
+
+    unknown_excerpt = dispatch(
+        "studium_derivation_record",
+        {**base, "references": {"excerpts": ["EVD-9999"]}},
+        session=session,
+    )
+    assert unknown_excerpt["status"] == "derivation.excerpt_unknown"
+    assert "EVD-9999" in unknown_excerpt["message"]
+
+
 def test_a_failed_derivation_check_is_not_softened(tmp_path, monkeypatch):
     monkeypatch.setattr("urllib.request.urlopen", _explode)
     session, _root = _project(tmp_path)

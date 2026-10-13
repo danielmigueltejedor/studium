@@ -588,6 +588,8 @@ _TOOLS: tuple[dict[str, object], ...] = (
             "Store one mathematical derivation as structured metadata: section, name, final equation, "
             "assumptions, governing principles, steps, variables with units, boundary conditions, "
             "applicability, limitations, and supporting excerpt references. "
+            "references is an object shaped {\"excerpts\": [\"EVD-0001\"], \"sources\": [\"SRC-0001\"]}; "
+            "each id must already be stored and any other key is rejected. "
             "It records the derivation; verification is a separate step and no status is claimed here."
         ),
     },
@@ -1570,7 +1572,19 @@ def _schema(tool: Mapping[str, object]) -> dict[str, object]:
                 "boundary_conditions": {"type": "array", "items": {"type": "string"}},
                 "applicability": {"type": "array", "items": {"type": "string"}},
                 "limitations": {"type": "array", "items": {"type": "string"}},
-                "references": {"type": "object", "description": "excerpts and/or sources id lists."},
+                "references": {
+                    "type": "object",
+                    "description": (
+                        "Stored ids that support the derivation. Shape: "
+                        "{\"excerpts\": [\"EVD-0001\"], \"sources\": [\"SRC-0001\"]}. "
+                        "Both keys are optional; an unknown key or an unstored excerpt id is rejected."
+                    ),
+                    "properties": {
+                        "excerpts": {"type": "array", "items": {"type": "string"}},
+                        "sources": {"type": "array", "items": {"type": "string"}},
+                    },
+                    "additionalProperties": False,
+                },
             },
             "required": ["section", "name", "equation"],
             "additionalProperties": True,
