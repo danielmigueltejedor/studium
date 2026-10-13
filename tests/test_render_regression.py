@@ -458,6 +458,302 @@ class TestAuditGrouping:
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# Integration: hierarchical rendering with academic blueprint
+# ---------------------------------------------------------------------------
+
+
+class TestHierarchicalRendering:
+    """When an academic blueprint exists, the renderer uses its Part/Chapter/Section structure."""
+
+    @pytest.fixture(autouse=True)
+    def _setup(self, tmp_path, monkeypatch):
+        self.session, self.root = _full_setup(tmp_path, monkeypatch)
+        rendered = render_draft(self.root)
+        assert rendered["status"] in ("rendered", "compiler_missing", "incomplete"), rendered
+        self.tex = (self.root / "latex" / "draft.tex").read_text(encoding="utf-8")
+
+    def test_part_from_academic_blueprint(self):
+        assert r"\part{Part One}" in self.tex
+
+    def test_chapter_from_academic_blueprint(self):
+        assert r"\chapter{Presión hidrostática}" in self.tex
+
+    def test_section_from_academic_blueprint(self):
+        assert r"\section{Basics}" in self.tex
+
+    def test_no_duplicate_book_part(self):
+        parts = [line for line in self.tex.split("\n") if r"\part{" in line]
+        book_name_parts = [p for p in parts if "Part One" not in p]
+        assert not book_name_parts, f"Extra \\part outside academic blueprint: {book_name_parts}"
+
+
+class TestHierarchicalSubsectionPlacement:
+    """Paragraphs with a subsection field are placed under the right \\section{}."""
+
+    @pytest.fixture(autouse=True)
+    def _setup(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("urllib.request.urlopen", _explode)
+        self.session, self.root = _project(tmp_path)
+        dispatch(
+            "studium_blueprint_store",
+            {"sections": [{"id": "ch1", "title": "Chapter One"}]},
+            session=self.session,
+        )
+        dispatch(
+            "studium_academic_blueprint_store",
+            {
+                "profile_key": "ADVANCED_UNDERGRADUATE",
+                "subject": "Test",
+                "parts": [
+                    {
+                        "id": "part-a",
+                        "title": "Part A",
+                        "chapters": [
+                            {
+                                "id": "ch1",
+                                "title": "Chapter One",
+                                "learning_objectives": ["learn ch1"],
+                                "sections": [
+                                    {
+                                        "id": "ch1.intro",
+                                        "title": "Introduction",
+                                        "concepts": [
+                                            {
+                                                "id": "c1",
+                                                "title": "Concept One",
+                                                "learning_objectives": ["lo1"],
+                                                "depth": "ADVANCED_UNDERGRADUATE",
+                                                "exercises": 1,
+                                            }
+                                        ],
+                                    },
+                                    {
+                                        "id": "ch1.theory",
+                                        "title": "Theory",
+                                        "concepts": [
+                                            {
+                                                "id": "c2",
+                                                "title": "Concept Two",
+                                                "learning_objectives": ["lo2"],
+                                                "depth": "ADVANCED_UNDERGRADUATE",
+                                                "exercises": 1,
+                                            }
+                                        ],
+                                    },
+                                ],
+                            }
+                        ],
+                    }
+                ],
+            },
+            session=self.session,
+        )
+        excerpts = _excerpts(self.session)
+        dispatch(
+            "studium_paragraph_record",
+            {"section": "ch1", "text": "This is the chapter introduction.", "excerpts": excerpts},
+            session=self.session,
+        )
+        dispatch(
+            "studium_paragraph_record",
+            {
+                "section": "ch1",
+                "subsection": "ch1.intro",
+                "text": "This paragraph belongs to the Introduction section.",
+                "excerpts": excerpts,
+            },
+            session=self.session,
+        )
+        dispatch(
+            "studium_paragraph_record",
+            {
+                "section": "ch1",
+                "subsection": "ch1.theory",
+                "text": "This paragraph belongs to the Theory section.",
+                "excerpts": excerpts,
+            },
+            session=self.session,
+        )
+        rendered = render_draft(self.root)
+        assert rendered["status"] in ("rendered", "compiler_missing", "incomplete"), rendered
+        self.tex = (self.root / "latex" / "draft.tex").read_text(encoding="utf-8")
+
+    def test_chapter_present(self):
+        assert r"\chapter{Chapter One}" in self.tex
+
+    def test_section_introduction(self):
+        assert r"\section{Introduction}" in self.tex
+
+    def test_section_theory(self):
+        assert r"\section{Theory}" in self.tex
+
+    def test_intro_paragraph_in_chapter_body(self):
+        chapter_pos = self.tex.index(r"\chapter{Chapter One}")
+        intro_section_pos = self.tex.index(r"\section{Introduction}")
+        intro_text_pos = self.tex.index("chapter introduction")
+        assert chapter_pos < intro_text_pos < intro_section_pos
+
+    def test_section_paragraph_after_section_heading(self):
+        intro_section_pos = self.tex.index(r"\section{Introduction}")
+        intro_text_pos = self.tex.index("Introduction section")
+        assert intro_section_pos < intro_text_pos
+
+    def test_theory_paragraph_after_theory_heading(self):
+        theory_section_pos = self.tex.index(r"\section{Theory}")
+        theory_text_pos = self.tex.index("Theory section")
+        assert theory_section_pos < theory_text_pos
+
+    def test_sections_ordered_correctly(self):
+        intro_pos = self.tex.index(r"\section{Introduction}")
+        theory_pos = self.tex.index(r"\section{Theory}")
+        assert intro_pos < theory_pos
+
+
+class TestFlatBlueprintFallback:
+    """Without an academic blueprint, the old flat rendering still works."""
+
+    @pytest.fixture(autouse=True)
+    def _setup(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("urllib.request.urlopen", _explode)
+        self.session, self.root = _project(tmp_path)
+        dispatch(
+            "studium_blueprint_store",
+            {"sections": [{"id": "sec1", "title": "Flat Section"}]},
+            session=self.session,
+        )
+        excerpts = _excerpts(self.session)
+        dispatch(
+            "studium_paragraph_record",
+            {"section": "sec1", "text": "Content of flat section.", "excerpts": excerpts},
+            session=self.session,
+        )
+        rendered = render_draft(self.root)
+        assert rendered["status"] in ("rendered", "compiler_missing", "incomplete"), rendered
+        self.tex = (self.root / "latex" / "draft.tex").read_text(encoding="utf-8")
+
+    def test_chapter_from_flat_blueprint(self):
+        assert r"\chapter{Flat Section}" in self.tex
+
+    def test_no_academic_section_headings(self):
+        mainmatter_pos = self.tex.index(r"\mainmatter")
+        appendix_pos = self.tex.index(r"\appendix")
+        main_body = self.tex[mainmatter_pos:appendix_pos]
+        section_count = main_body.count(r"\section{")
+        assert section_count == 0
+
+
+class TestSubsectionRouting:
+    """Paragraphs targeting a blueprint subsection render under \\subsection{}."""
+
+    @pytest.fixture(autouse=True)
+    def _setup(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("urllib.request.urlopen", _explode)
+        self.session, self.root = _project(tmp_path)
+        dispatch(
+            "studium_blueprint_store",
+            {"sections": [{"id": "ch1", "title": "Chapter One"}]},
+            session=self.session,
+        )
+        dispatch(
+            "studium_academic_blueprint_store",
+            {
+                "profile_key": "ADVANCED_UNDERGRADUATE",
+                "subject": "Test",
+                "parts": [
+                    {
+                        "id": "p1",
+                        "title": "Part One",
+                        "chapters": [
+                            {
+                                "id": "ch1",
+                                "title": "Chapter One",
+                                "learning_objectives": ["lo"],
+                                "sections": [
+                                    {
+                                        "id": "ch1.sec1",
+                                        "title": "Sec One",
+                                        "subsections": [
+                                            {
+                                                "id": "ch1.sec1.sub1",
+                                                "title": "Sub Alpha",
+                                                "concepts": [
+                                                    {
+                                                        "id": "c1",
+                                                        "title": "C1",
+                                                        "learning_objectives": ["lo1"],
+                                                        "depth": "ADVANCED_UNDERGRADUATE",
+                                                        "exercises": 1,
+                                                    }
+                                                ],
+                                            }
+                                        ],
+                                        "concepts": [
+                                            {
+                                                "id": "c2",
+                                                "title": "C2",
+                                                "learning_objectives": ["lo2"],
+                                                "depth": "ADVANCED_UNDERGRADUATE",
+                                                "exercises": 1,
+                                            }
+                                        ],
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ],
+            },
+            session=self.session,
+        )
+        excerpts = _excerpts(self.session)
+        dispatch(
+            "studium_paragraph_record",
+            {
+                "section": "ch1",
+                "subsection": "ch1.sec1",
+                "text": "Section-level content.",
+                "excerpts": excerpts,
+            },
+            session=self.session,
+        )
+        dispatch(
+            "studium_paragraph_record",
+            {
+                "section": "ch1",
+                "subsection": "ch1.sec1.sub1",
+                "text": "Subsection-level content.",
+                "excerpts": excerpts,
+            },
+            session=self.session,
+        )
+        rendered = render_draft(self.root)
+        assert rendered["status"] in ("rendered", "compiler_missing", "incomplete"), rendered
+        self.tex = (self.root / "latex" / "draft.tex").read_text(encoding="utf-8")
+
+    def test_section_heading(self):
+        assert r"\section{Sec One}" in self.tex
+
+    def test_subsection_heading(self):
+        assert r"\subsection{Sub Alpha}" in self.tex
+
+    def test_subsection_content_under_subsection(self):
+        subsec_pos = self.tex.index(r"\subsection{Sub Alpha}")
+        content_pos = self.tex.index("Subsection-level content")
+        assert subsec_pos < content_pos
+
+    def test_section_content_before_subsection(self):
+        sec_pos = self.tex.index(r"\section{Sec One}")
+        sec_content_pos = self.tex.index("Section-level content")
+        subsec_pos = self.tex.index(r"\subsection{Sub Alpha}")
+        assert sec_pos < sec_content_pos < subsec_pos
+
+
+# ---------------------------------------------------------------------------
+# Integration: study plan with academic blueprint
+# ---------------------------------------------------------------------------
+
+
 class TestStudyPlan:
     @pytest.fixture(autouse=True)
     def _setup(self, tmp_path, monkeypatch):

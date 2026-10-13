@@ -9,6 +9,7 @@ import re
 from contextvars import ContextVar
 from pathlib import Path
 
+from studium.authoring.academic_blueprint import academic_sections_for_chapter
 from studium.authoring.audit import (
     audited_paragraph_ids,
     explicit_gap_ids,
@@ -21,6 +22,7 @@ from studium.authoring.audit import (
 )
 from studium.authoring.blueprint import current_sections
 from studium.authoring.computation import list_computations
+from studium.authoring.derivations import derivations_for_section
 from studium.authoring.excerpts import excerpts_by_id
 from studium.authoring.languages import (
     BookLanguage,
@@ -217,10 +219,14 @@ def _book_next(root: Path) -> dict[str, object]:
                 ),
                 blocked=blocked_sections(root),
             )
+        arguments_more: dict[str, object] = {"section": section["id"], "excerpts": [excerpt_id], "role": "explanation"}
+        academic = _next_academic_section(root, section["id"])
+        if academic is not None:
+            arguments_more["subsection"] = academic["id"]
         return _step(
             state,
             "studium_paragraph_record",
-            {"section": section["id"], "excerpts": [excerpt_id], "role": "explanation"},
+            arguments_more,
             (
                 f"Write another explanatory paragraph for {section['id']} ({section['title']}). "
                 "A section of one short paragraph does not count as written. "
@@ -248,6 +254,16 @@ def _book_next(root: Path) -> dict[str, object]:
             return _unwritten_step(state, root, section, _excerpt_for_section(root, section["id"]))
         if _explanation_words(root, section["id"]) < _thresholds(root).min_explanation_words:
             return _explanation_step(state, root, section)
+    unchecked_deriv = _pending_derivation_check(root, sections)
+    if unchecked_deriv is not None:
+        return _step(
+            state,
+            "studium_derivation_check",
+            {"id": unchecked_deriv["id"]},
+            f"Verify derivation {unchecked_deriv['id']} in {unchecked_deriv['section']}. "
+            "Run the deterministic symbolic and dimensional checks.",
+            blocked=blocked_sections(root),
+        )
     audit = _pending_audit(root)
     if audit is not None:
         return _step(
@@ -398,6 +414,66 @@ def _paragraph_count(root: Path, section_id: str) -> int:
     return sum(1 for record in supported_paragraphs(root) if record.get("section") == section_id)
 
 
+def _next_academic_section(root: Path, chapter_id: str) -> dict[str, object] | None:
+    """First academic section in this chapter that has no paragraphs yet.
+
+    Returns a dict with id, title, and optionally depth and concept_count
+    so the agent can adapt its writing to the planned academic level.
+    """
+
+    from studium.authoring.academic_blueprint import current_academic_blueprint
+
+    blueprint = current_academic_blueprint(root)
+    if blueprint is None:
+        return None
+    sections = academic_sections_for_chapter(root, chapter_id)
+    if not sections:
+        return None
+    written = set()
+    for record in supported_paragraphs(root):
+        if record.get("section") == chapter_id:
+            sub = record.get("subsection")
+            if isinstance(sub, str):
+                written.add(sub)
+    section_meta: dict[str, dict[str, object]] = {}
+    for part in _iter_list(blueprint.get("parts")):
+        for chapter in _iter_list(part.get("chapters")):
+            if chapter.get("id") != chapter_id:
+                continue
+            for sec in _iter_list(chapter.get("sections")):
+                sec_id = sec.get("id")
+                if isinstance(sec_id, str):
+                    concepts = sec.get("concepts")
+                    concept_list = concepts if isinstance(concepts, list) else []
+                    concept_titles = [
+                        str(c.get("title")) for c in concept_list
+                        if isinstance(c, dict) and isinstance(c.get("title"), str)
+                    ]
+                    section_meta[sec_id] = {
+                        "depth": sec.get("depth"),
+                        "concept_count": len(concept_list),
+                        "concept_titles": concept_titles,
+                    }
+    for s in sections:
+        if s["id"] not in written:
+            result = dict(s)
+            meta = section_meta.get(str(s["id"]), {})
+            if meta.get("depth"):
+                result["depth"] = meta["depth"]
+            if meta.get("concept_count"):
+                result["concept_count"] = meta["concept_count"]
+            if meta.get("concept_titles"):
+                result["concept_titles"] = meta["concept_titles"]
+            return result
+    return None
+
+
+def _iter_list(value: object) -> list[dict[str, object]]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, dict)]
+
+
 def _unwritten_step(
     state: dict[str, object],
     root: Path,
@@ -408,11 +484,28 @@ def _unwritten_step(
 
     if excerpt_id is None:
         return _step(state, "studium_public_source_record", {}, _need_sources(root))
+    arguments: dict[str, object] = {"section": section["id"], "excerpts": [excerpt_id], "role": "explanation"}
+    reason = _unwritten_reason(section)
+    academic = _next_academic_section(root, section["id"])
+    if academic is not None:
+        arguments["subsection"] = academic["id"]
+        extras = ""
+        depth = academic.get("depth")
+        if isinstance(depth, str):
+            extras += f" Target depth: {depth}."
+        concept_titles = academic.get("concept_titles")
+        if isinstance(concept_titles, list) and concept_titles:
+            names = ", ".join(str(t) for t in concept_titles[:5])
+            extras += f" Concepts to teach: {names}."
+        reason = (
+            f"Write the next unwritten section: {section['title']} > {academic['title']}. "
+            f"The book is incomplete while {academic['title']} has no paragraphs.{extras}"
+        )
     return _step(
         state,
         "studium_paragraph_record",
-        {"section": section["id"], "excerpts": [excerpt_id], "role": "explanation"},
-        _named(root, section, _unwritten_reason(section)),
+        arguments,
+        _named(root, section, reason),
         blocked=blocked_sections(root),
     )
 
@@ -781,10 +874,18 @@ def _explanation_step(
             "Search open sources before writing. Cite a stored excerpt. "
             + _chapter()
         )
+    arguments: dict[str, object] = {"section": section["id"], "excerpts": [excerpt_id], "role": "explanation"}
+    academic = _next_academic_section(root, section["id"])
+    if academic is not None:
+        arguments["subsection"] = academic["id"]
+        reason = (
+            f"Write the explanation for {section['title']} > {academic['title']}. "
+            + reason.split(". ", 1)[-1]
+        )
     return _step(
         state,
         "studium_paragraph_record",
-        {"section": section["id"], "excerpts": [excerpt_id], "role": "explanation"},
+        arguments,
         _named(root, section, reason),
         blocked=blocked_sections(root),
     )
@@ -840,10 +941,14 @@ def _role_step(
     excerpt_id = _excerpt_for_section(root, section["id"])
     if excerpt_id is None:
         return _step(state, "studium_public_source_record", {}, _need_sources(root))
+    arguments: dict[str, object] = {"section": section["id"], "excerpts": [excerpt_id], "role": role}
+    academic = _next_academic_section(root, section["id"])
+    if academic is not None:
+        arguments["subsection"] = academic["id"]
     return _step(
         state,
         "studium_paragraph_record",
-        {"section": section["id"], "excerpts": [excerpt_id], "role": role},
+        arguments,
         _named(root, section, reason),
         blocked=blocked_sections(root),
     )
@@ -1058,6 +1163,28 @@ def _pending_self_check(
             continue
         remember_offer(root, section_id=section["id"], kind="self_check")
         return section, excerpt_id
+    return None
+
+
+def _pending_derivation_check(
+    root: Path,
+    sections: list[dict[str, str]],
+) -> dict[str, str] | None:
+    """First derivation in any written section that has not been verified."""
+
+    for section in sections:
+        for deriv in derivations_for_section(root, section["id"]):
+            verification = deriv.get("verification")
+            if not isinstance(verification, dict):
+                identifier = deriv.get("id")
+                if isinstance(identifier, str):
+                    return {"id": identifier, "section": section["id"]}
+                continue
+            status = verification.get("status")
+            if status == "UNVERIFIED":
+                identifier = deriv.get("id")
+                if isinstance(identifier, str):
+                    return {"id": identifier, "section": section["id"]}
     return None
 
 

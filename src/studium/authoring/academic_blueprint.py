@@ -137,6 +137,23 @@ def academic_concept_ids(root: Path) -> set[str]:
     return {str(concept["id"]) for concept in academic_concepts(root) if isinstance(concept.get("id"), str)}
 
 
+def academic_sections_for_chapter(root: Path, chapter_id: str) -> list[dict[str, object]]:
+    """Return the academic blueprint sections for one chapter, in order."""
+
+    blueprint = current_academic_blueprint(root)
+    if blueprint is None:
+        return []
+    for part in _iter(blueprint.get("parts")):
+        for chapter in _iter(part.get("chapters")):
+            if chapter.get("id") == chapter_id:
+                return [
+                    {"id": s.get("id"), "title": s.get("title")}
+                    for s in _iter(chapter.get("sections"))
+                    if isinstance(s.get("id"), str) and isinstance(s.get("title"), str)
+                ]
+    return []
+
+
 def academic_chapter_ids(root: Path) -> list[str]:
     blueprint = current_academic_blueprint(root)
     identifiers: list[str] = []

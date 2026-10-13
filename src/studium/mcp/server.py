@@ -811,6 +811,7 @@ def _dispatch(session: McpSession, name: str, arguments: Mapping[str, object]) -
             excerpts=arguments.get("excerpts") if "excerpts" in arguments else None,
             role=arguments.get("role") if "role" in arguments else None,
             concepts=arguments.get("concepts") if "concepts" in arguments else None,
+            subsection=arguments.get("subsection") if "subsection" in arguments else None,
             actor=actor,
         )
     if name == "studium_paragraph_replace":
