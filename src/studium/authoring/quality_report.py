@@ -20,6 +20,7 @@ from studium.authoring.coverage import source_coverage
 from studium.authoring.depth.planner import depth_plan_status
 from studium.authoring.excerpts import excerpts_by_id
 from studium.authoring.figures import referenced_figure_keys, uncited_figures, unresolved_figure_references
+from studium.authoring.grounding import grounding_summary
 from studium.authoring.notation import notation_registry
 from studium.authoring.paragraphs import supported_paragraphs
 from studium.authoring.problems import problem_result_current
@@ -77,6 +78,7 @@ def quality_report(root: Path) -> dict[str, object]:
     figure_references = referenced_figure_keys(root)
     uncited = uncited_figures(root)
     unresolved = unresolved_figure_references(root)
+    math_grounding = grounding_summary(root)
 
     limitations: list[str] = []
     limitations.append(
@@ -109,6 +111,11 @@ def quality_report(root: Path) -> dict[str, object]:
         )
     if uncited:
         limitations.append(f"{len(uncited)} checked figures are not referenced from the prose")
+    ungrounded_formulas = math_grounding.get("formulas_ungrounded")
+    if isinstance(ungrounded_formulas, int) and ungrounded_formulas > 0:
+        limitations.append(
+            f"{ungrounded_formulas} prose formulas are not grounded by a source, a checked derivation, or a replay"
+        )
 
     return {
         "status": "ok",
@@ -148,6 +155,7 @@ def quality_report(root: Path) -> dict[str, object]:
         },
         "derivation_statuses": derivation_statuses,
         "exercise_difficulties": exercise_difficulties,
+        "math_grounding": math_grounding,
         "completeness": completeness.get("summary"),
         "coverage": coverage.get("totals"),
         "consistent": consistency.get("consistent"),

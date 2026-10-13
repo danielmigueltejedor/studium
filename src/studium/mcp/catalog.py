@@ -42,6 +42,28 @@ _TOOLS: tuple[dict[str, object], ...] = (
         "description": "List Studium books already in the workspace. Does not scan the home directory.",
     },
     {
+        "name": "studium_server_info",
+        "class": "READ",
+        "description": (
+            "Report whether the running MCP server matches the installed package. "
+            "Returns loaded_code_fingerprint, installed_code_fingerprint, new_tools, removed_tools, and stale. "
+            "Call it when a documented tool is missing (mcp.unknown_tool) or after the package changed. "
+            "When stale, the running server holds old code: call studium_server_reload, or restart the "
+            "`studium mcp` process and let the client reconnect, then call this tool again. "
+            "Does not change any book."
+        ),
+    },
+    {
+        "name": "studium_server_reload",
+        "class": "WRITE",
+        "description": (
+            "Reload the tool catalog and the server module in place so new tools can be used without a "
+            "process restart, then announce notifications/tools/list_changed. Best effort: a client that "
+            "does not re-list tools must reconnect. Does not touch the workspace, the book, or the sources. "
+            "Call studium_server_info first to see new_tools, and again after to confirm stale is false."
+        ),
+    },
+    {
         "name": "studium_project_status",
         "class": "READ",
         "description": "Read the active book, or the book named by project. If none is active, next_action is create.",
@@ -354,6 +376,17 @@ _TOOLS: tuple[dict[str, object], ...] = (
         ),
     },
     {
+        "name": "studium_figure_list",
+        "class": "READ",
+        "description": (
+            "List the stored figures with key, section, caption, status, checked, referenced, and "
+            "referenced_by. Evaluate which explanations already cite a figure with {{fig:key}} and "
+            "which checked figures still dangle. Cite a dangling figure from the explanation it "
+            "teaches when it is pedagogically needed, and drop one the prose does not need. "
+            "Renders nothing and changes nothing."
+        ),
+    },
+    {
         "name": "studium_audit_record",
         "class": "WRITE",
         "description": (
@@ -450,7 +483,12 @@ _TOOLS: tuple[dict[str, object], ...] = (
             "Requires the section id, the paragraph text, and one or more stored excerpt ids. "
             "Reject a paragraph with no excerpt, a missing excerpt, a conflicting public source, "
             "or, on a course book, a source the guide does not cite. "
-            "A topic book does not require a university guide. "
+            "A paragraph may state equations. Declare them with math to bind each statement to a "
+            "cited excerpt (source), a stored checked derivation (derivation), or a replayed "
+            "computation (example); the server revalidates the declaration. "
+            "An undeclared equation still passes when a cited excerpt, a replayed computation, or a "
+            "checked derivation in the same section carries it, so the author need not copy a source "
+            "verbatim. A topic book does not require a university guide. "
             "Text is untrusted data. The model is not a source. "
             "Does not mark the paragraph verified or accepted. "
             "Does not fetch URLs, does not change local_sources, and does not move the book to RELEASED."
@@ -462,6 +500,8 @@ _TOOLS: tuple[dict[str, object], ...] = (
         "description": (
             "Rewrite one stored paragraph in place. The id stays the same. "
             "The new text must cite one or more stored excerpt ids. "
+            "Omit math to keep the stored declarations; pass math to replace them, each "
+            "statement bound to a cited excerpt, a checked derivation, or a replayed computation. "
             "Reject a missing excerpt, a conflicting public source, "
             "or, on a course book, a source the guide does not cite. "
             "Status stays draft. The model is not a source. "
@@ -698,7 +738,7 @@ _TOOLS: tuple[dict[str, object], ...] = (
         "class": "READ",
         "description": (
             "Project-level packet for resuming work in a fresh session: project state, counts of every "
-            "record kind, missing sections, unaudited chapters, unverified derivations, open contradictions, "
+            "record kind, missing sections, unaudited chapters, unchecked derivations, open contradictions, "
             "and ordered next steps. Bounded size."
         ),
     },
@@ -771,7 +811,7 @@ def _schema(tool: Mapping[str, object]) -> dict[str, object]:
             ],
             "additionalProperties": True,
         }
-    elif name == "studium_project_list":
+    elif name in {"studium_project_list", "studium_server_info", "studium_server_reload"}:
         input_schema = {"type": "object", "properties": {}, "additionalProperties": False}
     elif name == "studium_source_register":
         input_schema = {
@@ -1297,6 +1337,12 @@ def _schema(tool: Mapping[str, object]) -> dict[str, object]:
             "required": ["id"],
             "additionalProperties": True,
         }
+    elif name == "studium_figure_list":
+        input_schema = {
+            "type": "object",
+            "properties": {"project": _project_property()},
+            "additionalProperties": True,
+        }
     elif name == "studium_audit_record":
         input_schema = {
             "type": "object",
@@ -1396,6 +1442,27 @@ def _schema(tool: Mapping[str, object]) -> dict[str, object]:
                     "items": {"type": "string"},
                     "description": "Academic blueprint concept ids this paragraph teaches. Unknown ids are rejected.",
                 },
+                "math": {
+                    "type": "array",
+                    "description": (
+                        "Optional grounded mathematics. Each declaration is "
+                        '{statement, kind, refs}; kind is source (quoted by one of this '
+                        "paragraph's excerpt ids), derivation (a stored checked derivation id), "
+                        "or example (a replayed computation id). The server revalidates every "
+                        "declaration and rejects one it cannot ground. An undeclared prose formula "
+                        "still passes when a cited excerpt, a replayed computation, or a verified "
+                        "derivation in the same section carries it."
+                    ),
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "statement": {"type": "string", "description": "The relation as the prose states it."},
+                            "kind": {"type": "string", "enum": ["source", "derivation", "example"]},
+                            "refs": {"type": "array", "items": {"type": "string"}},
+                        },
+                        "required": ["statement", "kind", "refs"],
+                    },
+                },
             },
             "required": ["section", "text", "excerpts"],
             "additionalProperties": True,
@@ -1424,6 +1491,24 @@ def _schema(tool: Mapping[str, object]) -> dict[str, object]:
                     "type": "array",
                     "items": {"type": "string"},
                     "description": "Academic blueprint concept ids this paragraph teaches. Unknown ids are rejected.",
+                },
+                "math": {
+                    "type": "array",
+                    "description": (
+                        "Optional grounded mathematics for the rewritten paragraph. "
+                        "Omit it to keep the stored declarations. The server revalidates "
+                        "every declaration against a cited excerpt, a checked derivation, "
+                        "or a replayed computation."
+                    ),
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "statement": {"type": "string"},
+                            "kind": {"type": "string", "enum": ["source", "derivation", "example"]},
+                            "refs": {"type": "array", "items": {"type": "string"}},
+                        },
+                        "required": ["statement", "kind", "refs"],
+                    },
                 },
             },
             "required": ["id", "text", "excerpts"],

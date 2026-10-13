@@ -6,10 +6,12 @@ concepts from the academic blueprint it teaches.
 """
 
 import hashlib
+import json
 from pathlib import Path
 
 from studium.authoring.academic_blueprint import academic_concept_ids
 from studium.authoring.blueprint import current_sections
+from studium.authoring.grounding import parse_math, validate_math
 from studium.authoring.support import paragraph_citation_blockers
 from studium.policy.trust import contains_directive, directive_changes_policy
 from studium.storage.init_project import load_state_holding_lock
@@ -33,6 +35,7 @@ def record_paragraph(
     role: object = None,
     concepts: object = None,
     subsection: object = None,
+    math: object = None,
     actor: dict[str, object] | None = None,
 ) -> dict[str, object]:
     """Store one draft paragraph for a blueprint section. Does not change state."""
@@ -53,7 +56,14 @@ def record_paragraph(
     if concept_error is not None:
         return concept_error
     subsection_id = _subsection(subsection)
+    math_entries, math_error = parse_math(math)
+    if math_error is not None:
+        return math_error
     assert section_id is not None and cleaned_text is not None and excerpt_ids is not None and concept_ids is not None
+    if math_entries is not None:
+        grounding_error = validate_math(root, math_entries, section=section_id, excerpt_ids=excerpt_ids)
+        if grounding_error is not None:
+            return grounding_error
     if directive_changes_policy(cleaned_text):
         return _error("policy.overridden", "paragraph text changed policy")
     blockers = paragraph_citation_blockers(root, excerpt_ids)
@@ -65,7 +75,7 @@ def record_paragraph(
             fresh_blockers = paragraph_citation_blockers(root, excerpt_ids)
             if fresh_blockers:
                 return _rejected_state(state, fresh_blockers)
-            digest = _digest(section_id, cleaned_text, excerpt_ids)
+            digest = _digest(section_id, cleaned_text, excerpt_ids, math_entries)
             prior = next((item for item in fold_by_id(root / PARAGRAPHS) if item.get("text_sha256") == digest), None)
             if prior is not None:
                 return _body(state, prior, status="already_recorded")
@@ -87,6 +97,8 @@ def record_paragraph(
                 record["concepts"] = concept_ids
             if subsection_id is not None:
                 record["subsection"] = subsection_id
+            if math_entries:
+                record["math"] = math_entries
             append_jsonl(root / PARAGRAPHS, record)
             _audit(root, record=record, actor=actor)
             fresh = load_state_holding_lock(root)
@@ -103,12 +115,14 @@ def replace_paragraph(
     excerpts: object,
     role: object = None,
     concepts: object = None,
+    math: object = None,
     actor: dict[str, object] | None = None,
 ) -> dict[str, object]:
     """Rewrite one stored paragraph in place. The new text still cites an excerpt.
 
     Conflicts and course sources the guide does not cite are rejected, the same
     as ``record_paragraph``. The id does not change. The result stays a draft.
+    When ``math`` is omitted the stored declarations are kept.
     """
 
     identifier = _paragraph_id(paragraph_id)
@@ -129,22 +143,33 @@ def replace_paragraph(
     concept_ids, concept_error = _concepts(root, concepts)
     if concept_error is not None:
         return concept_error
+    math_entries, math_error = parse_math(math)
+    if math_error is not None:
+        return math_error
     assert cleaned_text is not None and excerpt_ids is not None and concept_ids is not None
+    if math is None:
+        current_math = current.get("math")
+        if isinstance(current_math, list):
+            math_entries = [entry for entry in current_math if isinstance(entry, dict)]
+    section_id = current.get("section")
+    if not isinstance(section_id, str):
+        return _error("paragraph.section_unknown", "section is not in the stored blueprint")
+    if math_entries:
+        grounding_error = validate_math(root, math_entries, section=section_id, excerpt_ids=excerpt_ids)
+        if grounding_error is not None:
+            return grounding_error
     if directive_changes_policy(cleaned_text):
         return _error("policy.overridden", "paragraph text changed policy")
     blockers = paragraph_citation_blockers(root, excerpt_ids)
     if blockers:
         return _rejected(root, blockers)
-    section_id = current.get("section")
-    if not isinstance(section_id, str):
-        return _error("paragraph.section_unknown", "section is not in the stored blueprint")
     try:
         with project_lock(root):
             state = load_state_holding_lock(root)
             fresh_blockers = paragraph_citation_blockers(root, excerpt_ids)
             if fresh_blockers:
                 return _rejected_state(state, fresh_blockers)
-            digest = _digest(section_id, cleaned_text, excerpt_ids)
+            digest = _digest(section_id, cleaned_text, excerpt_ids, math_entries)
             record: dict[str, object] = {
                 "schema_version": "1.0.0",
                 "id": identifier,
@@ -166,6 +191,8 @@ def replace_paragraph(
                 record["concepts"] = concept_ids
             elif isinstance(current.get("concepts"), list):
                 record["concepts"] = current["concepts"]
+            if math_entries:
+                record["math"] = math_entries
             append_jsonl(root / PARAGRAPHS, record)
             _audit(root, record=record, actor=actor, operation="replace_paragraph")
             fresh = load_state_holding_lock(root)
@@ -363,6 +390,9 @@ def _public(record: dict[str, object]) -> dict[str, object]:
     concepts = record.get("concepts")
     if isinstance(concepts, list):
         visible["concepts"] = [str(item) for item in concepts if isinstance(item, str)]
+    math_entries = record.get("math")
+    if isinstance(math_entries, list) and math_entries:
+        visible["math"] = math_entries
     if record.get("content_directives_ignored") is True:
         visible["content_directives_ignored"] = True
     return visible
@@ -425,8 +455,10 @@ def _rejected_state(state: dict[str, object], blockers: list[dict[str, object]])
     }
 
 
-def _digest(section_id: str, text: str, excerpts: list[str]) -> str:
+def _digest(section_id: str, text: str, excerpts: list[str], math: list[dict[str, object]] | None = None) -> str:
     payload = section_id + "\n" + text + "\n" + "\n".join(excerpts)
+    if math:
+        payload += "\nmath:" + json.dumps(math, ensure_ascii=False, sort_keys=True)
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 

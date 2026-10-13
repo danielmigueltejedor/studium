@@ -476,6 +476,51 @@ def uncited_figures(root: Path) -> list[dict[str, object]]:
     ]
 
 
+def figure_usage(root: Path) -> list[dict[str, object]]:
+    """Every live figure with where the prose references it.
+
+    ``referenced`` is true when at least one supported paragraph names the key
+    or the id. ``referenced_by`` lists those paragraph ids in reading order, so
+    an author can see which explanations already cite a figure and which checked
+    figures still dangle. This evaluates usage; it does not render or verify.
+    """
+
+    from studium.authoring.paragraphs import supported_paragraphs
+
+    mapping = figure_reference_map(root)
+    referenced: dict[str, list[str]] = {}
+    for record in supported_paragraphs(root):
+        text = record.get("text")
+        if not isinstance(text, str):
+            continue
+        identifier = record.get("id")
+        paragraph_id = identifier if isinstance(identifier, str) else ""
+        for match in FIGURE_REF.finditer(text):
+            target = mapping.get(match.group(1).lower())
+            target_id = target.get("id") if target is not None else None
+            if isinstance(target_id, str):
+                referenced.setdefault(target_id, []).append(paragraph_id)
+    usage: list[dict[str, object]] = []
+    for record in _live_figures(root):
+        identifier = record.get("id")
+        if not isinstance(identifier, str):
+            continue
+        checked = record.get("status") == "checked" and record.get("correct") is True
+        usage.append(
+            {
+                "id": identifier,
+                "key": _effective_key(record),
+                "section": record.get("section"),
+                "caption": record.get("caption"),
+                "status": record.get("status"),
+                "checked": checked,
+                "referenced": identifier in referenced,
+                "referenced_by": referenced.get(identifier, []),
+            }
+        )
+    return usage
+
+
 def _key_taken(root: Path, key: str) -> bool:
     """True when a live figure already answers to this key or its id."""
 
