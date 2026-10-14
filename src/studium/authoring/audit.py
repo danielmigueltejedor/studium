@@ -238,11 +238,12 @@ def audited_paragraph_ids(root: Path) -> set[str]:
 
     paragraphs = supported_paragraphs(root)
     excerpts = excerpts_by_id(root)
+    dependencies = _DependencyView(root)
     covered: set[str] = set()
     for record in fold_by_id(root / AUDITS):
         for paragraph in paragraphs:
             identifier = paragraph.get("id")
-            if isinstance(identifier, str) and _covers_paragraph(root, record, paragraph, excerpts):
+            if isinstance(identifier, str) and _covers_paragraph(root, record, paragraph, excerpts, dependencies):
                 covered.add(identifier)
     return covered
 
@@ -571,7 +572,7 @@ def _dependency_entries(
     return entries
 
 
-def _dependencies_current(root: Path, entries: list[object]) -> bool:
+def _dependencies_current(root: Path, entries: list[object], view: "_DependencyView | None" = None) -> bool:
     for entry in entries:
         if not isinstance(entry, dict):
             return False
@@ -580,9 +581,31 @@ def _dependencies_current(root: Path, entries: list[object]) -> bool:
         digest = entry.get("sha256")
         if not isinstance(kind, str) or not isinstance(identifier, str) or not isinstance(digest, str):
             return False
-        if _current_dependency(root, kind, identifier) != digest:
+        current = view.current(kind, identifier) if view is not None else _current_dependency(root, kind, identifier)
+        if current != digest:
             return False
     return True
+
+
+class _DependencyView:
+    """``_current_dependency`` remembered for one read-only pass over many audits.
+
+    Checking every audit against every paragraph recomputed the same
+    fingerprints, each by re-reading a whole record file (F30). Nothing is
+    written while a view is in use, so a value cannot go stale inside it.
+    """
+
+    __slots__ = ("_root", "_seen")
+
+    def __init__(self, root: Path) -> None:
+        self._root = root
+        self._seen: dict[tuple[str, str], str | None] = {}
+
+    def current(self, kind: str, identifier: str) -> str | None:
+        key = (kind, identifier)
+        if key not in self._seen:
+            self._seen[key] = _current_dependency(self._root, kind, identifier)
+        return self._seen[key]
 
 
 def _current_dependency(root: Path, kind: str, identifier: str) -> str | None:
@@ -696,6 +719,7 @@ def _covers_paragraph(
     record: dict[str, object],
     paragraph: dict[str, object],
     excerpts: dict[str, dict[str, object]],
+    dependencies: "_DependencyView | None" = None,
 ) -> bool:
     if record.get("status") != "recorded" or record.get("prose_added") is not False:
         return False
@@ -721,8 +745,8 @@ def _covers_paragraph(
         current_digest = current.get("text_sha256") if isinstance(current, dict) else None
         if excerpt_hashes.get(excerpt_id) != current_digest:
             return False
-    dependencies = binding.get("dependencies")
-    return not (isinstance(dependencies, list) and not _dependencies_current(root, dependencies))
+    entries = binding.get("dependencies")
+    return not (isinstance(entries, list) and not _dependencies_current(root, entries, dependencies))
 
 
 def _public_audit(record: dict[str, object]) -> dict[str, object]:

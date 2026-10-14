@@ -12,7 +12,7 @@ from pathlib import Path
 from studium.authoring.academic_blueprint import academic_concept_ids
 from studium.authoring.blueprint import current_sections
 from studium.authoring.grounding import parse_math, validate_math
-from studium.authoring.support import paragraph_citation_blockers
+from studium.authoring.support import citation_context, paragraph_citation_blockers
 from studium.policy.trust import contains_directive, directive_changes_policy
 from studium.storage.init_project import load_state_holding_lock
 from studium.storage.locking import ProjectLocked, project_lock
@@ -231,13 +231,14 @@ def supported_paragraphs(root: Path) -> list[dict[str, object]]:
     """Stored drafts whose excerpts still pass the support check."""
 
     kept: list[dict[str, object]] = []
+    context = citation_context(root)
     for record in fold_by_id(root / PARAGRAPHS):
         if record.get("status") != "draft":
             continue
         excerpts = record.get("excerpts")
         if not isinstance(excerpts, list) or not excerpts or not all(isinstance(item, str) for item in excerpts):
             continue
-        if paragraph_citation_blockers(root, list(excerpts)):
+        if paragraph_citation_blockers(root, list(excerpts), context):
             continue
         kept.append(record)
     return kept
