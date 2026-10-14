@@ -785,6 +785,18 @@ _TOOLS: tuple[dict[str, object], ...] = (
         ),
     },
     {
+        "name": "studium_equation_report",
+        "class": "READ",
+        "description": (
+            "Equation evidence report: every complete equation in the stored prose, exactly as written, with "
+            "its evidence status (symbolically_verified, dimensionally_verified, numerically_reproduced, "
+            "source_supported, derived_steps_unchecked, numerically_ambiguous, not_machine_checkable, "
+            "unsupported, contradicted, verification_failed; or definition, approximation, value_or_condition), "
+            "the evidence ids, whether it is a display equation, and whether a person must still review it. "
+            "Filter by section or status; paginated with offset and limit. Read-only; it never marks anything verified."
+        ),
+    },
+    {
         "name": "studium_quality_report",
         "class": "READ",
         "description": (
@@ -1880,6 +1892,21 @@ def _schema(tool: Mapping[str, object]) -> dict[str, object]:
             "properties": {
                 "project": _project_property(),
                 "section": {"type": "string", "description": "Blueprint section id, or omit for the whole book."},
+            },
+            "additionalProperties": True,
+        }
+    elif name == "studium_equation_report":
+        input_schema = {
+            "type": "object",
+            "properties": {
+                "project": _project_property(),
+                "section": {"type": "string", "description": "Blueprint section id, or omit for the whole book."},
+                "status": {
+                    "description": "One evidence status or a list of them to keep.",
+                    "anyOf": [{"type": "string"}, {"type": "array", "items": {"type": "string"}}],
+                },
+                "offset": {"type": "integer", "minimum": 0},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 500},
             },
             "additionalProperties": True,
         }

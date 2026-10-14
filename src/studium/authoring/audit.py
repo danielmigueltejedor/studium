@@ -150,6 +150,12 @@ def book_review(root: Path) -> dict[str, object]:
             fresh = load_state_holding_lock(root)
     except ProjectLocked:
         return _error("storage.locked", "project is locked")
+    from studium.authoring.grounding import grounding_summary
+    from studium.authoring.stages import verification_stages
+
+    stages = verification_stages(root, grounding_summary(root))
+    science_value = stages["scientific_verification"]
+    science = science_value if isinstance(science_value, dict) else {}
     return {
         "status": "audit_passed" if passed else "blocked",
         "audit_passed": passed,
@@ -158,7 +164,13 @@ def book_review(root: Path) -> dict[str, object]:
         "applied": False,
         "project_state": fresh.get("state"),
         "local_sources": _local(fresh),
-        "message": "audit_passed is for this edition only. The book is not RELEASED.",
+        "scientific_verification": science,
+        "stages": stages,
+        "message": (
+            "audit_passed is the evidence audit for this edition only; it is not scientific verification "
+            f"({science.get('verified')} of {science.get('claims')} equation claims verified) and not human approval. "
+            "The book is not RELEASED."
+        ),
     }
 
 

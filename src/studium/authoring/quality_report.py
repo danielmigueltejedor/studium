@@ -24,6 +24,7 @@ from studium.authoring.grounding import grounding_summary
 from studium.authoring.notation import notation_registry
 from studium.authoring.paragraphs import supported_paragraphs
 from studium.authoring.problems import problem_result_current
+from studium.authoring.stages import verification_stages
 from studium.domain.profiles import depth_thresholds
 from studium.storage.init_project import domain_profile as _domain_profile
 from studium.storage.init_project import load_state_holding_lock
@@ -114,7 +115,12 @@ def quality_report(root: Path) -> dict[str, object]:
     ungrounded_formulas = math_grounding.get("formulas_ungrounded")
     if isinstance(ungrounded_formulas, int) and ungrounded_formulas > 0:
         limitations.append(
-            f"{ungrounded_formulas} prose formulas are not grounded by a source, a checked derivation, or a replay"
+            f"{ungrounded_formulas} prose equations are unsupported, contradicted, or failed a stored check"
+        )
+    if math_grounding.get("scientific_verification_complete") is not True:
+        limitations.append(
+            f"{math_grounding.get('claims_verified')} of {math_grounding.get('claims')} equation claims are verified; "
+            "the rest are source-supported, unchecked, or not machine-checkable and need human review"
         )
 
     return {
@@ -156,6 +162,7 @@ def quality_report(root: Path) -> dict[str, object]:
         "derivation_statuses": derivation_statuses,
         "exercise_difficulties": exercise_difficulties,
         "math_grounding": math_grounding,
+        "stages": verification_stages(root, math_grounding),
         "completeness": completeness.get("summary"),
         "coverage": coverage.get("totals"),
         "consistent": consistency.get("consistent"),
