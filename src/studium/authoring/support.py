@@ -11,6 +11,7 @@ from pathlib import Path
 from studium.authoring.excerpts import excerpts_by_id
 from studium.domain.enums import SourceOrigin
 from studium.domain.profiles import BOOK_TOPIC
+from studium.research.sources import live_local_source
 from studium.storage.init_project import book_kind
 from studium.storage.records import CLAIMS, PUBLIC_BIBLIOGRAPHY, fold_by_id
 
@@ -79,6 +80,11 @@ def paragraph_citation_blockers(root: Path, excerpt_ids: list[str]) -> list[dict
             )
             continue
         source_id = excerpt.get("source_id")
+        if excerpt.get("source_kind") == "local":
+            blocker = _local_excerpt_blocker(root, excerpt_id, excerpt)
+            if blocker is not None:
+                blockers.append(blocker)
+            continue
         record = records.get(source_id) if isinstance(source_id, str) else None
         if record is None:
             blockers.append(
@@ -130,9 +136,12 @@ def draft_source_usable(root: Path, record: dict[str, object]) -> bool:
 
 
 def corroboration_for_excerpts(root: Path, excerpt_ids: list[str]) -> str | None:
-    """``two_witnesses`` when two stored excerpts come from different public sources.
+    """``two_witnesses`` when two stored excerpts come from different sources.
 
-    Agreement is not verified and it is not absolute truth.
+    User-provided files count together as one witness: two of the user's own
+    documents (for example two sets of lecture notes) do not corroborate each
+    other, so two witnesses need at least one public source. Agreement is not
+    verified and it is not absolute truth.
     """
 
     if len(excerpt_ids) < 2:
@@ -146,10 +155,28 @@ def corroboration_for_excerpts(root: Path, excerpt_ids: list[str]) -> str | None
         source_id = excerpt.get("source_id")
         if not isinstance(source_id, str) or not source_id:
             return None
-        sources.add(source_id)
+        sources.add("user-provided" if excerpt.get("source_kind") == "local" else source_id)
     if len(sources) < 2:
         return None
     return "two_witnesses"
+
+
+def _local_excerpt_blocker(root: Path, excerpt_id: str, excerpt: dict[str, object]) -> dict[str, object] | None:
+    """A user-provided excerpt may support a draft while its exact file version is live and not rejected."""
+
+    source_id = excerpt.get("source_id")
+    record = live_local_source(root, source_id) if isinstance(source_id, str) else None
+    if record is None:
+        return {"code": "claim.source_missing", "entity_id": excerpt_id, "message": "the user-provided source was removed"}
+    if record.get("state") == "REJECTED":
+        return {"code": "claim.source_rejected", "entity_id": source_id, "message": f"excerpt {excerpt_id}: source was rejected"}
+    if record.get("sha256") != excerpt.get("source_sha256"):
+        return {
+            "code": "claim.source_changed",
+            "entity_id": source_id,
+            "message": f"excerpt {excerpt_id}: quoted from a different version of the source",
+        }
+    return None
 
 
 def citation_blockers(

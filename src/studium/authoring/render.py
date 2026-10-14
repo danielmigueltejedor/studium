@@ -36,6 +36,7 @@ from studium.storage.records import (
     AUDITS,
     COMPUTATIONS,
     DERIVATIONS,
+    EXCERPTS,
     FIGURES,
     PROBLEMS,
     PUBLIC_BIBLIOGRAPHY,
@@ -640,9 +641,11 @@ _EXTRA_BOX_LABELS: dict[str, dict[str, str]] = {
         "answer_mismatch": "la aritmética del último paso no da la respuesta enunciada. La respuesta no está comprobada.",
         "answer_ambiguous": "la respuesta enunciada termina en ceros que pueden no ser significativos; sólo coincide si son de relleno. La respuesta no está comprobada.",
         "answer_unreplayable": "la respuesta no se pudo reproducir con los pasos almacenados. La respuesta no está comprobada.",
+        "user_material": "Material aportado por el usuario (privado; no verificado).",
     },
 }
 _EXTRA_BOX_DEFAULTS = {
+    "user_material": "User-provided material (private; not verified).",
     "exercises": "Exercises",
     "derivations": "Derivations",
     "symbol": "Symbol",
@@ -1604,7 +1607,7 @@ def _document(root: Path) -> str:
             r"\begin{thebibliography}{99}",
         ]
     )
-    lines.extend(_bibliography_lines(root, copy))
+    lines.extend(_bibliography_lines(root, copy, language))
     lines.extend([r"\end{thebibliography}", r"\end{document}", ""])
     return "\n".join(lines)
 
@@ -2884,7 +2887,7 @@ def _url_tex(url: str) -> str:
     return latex_escape(cleaned)
 
 
-def _bibliography_lines(root: Path, copy: dict[str, str]) -> list[str]:
+def _bibliography_lines(root: Path, copy: dict[str, str], language: BookLanguage | None = None) -> list[str]:
     lines: list[str] = []
     index = 0
     for record in fold_by_id(root / PUBLIC_BIBLIOGRAPHY):
@@ -2902,9 +2905,28 @@ def _bibliography_lines(root: Path, copy: dict[str, str]) -> list[str]:
         if note:
             parts.append(latex_escape(note.strip()))
         lines.append(r"\bibitem{src" + str(index) + "} " + " ".join(parts))
+    label = _extra_label(language, "user_material") if language is not None else _EXTRA_BOX_DEFAULTS["user_material"]
+    for _source_id, filename in _quoted_local_sources(root):
+        index += 1
+        lines.append(r"\bibitem{src" + str(index) + "} " + latex_escape(f"{filename}. {label}"))
     if not lines:
         lines.append(r"\bibitem{none} " + latex_escape(copy["empty"]))
     return lines
+
+
+def _quoted_local_sources(root: Path) -> list[tuple[str, str]]:
+    """User-provided sources that a stored excerpt quotes: id and file name, never a path."""
+
+    quoted: list[str] = []
+    for excerpt in fold_by_id(root / EXCERPTS):
+        source_id = excerpt.get("source_id")
+        if excerpt.get("source_kind") == "local" and isinstance(source_id, str) and source_id not in quoted:
+            quoted.append(source_id)
+    names = {
+        str(record.get("id")): str(record.get("filename") or record.get("id"))
+        for record in fold_by_id(root / "sources" / "registry.jsonl")
+    }
+    return [(source_id, names[source_id]) for source_id in quoted if source_id in names]
 
 
 def _status_line(kind: str, counts: dict[str, int], copy: dict[str, str]) -> str:
@@ -2983,6 +3005,8 @@ def _source_titles(root: Path) -> dict[str, str]:
         title = record.get("title")
         if isinstance(identifier, str) and isinstance(title, str):
             titles[identifier] = title
+    for source_id, filename in _quoted_local_sources(root):
+        titles.setdefault(source_id, filename)
     return titles
 
 

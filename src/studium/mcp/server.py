@@ -976,6 +976,9 @@ def _dispatch(session: McpSession, name: str, arguments: Mapping[str, object]) -
             source_id=arguments.get("source_id"),
             url=arguments.get("url"),
             text=arguments.get("text"),
+            path=arguments.get("path"),
+            locator=arguments.get("locator"),
+            page=arguments.get("page"),
             actor=actor,
         )
     if name == "studium_excerpt_list":

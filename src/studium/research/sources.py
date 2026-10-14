@@ -193,6 +193,44 @@ def source_get(root: Path, source_id: str) -> dict[str, object]:
     return {"status": "ok", "source": _present(found, _successors(sources))}
 
 
+def live_local_source(root: Path, source_id: str) -> dict[str, object] | None:
+    """The current registry record of a user-provided source, or ``None``."""
+
+    return _find(_live(root), source_id)
+
+
+def read_registered_file(
+    root: Path, source_id: str, raw_path: object
+) -> tuple[dict[str, object] | None, bytes | None, dict[str, object] | None]:
+    """Read a file the user gave again and prove it is the registered source.
+
+    The bytes must hash to the stored sha256 of a live, not rejected source.
+    The path is not stored and the bytes are not kept.
+    """
+
+    record = live_local_source(root, source_id)
+    if record is None:
+        return None, None, _error("sources.not_found", f"no source {source_id}", source_id=source_id)
+    if record.get("state") == "REJECTED":
+        return record, None, _error("sources.rejected", "a rejected source cannot be quoted", source_id=source_id)
+    if not isinstance(raw_path, str) or not raw_path.strip():
+        return record, None, _error(
+            "mcp.invalid_input",
+            "path is required: the file the user gave for this source, read again to check the quote",
+        )
+    prepared = _prepare_path(raw_path.strip())
+    if prepared.get("status") != "ready":
+        return record, None, prepared
+    if prepared.get("sha256") != record.get("sha256"):
+        return record, None, _error(
+            "sources.hash_mismatch",
+            "the file at path is not the registered version of this source; register a new version first",
+            source_id=source_id,
+        )
+    content = prepared.get("content")
+    return record, content if isinstance(content, bytes) else None, None
+
+
 def source_add(
     root: Path,
     paths: list[str],
