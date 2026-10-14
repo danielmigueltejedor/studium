@@ -110,18 +110,63 @@ def review_stored_problem(
     stored_solution = problem.get("solution")
     solution = stored_solution if isinstance(stored_solution, dict) else {}
 
+    expected_text: str | None = None
+    expected_source = "caller" if numeric_value is not None else None
+    if numeric_value is None:
+        # Without a caller-supplied value, review the problem's own stated answer in the
+        # unit of its final step, read at the precision it is written with.
+        stored_expected = problem.get("expected")
+        stored_unit = _final_step_unit(solution)
+        if isinstance(stored_expected, str) and stored_unit is not None:
+            try:
+                candidate = float(stored_expected)
+            except ValueError:
+                candidate = math.nan
+            if math.isfinite(candidate):
+                numeric_value, unit_value, expected_text = candidate, stored_unit, stored_expected
+                expected_source = "stored"
+
     report = verify_problem_report(
         solution,
         expected_value=numeric_value,
         expected_unit=unit_value,
+        expected_text=expected_text,
     )
 
+    answer_check = problem.get("answer_check")
     return {
         "status": "ok",
         "problem_id": identifier,
         "problem_status": problem.get("status"),
         "record_current": problem.get("current") is not False,
+        "expected_source": expected_source,
+        "evidence": {
+            # Three different questions. None of them is scientific validity.
+            "source_independence": problem.get("status") == "two_witnesses",
+            "answer_arithmetic": answer_check.get("result") if isinstance(answer_check, dict) else "not_checked",
+            "model_reproduction": _numeric_status(report.as_dict()),
+            "scientific_validity": "not_established",
+        },
         "report": report.as_dict(),
         "advisory": True,
         "stored_content_modified": False,
     }
+
+
+def _numeric_status(report: dict[str, object]) -> str:
+    outputs = report.get("outputs")
+    checks = outputs.get("checks") if isinstance(outputs, dict) else None
+    numeric = checks.get("numeric") if isinstance(checks, dict) else None
+    status = numeric.get("status") if isinstance(numeric, dict) else None
+    return str(status) if status is not None else "UNVERIFIED"
+
+
+def _final_step_unit(solution: dict[str, object]) -> str | None:
+    steps = solution.get("steps")
+    if not isinstance(steps, list):
+        return None
+    for step in reversed(steps):
+        if isinstance(step, dict) and "expression" in step:
+            unit = step.get("unit")
+            return unit.strip() if isinstance(unit, str) and unit.strip() else None
+    return None

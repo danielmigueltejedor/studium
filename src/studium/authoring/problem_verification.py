@@ -5,10 +5,12 @@ A dimensional check cannot establish mathematical or physical validity.
 
 import math
 from collections.abc import Mapping
+from fractions import Fraction
 
 import pint
 import sympy
 
+from studium.authoring.computation import precision_verdict
 from studium.verification.dimensional import REGISTRY, DimensionError, check_dimensions
 from studium.verification.model import VerificationResult, VerificationStatus
 from studium.verification.parser import ExpressionError, parse_expression
@@ -145,6 +147,7 @@ def verify_problem_numeric(
     *,
     expected_value: float,
     expected_unit: str,
+    expected_text: str | None = None,
 ) -> VerificationResult:
     """Reproduce one model calculation using quantities in base units.
 
@@ -282,12 +285,24 @@ def verify_problem_numeric(
     if not math.isfinite(calculated) or not math.isfinite(expected_base):
         return unverified("The calculation produced a non-finite value.")
 
-    reproduced = math.isclose(
-        calculated,
-        expected_base,
-        rel_tol=1e-9,
-        abs_tol=1e-12,
-    )
+    if expected_text is not None:
+        # The stated answer is compared at the precision it is written with, in its own unit.
+        factor = expected_base / float(expected_value) if float(expected_value) != 0 else None
+        if factor is None or not math.isfinite(factor) or factor == 0:
+            return unverified("The stated answer cannot be compared in its unit.")
+        verdict = precision_verdict(expected_text, Fraction(calculated / factor))
+        if verdict == "ambiguous":
+            return unverified(
+                "The stated answer ends in zeros that may not be significant; the model agrees only if they are placeholders."
+            )
+        reproduced = verdict == "agrees"
+    else:
+        reproduced = math.isclose(
+            calculated,
+            expected_base,
+            rel_tol=1e-9,
+            abs_tol=1e-12,
+        )
 
     return VerificationResult(
         status=(

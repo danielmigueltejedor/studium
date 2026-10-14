@@ -1422,6 +1422,9 @@ def _failed(payload: Mapping[str, object]) -> bool:
         return False
     if status in {"two_witnesses", "unchecked"} and isinstance(payload.get("problem"), dict):
         return False
+    # A replay that ran and stored its verdict is a result, even when the verdict is negative.
+    if status in {"mismatch", "ambiguous_precision"} and isinstance(payload.get("computation"), dict):
+        return False
     if status in {"UNKNOWN", "NONE", "AVAILABLE", "IMPORTED", "SKIPPED"}:
         return False
     if "state" in payload and "local_sources" in payload:

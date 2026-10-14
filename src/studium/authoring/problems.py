@@ -809,10 +809,13 @@ def _public(record: dict[str, object], root: Path | None = None) -> dict[str, ob
         visible["status"] = "two_witnesses" if record.get("status") == "two_witnesses" else record.get("status")
         if record.get("corroboration") == "two_witnesses" and visible["status"] == "two_witnesses":
             visible["corroboration"] = "two_witnesses"
+        if isinstance(record.get("answer_check"), dict):
+            visible["answer_check"] = record["answer_check"]
     if root is not None and not problem_result_current(root, record):
         visible["status"] = "stale"
         visible["correct"] = False
         visible.pop("corroboration", None)
+        visible.pop("answer_check", None)
         visible["current"] = False
     return visible
 

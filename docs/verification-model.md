@@ -58,6 +58,14 @@ At least one must be provided. Each produces its own status. The overall status 
 
 Neither is mathematical proof. Both are recorded honestly.
 
+A numeric problem reports three separate kinds of evidence, and none of them is scientific validity:
+
+- **Source independence** (`two_witnesses`): the two cited excerpts come from different public sources. It does not mean they state the answer.
+- **Answer arithmetic** (`answer_check`): the unrounded value of the final replayed step reproduces the stated answer at its written precision (`replayed`), does not (`mismatch`), only would with trailing zeros read as placeholders (`ambiguous_precision`), or cannot be replayed (`not_replayable`).
+- **Model reproduction** (`studium_problem_scientific_review`): the stored model evaluated with the stored given values reproduces the stated answer in the unit of the final step. Without a caller-supplied value, the review uses the problem's own `expected`. A model that does not give the answer is `FAILED` even when the step arithmetic replays.
+
+The review always reports `scientific_validity: not_established` and `human_review_required`. The draft prints the answer check under each solution and says that an arithmetic reproduction does not validate the physical model.
+
 ## Structured solutions
 
 A worked problem may include a structured solution with given values, unknowns, governing equations, assumptions, intermediate steps, and a final result. Each step that includes an expression and expected value is replayed independently. A step that does not reproduce is reported, not hidden.

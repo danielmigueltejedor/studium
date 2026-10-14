@@ -632,7 +632,13 @@ _EXTRA_BOX_LABELS: dict[str, dict[str, str]] = {
         "mistakes": "Errores frecuentes",
         "reproduced": "reproducido",
         "not_reproduced": "no reproducido",
+        "ambiguous": "precisión ambigua",
         "step_word": "Paso",
+        "answer_check": "Comprobación de la respuesta",
+        "answer_replayed": "la aritmética del último paso reproduce la respuesta enunciada a la precisión con que está escrita. Es una reproducción aritmética; no valida el modelo físico ni sus hipótesis.",
+        "answer_mismatch": "la aritmética del último paso no da la respuesta enunciada. La respuesta no está comprobada.",
+        "answer_ambiguous": "la respuesta enunciada termina en ceros que pueden no ser significativos; sólo coincide si son de relleno. La respuesta no está comprobada.",
+        "answer_unreplayable": "la respuesta no se pudo reproducir con los pasos almacenados. La respuesta no está comprobada.",
     },
 }
 _EXTRA_BOX_DEFAULTS = {
@@ -658,6 +664,12 @@ _EXTRA_BOX_DEFAULTS = {
     "limitations": "Limitations",
     "mistakes": "Common mistakes",
     "reproduced": "reproduced",
+    "ambiguous": "ambiguous precision",
+    "answer_check": "Answer check",
+    "answer_replayed": "the arithmetic of the final step reproduces the stated answer to the precision it is written with. This is an arithmetic reproduction; it does not validate the physical model or its assumptions.",
+    "answer_mismatch": "the arithmetic of the final step does not give the stated answer. The answer is not checked.",
+    "answer_ambiguous": "the stated answer ends in zeros that may not be significant; it agrees only if they are placeholders. The answer is not checked.",
+    "answer_unreplayable": "the answer could not be reproduced from the stored steps. The answer is not checked.",
     "not_reproduced": "not reproduced",
     "step_word": "Step",
 }
@@ -2004,6 +2016,7 @@ def _solution_body(problem: dict[str, object], solution: dict[str, object], copy
     step_checks = problem.get("step_checks")
     if isinstance(step_checks, list):
         body.extend(_step_check_lines(step_checks, language))
+    body.extend(_answer_check_lines(problem.get("answer_check"), language))
     limitations = solution.get("limitations")
     if isinstance(limitations, list):
         body.extend(_bullet_items(_extra_label(language, "limitations"), [str(item) for item in limitations], language))
@@ -2290,7 +2303,12 @@ def _step_check_lines(step_checks: list[object], language: BookLanguage) -> list
         index = check.get("index")
         number = str(index + 1) if isinstance(index, int) else "?"
         value = str(check.get("value") or check.get("expected") or "")
-        phrase = _extra_label(language, "reproduced") if check.get("reproduced") is True else _extra_label(language, "not_reproduced")
+        if check.get("reproduced") is True:
+            phrase = _extra_label(language, "reproduced")
+        elif check.get("precision") == "ambiguous":
+            phrase = _extra_label(language, "ambiguous")
+        else:
+            phrase = _extra_label(language, "not_reproduced")
         item = latex_escape(_extra_label(language, "step_word")) + " " + latex_escape(number)
         if value:
             item += r": $" + render_text_run(value) + "$"
@@ -2298,6 +2316,29 @@ def _step_check_lines(step_checks: list[object], language: BookLanguage) -> list
         lines.append(r"\item " + item)
     lines.append(r"\end{itemize}")
     return lines
+
+
+_ANSWER_PHRASES = {
+    "replayed": "answer_replayed",
+    "mismatch": "answer_mismatch",
+    "ambiguous_precision": "answer_ambiguous",
+    "not_replayable": "answer_unreplayable",
+}
+
+
+def _answer_check_lines(answer_check: object, language: BookLanguage) -> list[str]:
+    """What the stored answer check established, and what it did not."""
+
+    if not isinstance(answer_check, dict):
+        return []
+    key = _ANSWER_PHRASES.get(str(answer_check.get("result")))
+    if key is None:
+        return []
+    return [
+        "",
+        r"\noindent\textbf{" + latex_escape(_extra_label(language, "answer_check")) + "} "
+        + latex_escape(_extra_label(language, key)),
+    ]
 
 
 def _derivation_box(root: Path, section_id: str, language: BookLanguage) -> list[str]:
@@ -2690,6 +2731,7 @@ def _solution_lines(root: Path, copy: dict[str, str], language: BookLanguage) ->
                 # answer; reuse it so the appendix never prints a raw float.
                 lines.extend(["", r"\noindent\textbf{" + latex_escape(copy["respuesta"]) + "}"])
                 lines.extend(_display_math(result))
+                lines.extend(_answer_check_lines(record.get("answer_check"), language))
             else:
                 expected = _str_field(record, "expected")
                 if expected.strip():
