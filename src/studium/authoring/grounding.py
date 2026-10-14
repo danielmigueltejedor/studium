@@ -237,9 +237,8 @@ def _relation(equation: str):
 
     import sympy
 
-    text = _latex_to_ascii(equation)
-
-    if len(text) > 300 or text.count("=") != 1:
+    text = _sympy_text(equation)
+    if text is None or len(text) > 400 or text.count("=") != 1:
         return None
 
     left, right = text.split("=", 1)
@@ -267,7 +266,19 @@ def _relation(equation: str):
             if isinstance(node, ast.Name):
                 if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,63}", node.id):
                     raise ValueError("invalid symbol")
+                if node.id == "pi":
+                    return sympy.pi
                 return sympy.Symbol(node.id)
+
+            if isinstance(node, ast.Call):
+                if (
+                    not isinstance(node.func, ast.Name)
+                    or node.func.id not in _FUNCTION_NAMES
+                    or len(node.args) != 1
+                    or node.keywords
+                ):
+                    raise ValueError("unsupported function")
+                return _sympy_functions()[node.func.id](convert(node.args[0], depth + 1))
 
             if isinstance(node, ast.UnaryOp):
                 value = convert(node.operand, depth + 1)
@@ -292,7 +303,10 @@ def _relation(equation: str):
                 if isinstance(node.op, ast.Div):
                     return a / b
                 if isinstance(node.op, ast.Pow):
-                    if b.is_Integer is not True or abs(int(b)) > 8:
+                    if a == sympy.Symbol("e"):
+                        # e^{x} in a physics text is the exponential.
+                        return sympy.exp(b)
+                    if b.is_Rational is not True or abs(b.p) > 8 or b.q > 4:
                         raise ValueError("unsupported exponent")
                     return a**b
 
@@ -308,6 +322,176 @@ def _relation(equation: str):
         return cast(Any, lhs) - cast(Any, rhs)
     except (SyntaxError, ValueError, TypeError, ZeroDivisionError, OverflowError):
         return None
+
+
+def _sympy_functions() -> dict[str, Any]:
+    import sympy
+
+    return {
+        "sin": sympy.sin,
+        "cos": sympy.cos,
+        "tan": sympy.tan,
+        "exp": sympy.exp,
+        "ln": sympy.log,
+        "log": sympy.log,
+        "sqrt": sympy.sqrt,
+        "sinh": sympy.sinh,
+        "cosh": sympy.cosh,
+        "tanh": sympy.tanh,
+    }
+
+
+_FUNCTION_NAMES = frozenset({"sin", "cos", "tan", "exp", "ln", "log", "sqrt", "sinh", "cosh", "tanh"})
+#: Notation the scalar relation parser must not read: vector and tensor operators,
+#: calculus, sums and norms. Such a relation stays not machine-checkable.
+_UNREADABLE = re.compile(
+    r"\\(?:nabla|int|iint|iiint|oint|oiint|sum|prod|lim|partial|mathcal|operatorname\{div|otimes|wedge)\b|\|"
+)
+_VECTOR = re.compile(r"\\(?:mathbf|boldsymbol|vec|bm)\s*\{")
+_VECTOR_PRODUCT = re.compile(r"\\(?:times|cdot|wedge|otimes)\b")
+
+
+def _sympy_text(equation: str) -> str | None:
+    """A Python-syntax spelling of a scalar LaTeX relation, or None when it uses notation SymPy must not guess.
+
+    Vectors are read as distinct symbols only in scalar multiples; a vector or
+    tensor product, a calculus operator, a sum or a norm makes the relation not
+    machine-checkable instead of silently wrong.
+    """
+
+    if _UNREADABLE.search(equation):
+        return None
+    if _VECTOR.search(equation) and _VECTOR_PRODUCT.search(equation):
+        return None
+    if r"\begin" in equation:
+        return None
+    text = re.sub(r"\\[,;:!]|~", " ", equation)
+    text = re.sub(r"\\[td]frac(?![A-Za-z])", r"\\frac", text)
+    text = re.sub(r"\\frac\s*(\d)\s*(\d)", r"((\1)/(\2))", text)
+    text = _replace_command(text, "frac", 2, "(({0})/({1}))")
+    text = _replace_sqrt(text)
+    for command in ("mathbf", "boldsymbol", "vec", "bm"):
+        text = _replace_command(text, command, 1, " {0}_vec ")
+    for command in ("mathrm", "text", "operatorname", "mathit"):
+        text = _replace_command(text, command, 1, " {0} ")
+    # Every command starts a new token: \\omega t, A\\cos\\omega t.
+    text = re.sub(r"\\(?=[A-Za-z])", " \\\\", text)
+    text = _latex_to_ascii(text)
+    # A bracket is a grouping only where it cannot be an index (never right after a name).
+    if re.search(r"[A-Za-z0-9_]\s*\[", text):
+        return None
+    text = text.replace("[", "(").replace("]", ")")
+    text = re.sub(r"\s+_", "_", text)
+    text = re.sub(r"_\(([A-Za-z0-9]+)\)", r"_\1", text)
+    # Function-value notation u(0), x(t), p(z): one symbol, not a product or an unknown function.
+    text = re.sub(
+        r"\b(?!(?:" + "|".join(_FUNCTION_NAMES) + r")\()([A-Za-z][A-Za-z0-9_]*)\(\s*([A-Za-z0-9_.]+)\s*\)",
+        r"\1_at_\2",
+        text,
+    )
+    text = _function_arguments(text)
+    text = _implicit_products(text)
+    if "\\" in text:
+        return None
+    return text
+
+
+def _braced(text: str, start: int) -> tuple[str, int] | None:
+    """The content of the balanced ``{...}`` starting at ``start`` (spaces skipped), and the index after it."""
+
+    index = start
+    while index < len(text) and text[index].isspace():
+        index += 1
+    if index >= len(text) or text[index] != "{":
+        return None
+    depth = 0
+    for position in range(index, len(text)):
+        if text[position] == "{":
+            depth += 1
+        elif text[position] == "}":
+            depth -= 1
+            if depth == 0:
+                return text[index + 1 : position], position + 1
+    return None
+
+
+def _replace_command(text: str, name: str, arguments: int, template: str) -> str:
+    pattern = re.compile(r"\\" + name + r"(?![A-Za-z])")
+    for _ in range(50):
+        match = pattern.search(text)
+        if match is None:
+            return text
+        position = match.end()
+        values: list[str] = []
+        for _argument in range(arguments):
+            found = _braced(text, position)
+            if found is None:
+                return text
+            values.append(found[0])
+            position = found[1]
+        text = text[: match.start()] + template.format(*values) + text[position:]
+    return text
+
+
+def _replace_sqrt(text: str) -> str:
+    for _ in range(50):
+        match = re.search(r"\\sqrt(?![A-Za-z])\s*(\[([^\]]*)\])?", text)
+        if match is None:
+            return text
+        found = _braced(text, match.end())
+        if found is None:
+            return text
+        index = match.group(2)
+        body = f"(({found[0]})**(1/({index})))" if index else f"sqrt({found[0]})"
+        text = text[: match.start()] + body + text[found[1] :]
+    return text
+
+
+def _function_arguments(text: str) -> str:
+    """``sin theta`` -> ``sin(theta)``; an argument runs to the next top-level + - = or the end."""
+
+    out: list[str] = []
+    index = 0
+    pattern = re.compile(r"\b(" + "|".join(sorted(_FUNCTION_NAMES, key=len, reverse=True)) + r")\b\s*")
+    while index < len(text):
+        match = pattern.match(text, index)
+        if match is None or (index > 0 and (text[index - 1].isalnum() or text[index - 1] == "_")):
+            out.append(text[index])
+            index += 1
+            continue
+        out.append(match.group(1))
+        position = match.end()
+        if position < len(text) and text[position] == "(":
+            index = position
+            continue
+        end = position
+        depth = 0
+        while end < len(text):
+            character = text[end]
+            if character == "(":
+                depth += 1
+            elif character == ")":
+                if depth == 0:
+                    break
+                depth -= 1
+            elif depth == 0 and character in "+-=" and end > position:
+                break
+            end += 1
+        out.append("(" + text[position:end].strip() + ")")
+        index = end
+    return "".join(out)
+
+
+def _implicit_products(text: str) -> str:
+    """Make juxtaposed factors explicit: ``2 g h`` -> ``2*g*h``, ``)(`` -> ``)*(``, ``2(`` -> ``2*(``."""
+
+    text = re.sub(r"(?<=[A-Za-z0-9_)])\s+(?=[A-Za-z0-9_(])", "*", text.strip())
+    text = re.sub(r"\)\s*\(", ")*(", text)
+    text = re.sub(r"(?<=\d)(?=[A-Za-z(])", "*", text)
+    text = re.sub(r"\)(?=[A-Za-z0-9])", ")*", text)
+    text = re.sub(r"(?<=[A-Za-z0-9_])\(", "*(", text)
+    # A function name keeps its call parenthesis.
+    return re.sub(r"\b(" + "|".join(_FUNCTION_NAMES) + r")\*\(", r"\1(", text)
 
 
 _GREEK = {
@@ -590,7 +774,13 @@ _RANK = {status: index for index, status in enumerate(EQUATION_STATUSES)}
 #: Kept for callers of the earlier API: the statuses that count as grounded.
 GROUNDED_STATUSES = frozenset({*VERIFIED_STATUSES, "source_supported"})
 
-_SPAN = re.compile(r"\$\$(.+?)\$\$|\\\[(.+?)\\\]|\\\((.+?)\\\)|\$([^$]+)\$", re.S)
+_ENVIRONMENTS = r"(?:equation|align|gather|multline|eqnarray|displaymath)\*?"
+_SPAN = re.compile(
+    r"\\begin\{(" + _ENVIRONMENTS + r")\}(.+?)\\end\{\1\}|\$\$(.+?)\$\$|\\\[(.+?)\\\]|\\\((.+?)\\\)|\$([^$]+)\$",
+    re.S,
+)
+#: Math spans shown as display equations: environments, ``$$`` and ``\\[``.
+_DISPLAY = re.compile(r"\\begin\{(" + _ENVIRONMENTS + r")\}(.+?)\\end\{\1\}|\$\$(.+?)\$\$|\\\[(.+?)\\\]", re.S)
 _RELATION_OPS = re.compile(r"\\approx|\\simeq|\\equiv|:=|(?<![<>!\\])=")
 _OP_KINDS = {"=": "claim", "\\approx": "approximation", "\\simeq": "approximation", "\\equiv": "definition", ":=": "definition"}
 _TRAILING = " ,;.:"
@@ -613,7 +803,7 @@ def math_statements(text: str) -> list[tuple[str, str]]:
     for match in _SPAN.finditer(text):
         outside.append(text[last : match.start()])
         last = match.end()
-        body = next(group for group in match.groups() if group is not None)
+        body = _span_body(match)
         for piece in _top_level_pieces(body):
             parts, operators = _split_relations(piece)
             for index, operator in enumerate(operators):
@@ -625,60 +815,105 @@ def math_statements(text: str) -> list[tuple[str, str]]:
     for sentence in sentences(" ".join(outside)):
         for formula in formulas(sentence):
             left, _sign, right = formula.partition("=")
-            if _complete_side(left, -1) and _complete_side(right, 1):
+            # Plain-text relations only: LaTeX outside a math span is not read in pieces.
+            if "\\" not in formula and _complete_side(left, -1) and _complete_side(right, 1):
                 found.append(("claim", formula))
     return found
 
 
-_SEPARATORS = re.compile(r"\\q?quad\b|\\\\|&|;|,(?=\s|\\)|:(?=\s|\\)|\\(?:text|mbox|mathrm)\{[^{}]*\s[^{}]*\}")
+def _span_body(match: re.Match[str]) -> str:
+    """The math inside a span; an environment drops its labels, tags and alignment marks."""
+
+    groups = match.groups()
+    if groups[0] is not None and groups[1] is not None:
+        body = re.sub(r"\\(?:label|tag|nonumber|notag)\b(?:\{[^{}]*\})?", " ", groups[1])
+        return body
+    return next(group for group in groups[2:] if group is not None)
+
+
+#: ``\\,`` and ``\\;`` are thin spaces, not separators: a comma or colon preceded by a backslash never splits.
+_SEPARATORS = re.compile(
+    r"\\q?quad\b|\\\\|(?<!\\);|(?<!\\),(?=\s|\\)|(?<!\\):(?=\s|\\)|\\(?:text|mbox|mathrm)\{[^{}]*\s[^{}]*\}"
+)
 
 
 def _top_level_pieces(body: str) -> list[str]:
-    """Split a math span at top-level separators (``\\quad``, ``,\\ ``, ``;``, ``\\text{ y }``, ``\\\\``)."""
+    """Split a math span at top-level separators (``\\quad``, ``,\\ ``, ``;``, ``\\text{ y }``, ``\\\\``).
 
-    pieces: list[str] = []
-    depth = 0
-    last = 0
-    index = 0
-    while index < len(body):
-        character = body[index]
-        if character in "{(":
-            depth += 1
-        elif character in "})":
-            depth -= 1
-        elif depth == 0:
-            match = _SEPARATORS.match(body, index)
-            if match:
-                pieces.append(body[last:index])
-                last = index = match.end()
-                continue
-        index += 1
-    pieces.append(body[last:])
-    return [piece for piece in pieces if piece.strip()]
+    Alignment marks ``&`` are dropped; nothing inside braces, parentheses or a
+    nested environment (a matrix, cases) is split.
+    """
+
+    parts, _operators = _split_top(body.replace("&", " ") if "\\begin" not in body else _drop_alignment(body), _SEPARATORS)
+    return [piece for piece in parts if piece.strip()]
 
 
 def _split_relations(body: str) -> tuple[list[str], list[str]]:
+    return _split_top(body, _RELATION_OPS)
+
+
+_BEGIN = re.compile(r"\\begin\{[^{}]*\}")
+_END = re.compile(r"\\end\{[^{}]*\}")
+
+
+def _split_top(body: str, pattern: re.Pattern[str]) -> tuple[list[str], list[str]]:
+    """Split ``body`` where ``pattern`` matches at depth zero; return the parts and the matched tokens."""
+
     parts: list[str] = []
-    operators: list[str] = []
+    tokens: list[str] = []
     depth = 0
     last = 0
     index = 0
     while index < len(body):
+        begin = _BEGIN.match(body, index)
+        if begin:
+            depth += 1
+            index = begin.end()
+            continue
+        end = _END.match(body, index)
+        if end:
+            depth -= 1
+            index = end.end()
+            continue
         character = body[index]
+        if character == "\\" and index + 1 < len(body) and body[index + 1] in "{}":
+            index += 2
+            continue
         if character in "{(":
             depth += 1
         elif character in "})":
             depth -= 1
         elif depth == 0:
-            match = _RELATION_OPS.match(body, index)
+            match = pattern.match(body, index)
             if match:
                 parts.append(body[last:index])
-                operators.append(match.group(0))
+                tokens.append(match.group(0))
                 last = index = match.end()
                 continue
         index += 1
     parts.append(body[last:])
-    return parts, operators
+    return parts, tokens
+
+
+def _drop_alignment(body: str) -> str:
+    """Drop ``&`` at depth zero only; a nested matrix keeps its column marks."""
+
+    kept: list[str] = []
+    depth = 0
+    index = 0
+    while index < len(body):
+        begin = _BEGIN.match(body, index)
+        end = _END.match(body, index)
+        if begin or end:
+            token = (begin or end).group(0)  # type: ignore[union-attr]
+            depth += 1 if begin else -1
+            kept.append(token)
+            index += len(token)
+            continue
+        character = body[index]
+        kept.append(" " if character == "&" and depth == 0 else character)
+        index += 1
+    return "".join(kept)
 
 
 def _complete_side(side: str, direction: int) -> bool:
@@ -709,8 +944,8 @@ def _condition(statement: str) -> bool:
     sides = []
     for side in (left, right):
         number = _arithmetic_text(side)
-        text = number if number is not None else _latex_to_ascii(side).strip()
-        sides.append(text.strip("()"))
+        text = number if number is not None else (_sympy_text(side) or _latex_to_ascii(side)).strip()
+        sides.append(text.strip("() "))
     return all(_ATOM.fullmatch(side) for side in sides)
 
 
@@ -784,8 +1019,13 @@ def equation_evidence(
 
 def _display_statements(text: str) -> list[str]:
     statements: list[str] = []
-    for match in re.finditer(r"\$\$(.+?)\$\$|\\\[(.+?)\\\]", text, re.S):
-        body = next(group for group in match.groups() if group is not None)
+    for match in _DISPLAY.finditer(text):
+        groups = match.groups()
+        body = (
+            re.sub(r"\\(?:label|tag|nonumber|notag)\b(?:\{[^{}]*\})?", " ", groups[1])
+            if groups[0] is not None and groups[1] is not None
+            else next(group for group in groups[2:] if group is not None)
+        )
         statements.extend(statement for _kind, statement in math_statements(f"${body}$"))
     return statements
 
@@ -806,6 +1046,9 @@ def _evidence(context: GroundingContext, record: dict[str, object], kind: str, s
         return "definition", []
     if kind == "approximation":
         return "approximation", []
+    matrices = _matrix_verdict(statement)
+    if matrices is not None:
+        return matrices, []
     arithmetic = _arithmetic_verdict(statement)
     if arithmetic is not None:
         return arithmetic, []
@@ -944,6 +1187,115 @@ def _arithmetic_text(side: str) -> str | None:
     # A typeset number in scientific notation is one value: 6.63×10^{-8}/1.0×10^{-5}
     # divides two numbers, it does not multiply the quotient by 10^{-5}.
     return re.sub(r"(\d+(?:\.\d+)?)\s*\*\s*10\s*\*\*\s*\(?\s*([+-]?\d+)\s*\)?", r"(\1e\2)", text)
+
+
+_MATRIX = re.compile(r"\\begin\{([bpvBV]?matrix)\}(.*?)\\end\{\1\}", re.S)
+
+
+def _matrix_verdict(statement: str) -> str | None:
+    """Check a relation between numeric matrices (``K u = f`` written with numbers).
+
+    Each matrix literal must hold only plain numbers; products, sums and
+    scalar multiples are evaluated exactly. A literal result is compared entry
+    by entry at its written precision. Anything with a symbol returns None.
+    """
+
+    if not _MATRIX.search(statement):
+        return None
+    import ast
+
+    import sympy
+
+    from studium.authoring.computation import ComputationError, evaluate, precision_verdict
+
+    literals: dict[str, sympy.Matrix] = {}
+    written: dict[str, list[list[str]]] = {}
+
+    def replace(match: re.Match[str]) -> str:
+        rows = [row for row in re.split(r"\\\\", match.group(2)) if row.strip()]
+        table = [[cell.strip() for cell in row.split("&")] for row in rows]
+        values = []
+        for row in table:
+            converted = []
+            for cell in row:
+                text = _arithmetic_text(cell)
+                if text is None:
+                    raise ValueError("symbolic entry")
+                converted.append(text)
+            values.append(converted)
+        name = f"M{len(literals)}"
+        literals[name] = sympy.Matrix([[sympy.Rational(evaluate(cell)) for cell in row] for row in values])
+        written[name] = values
+        return f" {name} "
+
+    left, sign, right = statement.partition("=")
+    if not sign:
+        return None
+    try:
+        left_text = _MATRIX.sub(replace, left)
+        right_text = _MATRIX.sub(replace, right)
+    except (ValueError, ComputationError, ZeroDivisionError, TypeError):
+        return None
+
+    def value(side: str) -> object:
+        text = _arithmetic_side(side)
+        if text is None:
+            raise ValueError("not arithmetic")
+        tree = ast.parse(text, mode="eval")
+
+        def walk(node: ast.AST) -> object:
+            if isinstance(node, ast.Expression):
+                return walk(node.body)
+            if isinstance(node, ast.Name) and node.id in literals:
+                return literals[node.id]
+            if isinstance(node, ast.Constant) and type(node.value) in (int, float):
+                return sympy.Rational(str(node.value))
+            if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub):
+                return -cast(Any, walk(node.operand))
+            if isinstance(node, ast.BinOp):
+                first, second = cast(Any, walk(node.left)), cast(Any, walk(node.right))
+                if isinstance(node.op, ast.Add):
+                    return first + second
+                if isinstance(node.op, ast.Sub):
+                    return first - second
+                if isinstance(node.op, ast.Mult):
+                    return first * second
+                if isinstance(node.op, ast.Div) and not isinstance(second, sympy.MatrixBase):
+                    return first / second
+            raise ValueError("unsupported matrix expression")
+
+        return walk(tree)
+
+    try:
+        first, second = value(left_text), value(right_text)
+    except (ValueError, SyntaxError, TypeError, ZeroDivisionError, sympy.ShapeError):
+        return None
+    if not isinstance(first, sympy.MatrixBase) or not isinstance(second, sympy.MatrixBase):
+        return None
+    if first.shape != second.shape:
+        return "contradicted"
+    literal = right_text.strip() if right_text.strip() in written else None
+    for index in range(first.rows * first.cols):
+        actual = Fraction(str(first[index]))
+        if literal is not None:
+            row, column = divmod(index, first.cols)
+            verdict = precision_verdict(written[literal][row][column].replace(" ", ""), actual)
+        else:
+            verdict = "agrees" if first[index] == second[index] else "disagrees"
+        if verdict != "agrees":
+            return "contradicted" if verdict == "disagrees" else "numerically_ambiguous"
+    return "numerically_reproduced"
+
+
+def _arithmetic_side(side: str) -> str | None:
+    """A side made of matrix placeholders and numbers, in Python syntax."""
+
+    text = side.replace(r"\cdot", "*").replace(r"\times", "*").replace("{,}", ".")
+    text = re.sub(r"\\[,;:!]", " ", text)
+    if re.search(r"[A-Za-z]", re.sub(r"\bM\d+\b", "", text)):
+        return None
+    text = re.sub(r"(?<=[\w)])\s+(?=[\w(])", "*", text.strip())
+    return text
 
 
 def _arithmetic_verdict(statement: str) -> str | None:

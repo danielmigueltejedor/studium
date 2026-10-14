@@ -80,9 +80,9 @@ def test_an_unchecked_derivation_step_is_labelled_not_counted_as_checked(tmp_pat
     monkeypatch.setattr("urllib.request.urlopen", _explode)
     session, root = _book(tmp_path)
     excerpt = _excerpt(session, "La presión es fuerza por unidad de área.")
-    derivation = _derivation_with_steps(session, "p = F / A", [r"F = p A"])
+    derivation = _derivation_with_steps(session, "p = F / A", [r"dF = p\,dA"])
     _check_numeric(session, derivation, "F / A", {"F": 100, "A": 2}, 50)
-    paragraph = _paragraph(session, r"Despejando, la fuerza total es $F = p A$ sobre la superficie.", [excerpt])
+    paragraph = _paragraph(session, r"Sobre un elemento de área, $dF = p\,dA$ en la superficie.", [excerpt])
     assert _statuses(root, paragraph) == ["derived_steps_unchecked"]
     report = dispatch("studium_quality_report", {}, session=session)["math_grounding"]
     assert report["by_kind"]["derivation"] == 0
@@ -106,7 +106,7 @@ def test_unparseable_definitions_and_approximations_are_labelled_not_blocking(tm
     excerpt = _excerpt(session, "La presión es fuerza por unidad de área.")
     paragraph = _paragraph(
         session,
-        r"La segunda ley es $\mathbf{F} = m\mathbf{a}$, la viscosidad cinemática $\nu \equiv \mu/\rho$ y $g \approx 9{,}81$.",
+        r"La continuidad es $\nabla\cdot\mathbf{u} = 0$, la viscosidad cinemática $\nu \equiv \mu/\rho$ y $g \approx 9{,}81$.",
         [excerpt],
     )
     assert _statuses(root, paragraph) == ["not_machine_checkable", "definition", "approximation"]
@@ -145,7 +145,7 @@ def test_source_audit_labels_each_paragraphs_equations(tmp_path, monkeypatch):
     excerpt = _excerpt(session, "La presión es fuerza por unidad de área.")
     derivation = _derivation_with_steps(session, "p = F / A", [])
     _check_numeric(session, derivation, "F / A", {"F": 100, "A": 2}, 50)
-    _paragraph(session, r"La presión media es $p = \frac{F}{A}$ y la segunda ley $\mathbf{F} = m\mathbf{a}$ en el fluido.", [excerpt])
+    _paragraph(session, r"La presión media es $p = \frac{F}{A}$ y la continuidad $\nabla\cdot\mathbf{u} = 0$ en el fluido.", [excerpt])
     render_draft(root)
     tex = (root / "latex" / "draft.tex").read_text(encoding="utf-8")
     assert "Ecuaciones: 1 reproducida numéricamente, 1 no comprobable automáticamente." in tex
@@ -154,8 +154,8 @@ def test_source_audit_labels_each_paragraphs_equations(tmp_path, monkeypatch):
 def test_unparseable_equation_is_never_verified_but_a_quoting_source_supports_it(tmp_path, monkeypatch):
     monkeypatch.setattr("urllib.request.urlopen", _explode)
     session, root = _book(tmp_path)
-    quoted = _excerpt(session, r"Newton: $\mathbf{F} = m\mathbf{a}$ for a body of constant mass.", url="https://open.example/newton")
-    paragraph = _paragraph(session, r"La segunda ley se escribe $\mathbf{F} = m\mathbf{a}$ para masa constante.", [quoted])
+    quoted = _excerpt(session, r"Gauss: $\oint_S \mathbf{E}\cdot d\mathbf{A} = Q/\varepsilon_0$ for any closed surface.", url="https://open.example/gauss")
+    paragraph = _paragraph(session, r"La ley de Gauss es $\oint_S \mathbf{E}\cdot d\mathbf{A} = Q/\varepsilon_0$ para toda superficie cerrada.", [quoted])
     items = equation_evidence(root, paragraph)
     assert [(item["status"], item["evidence"], item["machine_parseable"], item["human_review"]) for item in items] == [
         ("source_supported", [quoted], False, "recommended")
@@ -182,7 +182,7 @@ def test_review_and_quality_report_separate_the_five_stages(tmp_path, monkeypatc
     monkeypatch.setattr("urllib.request.urlopen", _explode)
     session, _root = _book(tmp_path)
     excerpt = _excerpt(session, "La presión es fuerza por unidad de área.")
-    _paragraph(session, r"La segunda ley se escribe $$\mathbf{F} = m\mathbf{a}$$ para masa constante.", [excerpt])
+    _paragraph(session, r"La continuidad se escribe $$\nabla\cdot\mathbf{u} = 0$$ en un fluido incompresible.", [excerpt])
     review = dispatch("studium_book_review", {}, session=session)
     assert review["scientific_verification"]["status"] == "incomplete"
     assert review["scientific_verification"]["unresolved_important_equations"] == 1
@@ -198,11 +198,11 @@ def test_equation_report_lists_statements_as_written_with_filters(tmp_path, monk
     monkeypatch.setattr("urllib.request.urlopen", _explode)
     session, _root = _book(tmp_path)
     excerpt = _excerpt(session, "La presión es fuerza por unidad de área.")
-    text = r"Con $2\cdot 3 = 6$ y la ley $\mathbf{F} = m\mathbf{a}$, además $\nu \equiv \mu/\rho$."
+    text = r"Con $2\cdot 3 = 6$ y la ley $\nabla\cdot\mathbf{u} = 0$, además $\nu \equiv \mu/\rho$."
     _paragraph(session, text, [excerpt])
     report = dispatch("studium_equation_report", {}, session=session)
     assert report["total"] == 3
-    assert [item["statement"] for item in report["equations"]] == [r"2\cdot 3 = 6", r"\mathbf{F} = m\mathbf{a}", r"\nu \equiv \mu/\rho"]
+    assert [item["statement"] for item in report["equations"]] == [r"2\cdot 3 = 6", r"\nabla\cdot\mathbf{u} = 0", r"\nu \equiv \mu/\rho"]
     only = dispatch("studium_equation_report", {"status": "not_machine_checkable"}, session=session)
     assert only["total"] == 1 and only["equations"][0]["human_review"] == "required"
     bad = dispatch("studium_equation_report", {"status": "verified"}, session=session)
@@ -227,3 +227,41 @@ def test_equation_of_an_independently_verified_derivation_is_symbolically_verifi
     paragraph = _paragraph(session, r"Torricelli da $V^{2} = 2gh$ para la descarga libre.", [excerpt])
     items = equation_evidence(root, paragraph)
     assert [(item["status"], item["evidence"]) for item in items] == [("symbolically_verified", [derivation])]
+
+
+def test_parser_reads_scalar_notation_and_refuses_vector_operators():
+    from studium.authoring.grounding import _relation, equivalent_math
+
+    assert equivalent_math(r"E = \tfrac12 m v^{2}", "E = m*v**2/2")
+    assert equivalent_math(r"x = A\cos\omega t + B\sin\omega t", "x = A*cos(omega*t) + B*sin(omega*t)")
+    assert equivalent_math(r"\omega_d = \omega_0\sqrt{1 - \zeta^{2}}", "omega_d**2 = omega_0**2*(1 - zeta**2)") is False
+    assert _relation(r"x(t) = x_0 e^{kt}") is not None
+    assert _relation(r"V_t = (\rho_p - \rho_f)\,g\,d^{2}/(18\mu)") is not None
+    assert _relation(r"\mathbf{p} = m\mathbf{v}") is not None
+    # Cross products, divergence, integrals and norms are not guessed as scalars.
+    assert _relation(r"\mathbf{L}_O = \mathbf{r}\times m\mathbf{v}") is None
+    assert _relation(r"\nabla\cdot\mathbf{u} = 0") is None
+    assert _relation(r"Q = \int_0^{R} u\,2\pi r\,dr") is None
+    assert _relation(r"|\mathbf{u}| = U") is None
+
+
+def test_numeric_matrix_relations_are_checked(tmp_path, monkeypatch):
+    monkeypatch.setattr("urllib.request.urlopen", _explode)
+    session, root = _book(tmp_path)
+    excerpt = _excerpt(session, "La presión es fuerza por unidad de área.")
+    good = _paragraph(
+        session,
+        r"La rigidez da $\begin{bmatrix} 2 & -1 \\ -1 & 2 \end{bmatrix}\begin{bmatrix} 1 \\ 1 \end{bmatrix} = \begin{bmatrix} 1 \\ 1 \end{bmatrix}$ en kN.",
+        [excerpt],
+    )
+    assert _statuses(root, good) == ["numerically_reproduced"]
+    bad = _paragraph(
+        session,
+        r"Con otra carga, $\begin{bmatrix} 2 & -1 \\ -1 & 2 \end{bmatrix}\begin{bmatrix} 1 \\ 0 \end{bmatrix} = \begin{bmatrix} 2 \\ 1 \end{bmatrix}$ en kN.",
+        [excerpt],
+    )
+    assert _statuses(root, bad) == ["contradicted"]
+    symbolic = _paragraph(
+        session, r"La matriz de rigidez del muelle es $\mathbf{K} = \begin{bmatrix} k & -k \\ -k & k \end{bmatrix}$ en general.", [excerpt]
+    )
+    assert _statuses(root, symbolic) == ["not_machine_checkable"]
