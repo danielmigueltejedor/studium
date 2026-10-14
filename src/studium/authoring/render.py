@@ -176,7 +176,155 @@ _SUPERSCRIPTS = {
     "ⁿ": r"^{n}",
     "ⁱ": r"^{i}",
 }
-_MATH = {**_GREEK, **_SUBSCRIPTS, **_SUPERSCRIPTS}
+#: Unicode operators that carry no analogue in the Greek/sub/superscript maps.
+#: ``√`` is listed with a bare radical as a fallback for the plain-escape path;
+#: the formula renderer consumes its argument and emits ``\sqrt{...}``.
+_MATH_EXTRA = {
+    "µ": r"\mu",
+    "⋅": r"\cdot",
+    "∝": r"\propto",
+    "≡": r"\equiv",
+    "⇒": r"\Rightarrow",
+    "⇔": r"\Leftrightarrow",
+    "→": r"\to",
+    "←": r"\leftarrow",
+    "÷": r"\div",
+    "√": r"\surd",
+    "∛": r"\sqrt[3]{}",
+    "∜": r"\sqrt[4]{}",
+    "∑": r"\sum",
+    "∏": r"\prod",
+    "∫": r"\int",
+    "∘": r"\circ",
+    "⊥": r"\perp",
+    "∠": r"\angle",
+    "∆": r"\Delta",
+    "∈": r"\in",
+    "∅": r"\varnothing",
+    "½": r"\frac{1}{2}",
+    "⅓": r"\frac{1}{3}",
+    "⅔": r"\frac{2}{3}",
+    "¼": r"\frac{1}{4}",
+    "¾": r"\frac{3}{4}",
+    "⅕": r"\frac{1}{5}",
+    "⅖": r"\frac{2}{5}",
+    "⅗": r"\frac{3}{5}",
+    "⅘": r"\frac{4}{5}",
+    "ṁ": r"\dot{m}",
+    "ẋ": r"\dot{x}",
+    "ẏ": r"\dot{y}",
+    "ṫ": r"\dot{t}",
+    "ṙ": r"\dot{r}",
+    "ṗ": r"\dot{p}",
+    "ṡ": r"\dot{s}",
+    "ż": r"\dot{z}",
+    "ẇ": r"\dot{w}",
+}
+#: Radical sign -> the optional root index inside ``\sqrt[...]``.
+_ROOTS = {"√": "", "∛": "3", "∜": "4"}
+_MATH = {**_GREEK, **_SUBSCRIPTS, **_SUPERSCRIPTS, **_MATH_EXTRA}
+
+#: Characters that cannot stand alone as the base of a super/subscript. A script
+#: run that follows one of these (or starts the run) is given an empty group so
+#: the output stays valid LaTeX.
+_NO_BASE = set(" \t=+-*/,(<>|")
+
+
+def _script_inner(value: str) -> str:
+    """The content of a ``^{...}`` or ``_{...}`` mapping, without the group."""
+
+    return value[2:-1]
+
+
+def _root_argument(text: str, index: int) -> tuple[str, int]:
+    r"""The argument of a Unicode radical at ``index``.
+
+    Accepts a braced group, a parenthesised group, one alphanumeric run, or one
+    single math character. The parentheses around a radical argument are not
+    part of the argument, so ``√(g h)`` becomes ``\sqrt{g h}``.
+    """
+
+    if index >= len(text):
+        return "", index
+    opener = text[index]
+    if opener in "{(":
+        closer = "}" if opener == "{" else ")"
+        depth = 0
+        cursor = index
+        while cursor < len(text):
+            character = text[cursor]
+            if character == opener:
+                depth += 1
+            elif character == closer:
+                depth -= 1
+                if depth == 0:
+                    return text[index + 1 : cursor], cursor + 1
+            cursor += 1
+        return text[index + 1 :], len(text)
+    if opener.isalnum():
+        cursor = index
+        while cursor < len(text) and text[cursor].isalnum():
+            cursor += 1
+        return text[index:cursor], cursor
+    if opener in _MATH:
+        return text[index], index + 1
+    return "", index
+
+
+def _map_math_run(text: str, *, escape: bool = False) -> str:
+    r"""Translate a run of Unicode mathematics into LaTeX math content.
+
+    Greek and operator characters map to control words; a consecutive run of
+    Unicode super- or subscripts becomes a single braced group (so ``⁻³`` is
+    ``^{-3}``, never a double superscript); a radical consumes its argument and
+    becomes ``\sqrt{...}``. ASCII mathematics (``_``, ``^``, ``{``, ``}``) is
+    passed through unchanged, so author-written ``p_{man}`` stays valid.
+    """
+
+    parts: list[str] = []
+    index = 0
+    length = len(text)
+    while index < length:
+        character = text[index]
+        if character in _ROOTS:
+            index += 1
+            inner, index = _root_argument(text, index)
+            option = _ROOTS[character]
+            head = r"\sqrt" + (f"[{option}]" if option else "")
+            parts.append(head + "{" + _map_math_run(inner, escape=escape) + "}")
+            continue
+        if character in _SUPERSCRIPTS or character in _SUBSCRIPTS:
+            superscript = character in _SUPERSCRIPTS
+            table = _SUPERSCRIPTS if superscript else _SUBSCRIPTS
+            run: list[str] = []
+            while index < length and text[index] in table:
+                run.append(_script_inner(table[text[index]]))
+                index += 1
+            tail = parts[-1] if parts else ""
+            if not tail or tail[-1] in _NO_BASE:
+                parts.append("{}")
+            parts.append(("^" if superscript else "_") + "{" + "".join(run) + "}")
+            continue
+        mapped = _MATH.get(character)
+        if mapped is not None:
+            if mapped.startswith("\\") and mapped[-1:].isalpha():
+                following = text[index + 1] if index + 1 < length else ""
+                if following.isascii() and following.isalpha():
+                    mapped += " "
+            parts.append(mapped)
+            index += 1
+            continue
+        if escape and character in "%#&":
+            parts.append("\\" + character)
+            index += 1
+            continue
+        if escape and character == "\\":
+            parts.append(r"\backslash ")
+            index += 1
+            continue
+        parts.append(character)
+        index += 1
+    return "".join(parts)
 
 
 def render_draft(root: Path) -> dict[str, object]:
@@ -298,13 +446,12 @@ def latex_escape(value: str) -> str:
 
     def flush_math() -> None:
         if math:
-            parts.append(r"\(" + "".join(math) + r"\)")
+            parts.append(r"\(" + _map_math_run("".join(math)) + r"\)")
             math.clear()
 
     for character in value:
-        token = _MATH.get(character)
-        if token is not None:
-            math.append(token)
+        if character in _MATH:
+            math.append(character)
             continue
         flush_math()
         replacement = _LATEX.get(character)
@@ -638,42 +785,11 @@ def _dollar_ok(inner: str) -> bool:
 
 
 def _math_chars(text: str) -> str:
-    parts: list[str] = []
-    for index, character in enumerate(text):
-        mapped = _MATH.get(character)
-        if mapped is None:
-            parts.append(character)
-            continue
-        if mapped.startswith("\\") and mapped[-1:].isalpha():
-            following = text[index + 1] if index + 1 < len(text) else ""
-            if following.isascii() and following.isalpha():
-                mapped += " "
-        parts.append(mapped)
-    return "".join(parts)
+    return _map_math_run(text)
 
 
 def _formula_tex(span: str) -> str:
-    parts: list[str] = []
-    for index, character in enumerate(span):
-        mapped = _MATH.get(character)
-        if mapped is not None:
-            if mapped.startswith("\\") and mapped[-1:].isalpha():
-                following = span[index + 1] if index + 1 < len(span) else ""
-                if following.isascii() and following.isalpha():
-                    mapped += " "
-            parts.append(mapped)
-            continue
-        if character == "%":
-            parts.append(r"\%")
-        elif character == "#":
-            parts.append(r"\#")
-        elif character == "&":
-            parts.append(r"\&")
-        elif character == "\\":
-            parts.append(r"\backslash ")
-        else:
-            parts.append(character)
-    return "\\(" + "".join(parts) + "\\)"
+    return "\\(" + _map_math_run(span, escape=True) + "\\)"
 
 
 def _formula_spans(text: str, blocked: list[tuple[int, int, str]]) -> list[tuple[int, int]]:
@@ -692,11 +808,47 @@ def _formula_spans(text: str, blocked: list[tuple[int, int, str]]) -> list[tuple
         start, end, kind = tokens[token_index]
         if kind in {"math", "op", "num"}:
             return True
-        if kind != "word" or end - start != 1:
+        if kind != "word":
             return False
-        if adjacent or (formula_side is not None and formula_side[2] == "op"):
-            return True
-        return text[start] not in _STOP_LETTERS
+        if end - start == 1:
+            if adjacent:
+                return True
+            if (
+                formula_side is not None
+                and formula_side[2] == "op"
+                and text[formula_side[0]] not in ")]}"
+            ):
+                return True
+            return text[start] not in _STOP_LETTERS
+        # A multi-letter word is part of the formula when it is bound to a script
+        # or brace group (rho_fluido, p_{man}), tightly bound to a binding
+        # operator (dv/dy, R*T), or heads an assignment (Fr = ..., Re = ...).
+        # A long prose word is left as prose.
+        if token_index > 0:
+            previous = tokens[token_index - 1]
+            if previous[2] == "op" and text[previous[0]] in "_^{":
+                return True
+        if token_index + 1 < len(tokens):
+            following = tokens[token_index + 1]
+            if following[2] == "op" and text[following[0]] in "_^{":
+                return True
+            if following[2] == "math" and (text[following[0]] in _SUBSCRIPTS or text[following[0]] in _SUPERSCRIPTS):
+                return True
+        if 2 <= end - start <= 4 and text[start].isascii() and text[start].isalpha():
+            if token_index > 0:
+                previous = tokens[token_index - 1]
+                if previous[2] == "op" and text[previous[0]] in "/^*":
+                    return True
+            following = token_index + 1
+            if following < len(tokens) and tokens[following][2] == "op" and text[tokens[following][0]] in "/^*":
+                return True
+        if end - start == 2 and text[start] not in _STOP_LETTERS:
+            following = token_index + 1
+            if following < len(tokens) and tokens[following][2] == "space" and _one_space(text, tokens[following]):
+                following += 1
+            if following < len(tokens) and tokens[following][2] == "op" and text[tokens[following][0]] == "=":
+                return True
+        return False
 
     def next_index(current: int, direction: int) -> int | None:
         nxt = current + direction
@@ -759,9 +911,13 @@ def _tokenize(text: str) -> list[tuple[int, int, str]]:
     index = 0
     while index < len(text):
         character = text[index]
-        if character.isascii() and character.isalpha():
+        if character in _MATH:
+            tokens.append((index, index + 1, "math"))
+            index += 1
+            continue
+        if character.isalpha():
             end = index + 1
-            while end < len(text) and text[end].isascii() and text[end].isalpha():
+            while end < len(text) and text[end] not in _MATH and text[end].isalpha():
                 end += 1
             tokens.append((index, end, "word"))
             index = end
@@ -783,10 +939,6 @@ def _tokenize(text: str) -> list[tuple[int, int, str]]:
                 end += 1
             tokens.append((index, end, "space"))
             index = end
-            continue
-        if character in _MATH:
-            tokens.append((index, index + 1, "math"))
-            index += 1
             continue
         if character in _ASCII_OPERATORS:
             tokens.append((index, index + 1, "op"))

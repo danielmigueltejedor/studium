@@ -29,6 +29,7 @@ from studium.verification.engine import (
     verify_equation,
     verify_substitution,
 )
+from studium.verification.model import VerificationResult, VerificationStatus, combine
 
 _MAX_LINE = 500
 _MAX_STEPS = 30
@@ -277,15 +278,25 @@ def derivations_for_section(root: Path, section_id: str) -> list[dict[str, objec
 
 
 def _overall(results: list[dict[str, object]]) -> str:
-    statuses = {str(item.get("status")) for item in results}
-    if "FAILED" in statuses:
-        return "FAILED"
-    passing = statuses - {"UNVERIFIED", "FAILED"}
-    if not passing:
-        return "UNVERIFIED"
-    if len(passing) >= 2:
-        return "INDEPENDENTLY_VERIFIED"
-    return passing.pop()
+    """The combined status of the checks that ran.
+
+    Delegates to :func:`studium.verification.model.combine` so the derivation
+    layer cannot drift from the verification layer: numeric substitution and
+    dimensional agreement alone are corroboration, not independent proof.
+    """
+
+    verification: list[VerificationResult] = []
+    for item in results:
+        status = str(item.get("status"))
+        if status not in VerificationStatus.__members__:
+            continue
+        verification.append(
+            VerificationResult(
+                status=VerificationStatus[status],
+                method=str(item.get("method") or ""),
+            )
+        )
+    return combine(verification).status.value
 
 
 def _free_symbols(*texts: str) -> set[str]:
@@ -478,13 +489,34 @@ def _variables(value: object) -> tuple[dict[str, object] | None, dict[str, objec
     return cleaned, None
 
 
+def _describe(value: object) -> str:
+    """A short description of a value's type for a validation error."""
+
+    if isinstance(value, list):
+        return f"a list of {len(value)} item(s)"
+    if isinstance(value, dict):
+        return "an object"
+    if value is None:
+        return "null"
+    return f"a {type(value).__name__}"
+
+
 def _references(root: Path, value: object) -> tuple[dict[str, object] | None, dict[str, object] | None]:
     if value is None:
         return None, None
     if not isinstance(value, dict):
-        return None, _error("mcp.invalid_input", "references must be an object with excerpts and/or sources lists")
-    if set(value) - _REFERENCE_KINDS:
-        return None, _error("mcp.invalid_input", "references may only carry excerpts and sources")
+        return None, _error(
+            "mcp.invalid_input",
+            'references must be an object like {"excerpts": ["EVD-0001"], "sources": ["SRC-0001"]}; '
+            f"received {_describe(value)}",
+        )
+    unknown = set(value) - _REFERENCE_KINDS
+    if unknown:
+        allowed = ", ".join(sorted(_REFERENCE_KINDS))
+        return None, _error(
+            "mcp.invalid_input",
+            f"references may only carry {allowed}; unknown key(s): {', '.join(sorted(str(key) for key in unknown))}",
+        )
     stored = excerpts_by_id(root)
     cleaned: dict[str, object] = {}
     excerpts_value = value.get("excerpts")
@@ -494,7 +526,10 @@ def _references(root: Path, value: object) -> tuple[dict[str, object] | None, di
             return None, error
         for excerpt_id in ids:
             if excerpt_id not in stored:
-                return None, _error("derivation.excerpt_unknown", "a referenced excerpt id is not stored")
+                return None, _error(
+                    "derivation.excerpt_unknown",
+                    f"excerpt id {excerpt_id!r} is not stored; record it with studium_excerpt_record first",
+                )
         if ids:
             cleaned["excerpts"] = ids
     sources_value = value.get("sources")
@@ -509,11 +544,17 @@ def _references(root: Path, value: object) -> tuple[dict[str, object] | None, di
 
 def _references_ids(value: object, field: str) -> tuple[list[str], dict[str, object] | None]:
     if not isinstance(value, list) or len(value) > _MAX_ENTRIES:
-        return [], _error("mcp.invalid_input", f"{field} must be a list of ids")
+        return [], _error(
+            "mcp.invalid_input",
+            f"{field} must be a list of at most {_MAX_ENTRIES} stored id strings; received {_describe(value)}",
+        )
     identifiers: list[str] = []
     for item in value:
         if not isinstance(item, str) or not item.strip() or len(item.strip()) > 128:
-            return [], _error("mcp.invalid_input", f"{field} ids must be short strings")
+            return [], _error(
+                "mcp.invalid_input",
+                f"each {field} id must be a non-empty string of at most 128 characters",
+            )
         cleaned = item.strip()
         if cleaned not in identifiers:
             identifiers.append(cleaned)

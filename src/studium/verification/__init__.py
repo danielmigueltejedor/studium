@@ -14,7 +14,9 @@ The statuses are deliberately distinct:
   consistent equation can still be physically wrong.
 - ``NUMERICALLY_CROSS_CHECKED``: two independent numeric methods agree on
   sampled points. Sampling is not a proof.
-- ``INDEPENDENTLY_VERIFIED``: two or more distinct methods agree.
+- ``INDEPENDENTLY_VERIFIED``: two or more distinct methods agree and at least
+  one of them is a mathematical proof. Numeric substitution and dimensional
+  agreement alone are corroboration, not an independent proof.
 - ``UNVERIFIED``: the claim could not be decided within the limits.
 - ``FAILED``: a counterexample or a mismatch was found.
 """
@@ -39,9 +41,11 @@ from studium.verification.engine import (
     verify_substitution,
 )
 from studium.verification.model import (
+    PROOF_METHODS,
     VerificationResult,
     VerificationStatus,
     combine,
+    is_proof_method,
 )
 from studium.verification.parser import (
     ExpressionError,
@@ -50,6 +54,7 @@ from studium.verification.parser import (
 )
 
 __all__ = [
+    "PROOF_METHODS",
     "DimensionCheck",
     "DimensionError",
     "ExpressionError",
@@ -59,6 +64,7 @@ __all__ = [
     "check_dimensions",
     "combine",
     "convert",
+    "is_proof_method",
     "parse_expression",
     "parse_units",
     "verify_algebraic_equivalence",
