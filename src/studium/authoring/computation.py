@@ -68,6 +68,12 @@ _TYPOGRAPHIC = str.maketrans(
 )
 
 
+_SUPERSCRIPT = str.maketrans("⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻", "0123456789+-")
+_SUPERSCRIPT_RUN = re.compile(r"[⁺⁻]?[⁰¹²³⁴⁵⁶⁷⁸⁹]+")
+_DIGIT_GROUPS = re.compile(r"(?<![\d.])\d{1,3}(?:[\u00a0\u2009\u202f]\d{3})+(?!\d)")
+_GROUP_SPACES = dict.fromkeys(map(ord, "\u00a0\u2009\u202f"))
+
+
 _POSTFIX_FACTORIAL = re.compile(r"(?<![\w.])(\d+)!(?!=)")
 _MAX_FACTORIAL = 170
 
@@ -109,9 +115,15 @@ def _implicit_multiplication(expression: str) -> str:
 
 
 def normalize_operators(expression: str) -> str:
-    """Read typeset operators (× · ÷ − ^) and n! as the ASCII they denote."""
+    """Read typeset operators (× · ÷ − ^), 10⁻⁵, ``101 325`` and n! as the ASCII they denote.
 
-    return _POSTFIX_FACTORIAL.sub(r"factorial(\1)", expression.translate(_TYPOGRAPHIC))
+    Only a no-break, thin, or narrow no-break space groups digits, in groups of three
+    (``101 325``). A plain space never does, so ``2 3`` stays an error.
+    """
+
+    grouped = _DIGIT_GROUPS.sub(lambda found: found.group().translate(_GROUP_SPACES), expression)
+    powers = _SUPERSCRIPT_RUN.sub(lambda found: f"**({found.group().translate(_SUPERSCRIPT)})", grouped)
+    return _POSTFIX_FACTORIAL.sub(r"factorial(\1)", powers.translate(_TYPOGRAPHIC))
 
 
 def normalize_expression(expression: str) -> str:
@@ -199,7 +211,7 @@ def precision_verdict(claimed: object, actual: Fraction) -> str:
     return "disagrees"
 
 
-_SCIENTIFIC = re.compile(r"^([+-]?[\d.]+)(?:\*|x)10\*\*([+-]?\d+)$")
+_SCIENTIFIC = re.compile(r"^([+-]?[\d.]+)(?:\*|x)10\*\*\(?([+-]?\d+)\)?$")
 
 
 def _plain_number(text: str) -> str:

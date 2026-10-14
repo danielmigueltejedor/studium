@@ -4,6 +4,9 @@ Regression for an MCP evaluation run in which ``studium_problem_record`` rejecte
 a Pitot-tube worked problem (``sqrt(2*600/1.225)``) and a Torricelli exercise,
 because the replay engine accepted only integer powers and no functions.
 """
+# ruff: noqa: RUF001
+
+from fractions import Fraction
 
 import pytest
 
@@ -130,3 +133,30 @@ def test_trailing_zero_integer_is_ambiguous_not_a_match():
     assert not agrees("83300000", Fraction(90000000))
     assert not agrees("3924", Fraction(3930))
     assert agrees("3924", Fraction(39241, 10))
+
+
+@pytest.mark.parametrize(
+    ("expression", "value"),
+    [
+        ("8.314*300/101 325", 8.314 * 300 / 101325),
+        ("1 000 000+1", 1000001),
+        ("1 000 + 1", 1001),
+        ("2·10⁵", 2e5),
+        ("5×10⁻³", 5e-3),
+        ("3² + 4²", 25),
+        ("(1+1)³", 8),
+    ],
+)
+def test_typeset_digit_groups_and_superscript_powers_replay(expression, value):
+    actual, _exact = evaluate_number(expression)
+    assert float(actual) == pytest.approx(value, rel=1e-9)
+
+
+@pytest.mark.parametrize("expression", ["2 3", "101 325", "1 000.5 250", "1 0000", "10^"])
+def test_plain_space_and_misgrouped_digits_stay_refused(expression):
+    with pytest.raises(ComputationError):
+        evaluate_number(expression)
+
+
+def test_a_superscript_claim_matches_the_plain_scientific_value():
+    assert agrees("8.33×10⁷", Fraction(83300000))

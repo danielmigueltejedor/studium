@@ -443,7 +443,7 @@ _TOOLS: tuple[dict[str, object], ...] = (
             "integer exponents up to 1000 stay exact. "
             "Expressions may use numbers, + - * / **, parentheses, pi, e, sqrt, cbrt, exp, log, ln, log10, "
             "sin, cos, tan, asin, acos, atan, sinh, cosh, tanh, abs, and factorial (also n!, n up to 170). "
-            "Typeset × · ÷ − ^ and omitted products (2(3+4), 3pi) are read as * / - **. "
+            "Typeset × · ÷ − ^, 10⁻⁵, digit groups (101 325 with a no-break or thin space) and omitted products (2(3+4), 3pi) are read as * / - **. "
             "An expression that uses only integers and the four operators is accepted only when "
             "every one of those numbers appears in one excerpt cited by a paragraph. "
             "Do not trust a number the model reports. "
