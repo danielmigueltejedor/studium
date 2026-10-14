@@ -310,6 +310,31 @@ def academic_sections_for_chapter(root: Path, chapter_id: str) -> list[dict[str,
     return []
 
 
+def academic_placement_ids(root: Path, chapter_id: str) -> list[str] | None:
+    """Section and subsection ids a paragraph of this chapter may name, in order.
+
+    ``None`` when no academic blueprint plans this chapter's sections, so the
+    placement cannot be checked.
+    """
+
+    blueprint = current_academic_blueprint(root)
+    if blueprint is None:
+        return None
+    for part in _iter(blueprint.get("parts")):
+        for chapter in _iter(part.get("chapters")):
+            if chapter.get("id") != chapter_id:
+                continue
+            found: list[str] = []
+            for section in _iter(chapter.get("sections")):
+                if isinstance(section.get("id"), str):
+                    found.append(str(section["id"]))
+                for subsection in _iter(section.get("subsections")):
+                    if isinstance(subsection.get("id"), str):
+                        found.append(str(subsection["id"]))
+            return found or None
+    return None
+
+
 def academic_chapter_ids(root: Path) -> list[str]:
     blueprint = current_academic_blueprint(root)
     identifiers: list[str] = []

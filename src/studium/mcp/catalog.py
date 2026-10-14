@@ -532,6 +532,8 @@ _TOOLS: tuple[dict[str, object], ...] = (
         "description": (
             "Rewrite one stored paragraph in place. The id stays the same. "
             "The new text must cite one or more stored excerpt ids. "
+            "Omit subsection to keep the paragraph under its academic section; pass one to move it. "
+            "Role, concepts and math are kept unless given. "
             "Omit math to keep the stored declarations; pass math to replace them, each "
             "statement bound to a cited excerpt, a checked derivation, or a replayed computation. "
             "Reject a missing excerpt, a conflicting public source, "
@@ -1518,6 +1520,14 @@ def _schema(tool: Mapping[str, object]) -> dict[str, object]:
                     "items": {"type": "string"},
                     "description": "Academic blueprint concept ids this paragraph teaches. Unknown ids are rejected.",
                 },
+                "subsection": {
+                    "type": "string",
+                    "description": (
+                        "Optional academic blueprint section or subsection id of this chapter. The paragraph "
+                        "renders under that heading; without it the paragraph is part of the chapter "
+                        "introduction. An id the academic blueprint does not plan for the chapter is rejected."
+                    ),
+                },
                 "math": {
                     "type": "array",
                     "description": (
@@ -1567,6 +1577,15 @@ def _schema(tool: Mapping[str, object]) -> dict[str, object]:
                     "type": "array",
                     "items": {"type": "string"},
                     "description": "Academic blueprint concept ids this paragraph teaches. Unknown ids are rejected.",
+                },
+                "subsection": {
+                    "type": ["string", "null"],
+                    "description": (
+                        "Academic blueprint section or subsection id of this chapter. Omit it to keep the "
+                        "paragraph where it is; pass an id to move it there; pass null or an empty string to "
+                        "return it to the chapter introduction. An id the academic blueprint does not plan "
+                        "for the chapter is rejected."
+                    ),
                 },
                 "math": {
                     "type": "array",

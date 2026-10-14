@@ -1717,7 +1717,12 @@ def _hierarchical_chapter(
     for sec_id in section_ids:
         sec_paragraphs = by_subsection.get(sec_id, [])
         title = section_titles[sec_id]
-        if not sec_paragraphs and not intro_paragraphs:
+        nested = [
+            _str_field(subsec, "id")
+            for subsec in section_subsections.get(sec_id, [])
+            if by_subsection.get(_str_field(subsec, "id"))
+        ]
+        if not sec_paragraphs and not nested and not intro_paragraphs:
             continue
         lines.extend(["", r"\section{" + latex_escape(title) + "}"])
         if sec_paragraphs:
