@@ -20,6 +20,17 @@ _MAX_TITLE = 500
 _MAX_SECTIONS = 200
 _SECTION_KEYS = frozenset({"id", "title"})
 
+# Ids the default outline proposes for book-level material. They hold a plan,
+# problem list, quiz, formula table or source list, so the per-chapter teaching
+# shape (two explanations, tip, worked problem, figure) does not apply to them.
+SUPPORT_SECTION_IDS = frozenset({"roadmap", "worked-problems", "self-check", "formula-sheet", "source-audit"})
+
+
+def is_support_section(section_id: object) -> bool:
+    """True for a book-level support section exempt from the per-chapter shape."""
+
+    return isinstance(section_id, str) and section_id in SUPPORT_SECTION_IDS
+
 
 def store_blueprint(
     root: Path,

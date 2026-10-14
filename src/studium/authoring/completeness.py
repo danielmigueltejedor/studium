@@ -13,7 +13,7 @@ from pathlib import Path
 
 from studium.authoring.academic_blueprint import academic_concepts_for_chapter, academic_sections_for_chapter
 from studium.authoring.audit import audited_paragraph_ids
-from studium.authoring.blueprint import current_sections
+from studium.authoring.blueprint import current_sections, is_support_section
 from studium.authoring.contradictions import open_contradictions
 from studium.authoring.depth.planner import planned_figures_for_chapter
 from studium.authoring.derivations import derivations_for_section
@@ -190,6 +190,13 @@ def _section_report(root: Path, section_id: str, context: dict[str, object]) -> 
             f"{len(sec_ids) - len(missing_secs)} of {len(sec_ids)} academic sections have content",
         )
 
+    if is_support_section(section_id):
+        # Book-level material: written plus the evidence checks apply.
+        evidence = ("lead", "sources", "audited", "contradictions_clear")
+        checks = [
+            item if item["id"] in evidence else {**item, "applies": False, "met": None, "detail": "not applicable to a support section"}
+            for item in checks
+        ]
     complete = all(item["met"] is True for item in checks if item["applies"])
     missing = [item["id"] for item in checks if item["applies"] and item["met"] is not True]
     return {

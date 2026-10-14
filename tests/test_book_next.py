@@ -4,6 +4,7 @@ import json
 from fractions import Fraction
 
 from studium.authoring.audit import review_edition
+from studium.authoring.completeness import chapter_completeness
 from studium.mcp.server import dispatch, handle, open_workspace, tool_names
 from studium.storage.migrate import utc_now
 from studium.storage.records import REVIEWS, append_jsonl
@@ -1094,3 +1095,31 @@ def test_concept_coverage_blocks_chapter_completion(tmp_path, monkeypatch):
 
 def _explode(*_args, **_kwargs):
     raise AssertionError("must not fetch")
+
+
+def test_support_sections_need_only_cited_paragraphs(tmp_path, monkeypatch):
+    monkeypatch.setattr("urllib.request.urlopen", _explode)
+    session, root = _topic(tmp_path, "termo", "Classical thermodynamics")
+    excerpts = [_opened_source(session, index) for index in range(12)]
+    sections = [
+        {"id": "roadmap", "title": "Roadmap"},
+        {"id": "gas", "title": "The ideal gas"},
+        {"id": "worked-problems", "title": "Worked problems"},
+        {"id": "self-check", "title": "Self-check"},
+        {"id": "formula-sheet", "title": "Formula sheet"},
+        {"id": "source-audit", "title": "Source audit"},
+        *[{"id": f"extra-{index}", "title": f"Extra {index}"} for index in range(2)],
+    ]
+    dispatch("studium_blueprint_store", {"sections": sections}, session=session)
+    for section in ("roadmap", "worked-problems", "self-check", "formula-sheet", "source-audit"):
+        dispatch(
+            "studium_paragraph_record",
+            {"section": section, "role": "purpose", "text": f"The {section} section lists items.", "excerpts": [excerpts[0]]},
+            session=session,
+        )
+    nxt = dispatch("studium_book_next", {}, session=session)
+    assert nxt["tool"] == "studium_paragraph_record"
+    assert nxt["arguments"]["section"] == "gas"
+    assert "Missing contract pieces: paragraphs, two explanation sections" in nxt["reason"]
+    report = chapter_completeness(root, "roadmap")
+    section = report["sections"][0] if "sections" in report else report
