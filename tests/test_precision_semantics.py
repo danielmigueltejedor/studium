@@ -229,3 +229,49 @@ def test_public_record_gives_readable_value_for_huge_fraction():
 )
 def test_typeset_operators_are_read_as_the_ascii_operators(expression, expected):
     assert evaluate_number(expression)[0] == expected
+
+
+@pytest.mark.parametrize(
+    ("expression", "expected"),
+    [("5!", 120), ("0!", 1), ("factorial(4)", 24), ("10!/(8!*2!)", 45)],
+)
+def test_factorial_is_replayed_exactly(expression, expected):
+    value, exact = evaluate_number(expression)
+    assert value == expected and exact
+
+
+@pytest.mark.parametrize("expression", ["171!", "factorial(2.5)", "factorial(-1)", "2.5!"])
+def test_factorial_outside_domain_is_refused(expression):
+    with pytest.raises(ComputationError):
+        evaluate_number(expression)
+
+
+@pytest.mark.parametrize(
+    ("claimed", "actual", "verdict"),
+    [
+        ("−3", Fraction(-3), "agrees"),
+        ("–3", Fraction(-3), "agrees"),
+        ("8.33×10^7", Fraction(83300000), "agrees"),
+        ("8.33 × 10^7", Fraction(83300000), "agrees"),
+        ("8.33×10^7", Fraction(91000000), "disagrees"),
+        ("−3", Fraction(3), "disagrees"),
+    ],
+)
+def test_typeset_claims_are_read_as_plain_numbers(claimed, actual, verdict):
+    assert precision_verdict(claimed, actual) == verdict
+
+
+def test_factorial_and_typeset_claim_replay_through_the_tool(tmp_path):
+    session, _root = _book(tmp_path)
+    checked = dispatch(
+        "studium_computation_check",
+        {"section": "s1", "expression": "10!/(8!×2!)", "result": "+45"},
+        session=session,
+    )
+    assert checked["status"] == "replayed", checked
+    signed = dispatch(
+        "studium_computation_check",
+        {"section": "s1", "expression": "sqrt(2) − 3", "result": "−1.59"},
+        session=session,
+    )
+    assert signed["status"] == "replayed", signed

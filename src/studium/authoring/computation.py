@@ -38,7 +38,8 @@ class ComputationError(Exception):
 
 _SUPPORTED = (
     "supported: numbers, + - * / **, parentheses, pi, e, and "
-    "sqrt, cbrt, exp, log (natural), ln, log10, sin, cos, tan, asin, acos, atan, sinh, cosh, tanh, abs"
+    "sqrt, cbrt, exp, log (natural), ln, log10, sin, cos, tan, asin, acos, atan, sinh, cosh, tanh, abs, "
+    "factorial (also n!, n up to 170)"
 )
 
 _FUNCTIONS = {
@@ -67,10 +68,14 @@ _TYPOGRAPHIC = str.maketrans(
 )
 
 
+_POSTFIX_FACTORIAL = re.compile(r"(?<![\w.])(\d+)!(?!=)")
+_MAX_FACTORIAL = 170
+
+
 def normalize_operators(expression: str) -> str:
     """Read typeset operators (× · ÷ − ^) as the ASCII operators they denote."""
 
-    return expression.translate(_TYPOGRAPHIC)
+    return _POSTFIX_FACTORIAL.sub(r"factorial(\1)", expression.translate(_TYPOGRAPHIC))
 
 
 def evaluate(expression: str) -> Fraction:
@@ -130,7 +135,7 @@ def precision_verdict(claimed: object, actual: Fraction) -> str:
         return "agrees" if claimed == actual else "disagrees"
     if isinstance(claimed, bool):
         return "disagrees"
-    text = repr(claimed) if isinstance(claimed, float) else str(claimed).strip()
+    text = repr(claimed) if isinstance(claimed, float) else _plain_number(str(claimed))
     try:
         written = Decimal(text)
     except (InvalidOperation, ValueError):
@@ -150,6 +155,17 @@ def precision_verdict(claimed: object, actual: Fraction) -> str:
         if isinstance(trimmed, int) and trimmed > exponent and _within(written, trimmed, actual):
             return "ambiguous"
     return "disagrees"
+
+
+_SCIENTIFIC = re.compile(r"^([+-]?[\d.]+)(?:\*|x)10\*\*([+-]?\d+)$")
+
+
+def _plain_number(text: str) -> str:
+    """Read a typeset claim (−3, 8.33×10^7) as the plain decimal it denotes."""
+
+    plain = normalize_operators(text.strip()).replace(" ", "")
+    found = _SCIENTIFIC.match(plain)
+    return f"{found.group(1)}e{found.group(2)}" if found else plain
 
 
 def _within(written: Decimal, exponent: int, actual: Fraction) -> bool:
@@ -456,9 +472,13 @@ def _eval(node: ast.AST) -> tuple[Fraction, bool]:
         return _power(left, right, exact)
     if isinstance(node, ast.Call):
         name = node.func.id if isinstance(node.func, ast.Name) else None
-        if name is None or node.keywords or len(node.args) != 1 or (name != "abs" and name not in _FUNCTIONS):
+        if name is None or node.keywords or len(node.args) != 1 or (name not in ("abs", "factorial") and name not in _FUNCTIONS):
             raise ComputationError(f"expression is not a calculation; {_SUPPORTED}")
         argument, exact = _eval(node.args[0])
+        if name == "factorial":
+            if argument.denominator != 1 or not 0 <= argument <= _MAX_FACTORIAL:
+                raise ComputationError(f"factorial needs an integer from 0 to {_MAX_FACTORIAL}")
+            return _bounded(Fraction(math.factorial(int(argument)))), exact
         if name == "abs":
             return abs(argument), exact
         try:
@@ -543,7 +563,7 @@ def _fraction(value: str) -> Fraction | None:
     if not value or len(value) > 80:
         return None
     try:
-        return Fraction(value)
+        return Fraction(_plain_number(value))
     except (ValueError, ZeroDivisionError):
         return None
 
