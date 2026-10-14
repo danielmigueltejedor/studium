@@ -119,12 +119,14 @@ def test_a_pitot_worked_problem_can_be_recorded_and_its_steps_replay(tmp_path):
     assert checked["steps_reproduced"] is True, checked["step_checks"]
 
 
-def test_trailing_zero_integer_is_read_to_its_last_nonzero_digit():
+def test_trailing_zero_integer_is_ambiguous_not_a_match():
+    # Reviewed in PR #42: trailing zeros of an integer are not assumed to be placeholders.
     from fractions import Fraction
 
-    from studium.authoring.computation import agrees
+    from studium.authoring.computation import agrees, precision_verdict
 
-    assert agrees("83300000", Fraction(250 * 6, 5) * 0 + Fraction(833333333, 10))
+    assert not agrees("83300000", Fraction(833333333, 10))
+    assert precision_verdict("83300000", Fraction(833333333, 10)) == "ambiguous"
     assert not agrees("83300000", Fraction(90000000))
     assert not agrees("3924", Fraction(3930))
     assert agrees("3924", Fraction(39241, 10))

@@ -17,7 +17,7 @@ from pathlib import Path
 
 from studium.authoring.academic_blueprint import academic_concept_ids
 from studium.authoring.blueprint import current_sections
-from studium.authoring.computation import ComputationError, agrees, evaluate
+from studium.authoring.computation import ComputationError, evaluate, precision_verdict
 from studium.authoring.excerpts import excerpts_by_id
 from studium.authoring.mathematics import MathError, substitution_latex, symbol_names_of, validate_latex
 from studium.authoring.support import corroboration_for_excerpts, paragraph_citation_blockers
@@ -292,12 +292,12 @@ def _check_numeric(root: Path, record: dict[str, object]) -> dict[str, object]:
     excerpt_ids = list(excerpts) if isinstance(excerpts, list) and all(isinstance(item, str) for item in excerpts) else []
     present = len(excerpt_ids) == 2 and all(item in stored for item in excerpt_ids)
     independent = present and corroboration_for_excerpts(root, excerpt_ids) == "two_witnesses"
-    step_checks = _step_checks(record)
+    step_checks, final_value = _step_checks(record)
     updated = dict(record)
     updated["status"] = "two_witnesses" if independent else "unchecked"
     updated["correct"] = False
     updated["classification"] = "PENDING"
-    answer_check = _answer_check(record.get("expected"), step_checks)
+    answer_check = _answer_check(record.get("expected"), step_checks, final_value)
     if step_checks:
         updated["step_checks"] = step_checks
     updated["answer_check"] = answer_check
@@ -333,8 +333,18 @@ def _decimal(value: "Fraction") -> str:
     return f"{float(value):.6g}"
 
 
-def _answer_check(expected: object, step_checks: list[dict[str, object]]) -> dict[str, object]:
-    """Compare the stated answer with the value of the last replayed step.
+_AMBIGUOUS_REASON = (
+    "the stated value ends in zeros that may or may not be significant; it agrees only if they are placeholders. "
+    "Write it in scientific notation (e.g. 8.33e7) or with a decimal point"
+)
+
+
+def _answer_check(
+    expected: object,
+    step_checks: list[dict[str, object]],
+    final_value: "Fraction | None",
+) -> dict[str, object]:
+    """Compare the stated answer with the unrounded value of the last replayed step.
 
     ``replayed`` means the arithmetic of the final step gives the stated answer at
     the precision it is written with. It says nothing about the model behind it.
@@ -343,32 +353,38 @@ def _answer_check(expected: object, step_checks: list[dict[str, object]]) -> dic
     if not step_checks:
         return {"result": "not_replayable", "reason": "the solution has no step with an expression"}
     last = step_checks[-1]
-    value = _number(last.get("value"))
-    if value is None or last.get("error") is not None:
+    if final_value is None or last.get("error") is not None:
         return {"result": "not_replayable", "reason": "the final step could not be evaluated"}
     if _number(expected) is None:
         return {"result": "not_replayable", "reason": "the stated answer is not a plain number"}
-    return {
-        "result": "replayed" if agrees(expected, value) else "mismatch",
+    verdict = precision_verdict(expected, final_value)
+    check: dict[str, object] = {
+        "result": {"agrees": "replayed", "ambiguous": "ambiguous_precision"}.get(verdict, "mismatch"),
         "final_step": last.get("index"),
         "value": last.get("value"),
     }
+    if verdict == "ambiguous":
+        check["reason"] = _AMBIGUOUS_REASON
+    return check
 
 
-def _step_checks(record: dict[str, object]) -> list[dict[str, object]]:
+def _step_checks(record: dict[str, object]) -> "tuple[list[dict[str, object]], Fraction | None]":
     """Replay every numeric solution step that carries an expression.
 
-    A reproduced step is a calculation that matched its stored result. It is not
+    Returns the checks and the unrounded value of the last replayed step. The
+    stored ``value`` is for display only; comparisons use the exact value. A
+    reproduced step is a calculation that matched its stored result. It is not
     a proof and it does not make the whole solution correct.
     """
 
     solution = record.get("solution")
     if not isinstance(solution, dict):
-        return []
+        return [], None
     steps = solution.get("steps")
     if not isinstance(steps, list):
-        return []
+        return [], None
     checks: list[dict[str, object]] = []
+    final_value: Fraction | None = None
     for index, step in enumerate(steps):
         if not isinstance(step, dict) or "expression" not in step:
             continue
@@ -379,14 +395,19 @@ def _step_checks(record: dict[str, object]) -> list[dict[str, object]]:
             actual = evaluate(expression)
         except ComputationError as exc:
             checks.append({"index": index, "expression": expression, "reproduced": False, "error": str(exc)})
+            final_value = None
             continue
+        final_value = actual
         entry: dict[str, object] = {"index": index, "expression": expression, "value": _decimal(actual)}
         if "expected" in step:
             entry["expected"] = step["expected"]
             # A stated result is read as rounded to its last written digit.
-            entry["reproduced"] = _number(step["expected"]) is not None and agrees(step["expected"], actual)
+            verdict = precision_verdict(step["expected"], actual) if _number(step["expected"]) is not None else "disagrees"
+            entry["reproduced"] = verdict == "agrees"
+            if verdict == "ambiguous":
+                entry["precision"] = "ambiguous"
         checks.append(entry)
-    return checks
+    return checks, final_value
 
 
 def _check_rust(root: Path, record: dict[str, object]) -> dict[str, object]:
