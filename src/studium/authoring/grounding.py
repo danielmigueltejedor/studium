@@ -553,24 +553,42 @@ def validate_math(
     return None
 
 
-#: Statuses a prose relation can have. Only the blocking ones stop an audit:
-#: a parseable claim nothing stores, and arithmetic that does not hold.
-GROUNDED_STATUSES = frozenset({"source", "derivation", "example"})
-BLOCKING_STATUSES = frozenset({"ungrounded", "arithmetic_mismatch"})
-FORMULA_STATUSES = (
-    "source",
-    "derivation",
-    "example",
-    "arithmetic",
-    "arithmetic_ambiguous",
-    "condition",
-    "derivation_step",
-    "definition",
-    "approximation",
-    "not_checkable",
-    "ungrounded",
-    "arithmetic_mismatch",
+#: Evidence statuses of a prose equation, strongest first. A status names the
+#: evidence the project holds for the exact statement; none of them is human
+#: approval, and source support is not a proof.
+VERIFIED_STATUSES = ("symbolically_verified", "dimensionally_verified", "numerically_reproduced")
+EQUATION_STATUSES = (
+    "symbolically_verified",
+    "dimensionally_verified",
+    "numerically_reproduced",
+    "source_supported",
+    "derived_steps_unchecked",
+    "numerically_ambiguous",
+    "not_machine_checkable",
+    "unsupported",
+    "contradicted",
+    "verification_failed",
 )
+#: Relations that are not claims to verify.
+NON_CLAIM_STATUSES = ("definition", "approximation", "value_or_condition")
+FORMULA_STATUSES = EQUATION_STATUSES + NON_CLAIM_STATUSES
+#: The evidence audit blocks on these: a readable claim nothing supports, a
+#: relation the numbers contradict, or one a stored check failed.
+BLOCKING_STATUSES = frozenset({"unsupported", "contradicted", "verification_failed"})
+#: Statuses whose equation still needs a person to look at it.
+HUMAN_REVIEW_STATUSES = frozenset(
+    {"not_machine_checkable", "unsupported", "derived_steps_unchecked", "numerically_ambiguous", "source_supported"}
+)
+_DERIVATION_EVIDENCE = {
+    "SYMBOLICALLY_VERIFIED": "symbolically_verified",
+    "INDEPENDENTLY_VERIFIED": "symbolically_verified",
+    "ACADEMICALLY_REVIEWED": "symbolically_verified",
+    "DIMENSIONALLY_VERIFIED": "dimensionally_verified",
+    "COMPUTATION_REPRODUCED": "numerically_reproduced",
+}
+_RANK = {status: index for index, status in enumerate(EQUATION_STATUSES)}
+#: Kept for callers of the earlier API: the statuses that count as grounded.
+GROUNDED_STATUSES = frozenset({*VERIFIED_STATUSES, "source_supported"})
 
 _SPAN = re.compile(r"\$\$(.+?)\$\$|\\\[(.+?)\\\]|\\\((.+?)\\\)|\$([^$]+)\$", re.S)
 _RELATION_OPS = re.compile(r"\\approx|\\simeq|\\equiv|:=|(?<![<>!\\])=")
@@ -700,67 +718,154 @@ class GroundingContext:
     """What a relation may be grounded by, read once for many relations."""
 
     def __init__(self, root: Path) -> None:
+        from studium.storage.records import VERIFICATIONS
+
         self.root = root
         self.excerpts = excerpts_by_id(root)
         self.computations = replayed_computations(root)
-        self._derivations: dict[str, list[dict[str, object]]] = {}
+        self.derivation_records = [record for record in fold_by_id(root / DERIVATIONS) if record.get("deleted") is not True]
+        self.verifications = [
+            record
+            for record in fold_by_id(root / VERIFICATIONS)
+            if record.get("check") in {"equation", "equivalence"} and isinstance(record.get("inputs"), dict)
+        ]
 
     def derivations(self, section: object) -> list[dict[str, object]]:
-        key = section if isinstance(section, str) else ""
-        if key not in self._derivations:
-            self._derivations[key] = verified_derivations(self.root, section)
-        return self._derivations[key]
+        return [record for record in self.derivation_records if record.get("section") == section]
 
 
 def formula_statuses(
     root: Path, record: dict[str, object], context: GroundingContext | None = None
 ) -> list[tuple[str, str]]:
-    """Each complete relation the record states, with how it is grounded."""
+    """Each complete relation the record states, with its evidence status."""
+
+    return [(str(item["statement"]), str(item["status"])) for item in equation_evidence(root, record, context)]
+
+
+def equation_evidence(
+    root: Path, record: dict[str, object], context: GroundingContext | None = None
+) -> list[dict[str, object]]:
+    """Each complete relation the record states, as written, with its status and evidence ids.
+
+    The statement is kept exactly as the author wrote it. ``important`` marks
+    display equations. ``human_review`` says whether a person still has to
+    look at it; nothing here is human approval.
+    """
 
     loaded = context if context is not None else GroundingContext(root)
     text_value = record.get("text")
     text = text_value if isinstance(text_value, str) else ""
-    statuses: list[tuple[str, str]] = []
+    display = {normalize_math(item) for item in _display_statements(text)}
+    found: list[dict[str, object]] = []
     seen: set[str] = set()
     for kind, statement in math_statements(text):
         key = f"{kind}:{normalize_math(statement)}"
         if key in seen:
             continue
         seen.add(key)
-        statuses.append((statement, _status(loaded, record, kind, statement)))
-    return statuses
+        status, evidence = _evidence(loaded, record, kind, statement)
+        found.append(
+            {
+                "paragraph": record.get("id"),
+                "section": record.get("section"),
+                "statement": statement,
+                "kind": kind,
+                "status": status,
+                "evidence": evidence,
+                "important": normalize_math(statement) in display,
+                "machine_parseable": _relation(statement) is not None,
+                "human_review": "required" if status in HUMAN_REVIEW_STATUSES - {"source_supported"}
+                else ("recommended" if status == "source_supported" else "none"),
+                "blocks_audit": status in BLOCKING_STATUSES,
+            }
+        )
+    return found
+
+
+def _display_statements(text: str) -> list[str]:
+    statements: list[str] = []
+    for match in re.finditer(r"\$\$(.+?)\$\$|\\\[(.+?)\\\]", text, re.S):
+        body = next(group for group in match.groups() if group is not None)
+        statements.extend(statement for _kind, statement in math_statements(f"${body}$"))
+    return statements
 
 
 def _status(context: GroundingContext, record: dict[str, object], kind: str, statement: str) -> str:
+    return _evidence(context, record, kind, statement)[0]
+
+
+def _evidence(context: GroundingContext, record: dict[str, object], kind: str, statement: str) -> tuple[str, list[str]]:
+    """The strongest status the stored evidence gives this exact statement, and that evidence.
+
+    A relation the parser cannot read is never verified by a parser: only a
+    cited excerpt (source support) or a stored check of the same text can back
+    it. A failed check counts only when nothing passing backs the statement.
+    """
+
     if kind == "definition":
-        return "definition"
+        return "definition", []
     if kind == "approximation":
-        return "approximation"
+        return "approximation", []
     arithmetic = _arithmetic_verdict(statement)
     if arithmetic is not None:
-        return arithmetic
+        return arithmetic, []
     if _condition(statement):
-        return "condition"
-    for body in record_excerpt_texts(record, context.excerpts):
-        if _stated_in(statement, body):
-            return "source"
-    derivations = context.derivations(record.get("section"))
-    for derivation in derivations:
+        return "value_or_condition", []
+    found: list[tuple[str, str]] = []
+    failed: list[str] = []
+    for excerpt_id in _string_list(record.get("excerpts")):
+        excerpt = context.excerpts.get(excerpt_id)
+        body = excerpt.get("text") if isinstance(excerpt, dict) else None
+        if isinstance(body, str) and _stated_in(statement, body):
+            found.append(("source_supported", excerpt_id))
+    for derivation in context.derivations(record.get("section")):
+        identifier = str(derivation.get("id"))
+        verification = derivation.get("verification")
+        derivation_status = str(verification.get("status")) if isinstance(verification, dict) else "UNVERIFIED"
         if any(_same_relation(statement, line) for line in _final_statements(derivation)):
-            return "derivation"
-    for computation in context.computations:
-        if _computation_states(computation, statement):
-            return "example"
-    for entry in declared_math(record):
-        declared = entry.get("statement")
-        if isinstance(declared, str) and _same_relation(statement, declared) and entry.get("kind") in MATH_KINDS:
-            return str(entry["kind"])
-    for derivation in derivations:
+            if derivation_status in _DERIVATION_EVIDENCE:
+                found.append((_DERIVATION_EVIDENCE[derivation_status], identifier))
+            elif derivation_status == "FAILED":
+                failed.append(identifier)
+            continue
         steps = derivation.get("steps_latex")
         lines = [line for line in steps if isinstance(line, str)] if isinstance(steps, list) else []
-        if any(_same_relation(statement, line) for line in lines):
-            return "derivation_step"
-    return "ungrounded" if _relation(statement) is not None else "not_checkable"
+        if derivation_status in _DERIVATION_EVIDENCE and any(_same_relation(statement, line) for line in lines):
+            found.append(("derived_steps_unchecked", identifier))
+    for verification in context.verifications:
+        inputs = verification.get("inputs")
+        left = inputs.get("left") if isinstance(inputs, dict) else None
+        right = inputs.get("right") if isinstance(inputs, dict) else None
+        if not isinstance(left, str) or not isinstance(right, str) or not _same_relation(statement, f"{left} = {right}"):
+            continue
+        identifier = str(verification.get("id"))
+        if verification.get("verification_status") == "SYMBOLICALLY_VERIFIED" and verification.get("ok") is True:
+            found.append(("symbolically_verified", identifier))
+        elif verification.get("verification_status") == "FAILED":
+            failed.append(identifier)
+    for computation in context.computations:
+        if _computation_states(computation, statement):
+            found.append(("numerically_reproduced", str(computation.get("id"))))
+    for entry in declared_math(record):
+        declared = entry.get("statement")
+        if not isinstance(declared, str) or not _same_relation(statement, declared):
+            continue
+        refs = _string_list(entry.get("refs"))
+        # The declaration was revalidated against these ids when it was stored.
+        if entry.get("kind") == "source":
+            found.extend(("source_supported", ref) for ref in refs)
+        elif entry.get("kind") == "example":
+            found.extend(("numerically_reproduced", ref) for ref in refs)
+    if found:
+        best = min(found, key=lambda item: _RANK[item[0]])[0]
+        return best, sorted({identifier for _status, identifier in found})
+    if failed:
+        return "verification_failed", sorted(set(failed))
+    return ("unsupported" if _relation(statement) is not None else "not_machine_checkable"), []
+
+
+def _string_list(value: object) -> list[str]:
+    return [item for item in value if isinstance(item, str)] if isinstance(value, list) else []
 
 
 def _final_statements(derivation: dict[str, object]) -> list[str]:
@@ -842,7 +947,7 @@ def _arithmetic_text(side: str) -> str | None:
 
 
 def _arithmetic_verdict(statement: str) -> str | None:
-    """``arithmetic`` / ``arithmetic_mismatch`` for a relation between plain numbers, else None."""
+    """``numerically_reproduced`` / ``contradicted`` for a relation between plain numbers, else None."""
 
     from studium.authoring.computation import ComputationError, evaluate, precision_verdict
 
@@ -863,65 +968,115 @@ def _arithmetic_verdict(statement: str) -> str | None:
     except (ComputationError, ZeroDivisionError, OverflowError, ValueError):
         return None
     if verdict == "agrees":
-        return "arithmetic"
+        return "numerically_reproduced"
     if verdict == "ambiguous":
-        return "arithmetic_ambiguous"
-    return "arithmetic_mismatch"
+        return "numerically_ambiguous"
+    return "contradicted"
 
 
 def classify(root: Path, record: dict[str, object], formula: str) -> frozenset[str]:
-    """How one complete relation in prose is grounded. An empty set means not grounded.
-
-    Only a cited excerpt stating the whole relation, the final equation of a
-    checked derivation, a replayed computation, or a revalidated declaration
-    grounds it. A derivation step is not checked and does not ground.
-    """
+    """The evidence status of one relation, as a set; empty when nothing supports it."""
 
     status = _status(GroundingContext(root), record, "claim", formula)
     return frozenset({status}) if status in GROUNDED_STATUSES else frozenset()
 
 
 def ungrounded_formulas(root: Path, record: dict[str, object]) -> list[str]:
-    """Relations that block an audit: a parseable claim nothing grounds, or arithmetic that does not hold."""
+    """Relations that block the evidence audit: unsupported, contradicted, or with a failed check."""
 
     return [statement for statement, status in formula_statuses(root, record) if status in BLOCKING_STATUSES]
 
 
 def grounding_summary(root: Path) -> dict[str, object]:
-    """Count the prose relations by status and the explicit declarations by kind."""
+    """Count the prose relations by evidence status, and say whether verification is complete."""
 
     from studium.authoring.paragraphs import supported_paragraphs
 
     context = GroundingContext(root)
-    by_kind: dict[str, int] = {"source": 0, "derivation": 0, "example": 0}
     by_status: dict[str, int] = dict.fromkeys(FORMULA_STATUSES, 0)
-    ungrounded = 0
     total = 0
+    blocking = 0
+    claims = 0
+    verified = 0
+    unresolved_important: list[dict[str, object]] = []
     declared: dict[str, int] = {"source": 0, "derivation": 0, "example": 0}
     for record in supported_paragraphs(root):
-        for _statement, status in formula_statuses(root, record, context):
+        for item in equation_evidence(root, record, context):
             total += 1
+            status = str(item["status"])
             by_status[status] = by_status.get(status, 0) + 1
-            if status in by_kind:
-                by_kind[status] += 1
             if status in BLOCKING_STATUSES:
-                ungrounded += 1
+                blocking += 1
+            if status in EQUATION_STATUSES:
+                claims += 1
+                if status in VERIFIED_STATUSES:
+                    verified += 1
+                elif item["important"] and len(unresolved_important) < 50:
+                    unresolved_important.append({key: item[key] for key in ("paragraph", "statement", "status")})
         for entry in declared_math(record):
             kind = entry.get("kind")
             if kind in declared:
                 declared[str(kind)] += 1
-    verified_derivations = 0
-    for record in fold_by_id(root / DERIVATIONS):
-        verification = record.get("verification")
+    checked = 0
+    for derivation in context.derivation_records:
+        verification = derivation.get("verification")
         if isinstance(verification, dict) and str(verification.get("status")) in VERIFIED_DERIVATION_STATUSES:
-            verified_derivations += 1
+            checked += 1
     return {
         "formulas": total,
-        "formulas_ungrounded": ungrounded,
-        "by_kind": by_kind,
+        "claims": claims,
+        "claims_verified": verified,
+        "formulas_ungrounded": blocking,
         "by_status": by_status,
+        "by_kind": {
+            "source": by_status["source_supported"],
+            "derivation": by_status["symbolically_verified"] + by_status["dimensionally_verified"],
+            "example": by_status["numerically_reproduced"],
+        },
+        "scientific_verification_complete": claims == verified,
+        "unresolved_important": unresolved_important,
         "declared": declared,
-        "checked_derivations": verified_derivations,
+        "checked_derivations": checked,
+        "note": (
+            "Statuses describe stored evidence for each exact statement. Source support is not a proof, "
+            "not_machine_checkable is not an error, and nothing here is human approval."
+        ),
+    }
+
+
+def equation_report(root: Path, *, section: object = None, status: object = None, offset: object = 0, limit: object = 100) -> dict[str, object]:
+    """Every prose equation with its exact statement, evidence status and evidence ids (paginated).
+
+    Read-only. ``section`` and ``status`` filter; ``status`` may be one status
+    or a list. Nothing in the report is verification by a person.
+    """
+
+    from studium.authoring.paragraphs import supported_paragraphs
+
+    wanted = {status} if isinstance(status, str) else ({item for item in status if isinstance(item, str)} if isinstance(status, list) else None)
+    if wanted is not None and not wanted <= set(FORMULA_STATUSES):
+        return _error("mcp.invalid_input", "status must be one of: " + ", ".join(FORMULA_STATUSES))
+    start = offset if isinstance(offset, int) and not isinstance(offset, bool) and offset >= 0 else 0
+    size = limit if isinstance(limit, int) and not isinstance(limit, bool) and 1 <= limit <= 500 else 100
+    context = GroundingContext(root)
+    rows: list[dict[str, object]] = []
+    for record in supported_paragraphs(root):
+        if isinstance(section, str) and record.get("section") != section:
+            continue
+        for item in equation_evidence(root, record, context):
+            if wanted is None or item["status"] in wanted:
+                rows.append(item)
+    return {
+        "status": "ok",
+        "total": len(rows),
+        "offset": start,
+        "equations": rows[start : start + size],
+        "next_offset": start + size if start + size < len(rows) else None,
+        "statuses": list(FORMULA_STATUSES),
+        "note": (
+            "Each status names the stored evidence for that exact statement. Source support is not a proof; "
+            "not_machine_checkable needs human review; nothing here is human approval."
+        ),
     }
 
 

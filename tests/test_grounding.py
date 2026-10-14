@@ -28,7 +28,8 @@ def test_verified_derivation_grounds_a_prose_formula(tmp_path, monkeypatch):
     grounding = report["math_grounding"]
     assert grounding["formulas"] == 1
     assert grounding["formulas_ungrounded"] == 0
-    assert grounding["by_kind"]["derivation"] == 1
+    # The derivation's only check is numeric: the equation is numerically reproduced, not symbolically verified.
+    assert grounding["by_status"]["numerically_reproduced"] == 1
     assert grounding["checked_derivations"] == 1
     assert grounding_draft_not_released(recorded)
     assert "verified" not in json.dumps(recorded).lower().replace("not verified", "")

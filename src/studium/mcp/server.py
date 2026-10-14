@@ -33,6 +33,7 @@ from studium.authoring.derivations import check_derivation, list_derivations, re
 from studium.authoring.excerpts import get_excerpt, list_excerpts, record_excerpt
 from studium.authoring.expansion import expansion_plan
 from studium.authoring.figures import check_figure, figure_usage, record_figure, remove_figure
+from studium.authoring.grounding import equation_report
 from studium.authoring.math_verify import list_verifications, verify_math
 from studium.authoring.notation import list_notation, list_terminology, record_notation, record_terminology
 from studium.authoring.paragraphs import (
@@ -1120,6 +1121,14 @@ def _dispatch(session: McpSession, name: str, arguments: Mapping[str, object]) -
         return resume_packet(root)
     if name == "studium_quality_report":
         return quality_report(root)
+    if name == "studium_equation_report":
+        return equation_report(
+            root,
+            section=arguments.get("section"),
+            status=arguments.get("status"),
+            offset=arguments.get("offset", 0),
+            limit=arguments.get("limit", 100),
+        )
     return {"status": "mcp.unknown_tool", "message": "tool is not in the closed set"}
 
 
