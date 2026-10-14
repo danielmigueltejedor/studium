@@ -9,7 +9,7 @@ import hashlib
 import json
 from pathlib import Path
 
-from studium.authoring.academic_blueprint import academic_concept_ids
+from studium.authoring.academic_blueprint import academic_concept_ids, academic_placement_ids
 from studium.authoring.blueprint import current_sections
 from studium.authoring.grounding import parse_math, validate_math
 from studium.authoring.support import paragraph_citation_blockers
@@ -24,6 +24,7 @@ _MAX_TEXT = 20_000
 _MAX_EXCERPTS = 40
 _MAX_CONCEPTS = 40
 GAP_LABEL = "Gap: this section has no paragraph tied to an opened excerpt."
+_KEEP = object()
 
 
 def record_paragraph(
@@ -55,11 +56,13 @@ def record_paragraph(
     concept_ids, concept_error = _concepts(root, concepts)
     if concept_error is not None:
         return concept_error
-    subsection_id = _subsection(subsection)
     math_entries, math_error = parse_math(math)
     if math_error is not None:
         return math_error
     assert section_id is not None and cleaned_text is not None and excerpt_ids is not None and concept_ids is not None
+    subsection_id, subsection_error = _subsection(root, section_id, subsection)
+    if subsection_error is not None:
+        return subsection_error
     if math_entries is not None:
         grounding_error = validate_math(root, math_entries, section=section_id, excerpt_ids=excerpt_ids)
         if grounding_error is not None:
@@ -116,13 +119,17 @@ def replace_paragraph(
     role: object = None,
     concepts: object = None,
     math: object = None,
+    subsection: object = _KEEP,
     actor: dict[str, object] | None = None,
 ) -> dict[str, object]:
     """Rewrite one stored paragraph in place. The new text still cites an excerpt.
 
     Conflicts and course sources the guide does not cite are rejected, the same
     as ``record_paragraph``. The id does not change. The result stays a draft.
-    When ``math`` is omitted the stored declarations are kept.
+    When ``math`` is omitted the stored declarations are kept. When
+    ``subsection`` is omitted the paragraph keeps its academic section; an id
+    moves it there, and ``None`` or an empty string returns it to the chapter
+    introduction.
     """
 
     identifier = _paragraph_id(paragraph_id)
@@ -154,6 +161,15 @@ def replace_paragraph(
     section_id = current.get("section")
     if not isinstance(section_id, str):
         return _error("paragraph.section_unknown", "section is not in the stored blueprint")
+    if subsection is _KEEP:
+        kept = current.get("subsection")
+        subsection_id = kept if isinstance(kept, str) and kept.strip() else None
+    elif subsection is None or (isinstance(subsection, str) and not subsection.strip()):
+        subsection_id = None
+    else:
+        subsection_id, subsection_error = _subsection(root, section_id, subsection)
+        if subsection_error is not None:
+            return subsection_error
     if math_entries:
         grounding_error = validate_math(root, math_entries, section=section_id, excerpt_ids=excerpt_ids)
         if grounding_error is not None:
@@ -191,6 +207,8 @@ def replace_paragraph(
                 record["concepts"] = concept_ids
             elif isinstance(current.get("concepts"), list):
                 record["concepts"] = current["concepts"]
+            if subsection_id is not None:
+                record["subsection"] = subsection_id
             if math_entries:
                 record["math"] = math_entries
             append_jsonl(root / PARAGRAPHS, record)
@@ -387,6 +405,8 @@ def _public(record: dict[str, object]) -> dict[str, object]:
     }
     if record.get("role") in _KEPT_ROLES:
         visible["role"] = record["role"]
+    if isinstance(record.get("subsection"), str):
+        visible["subsection"] = record["subsection"]
     concepts = record.get("concepts")
     if isinstance(concepts, list):
         visible["concepts"] = [str(item) for item in concepts if isinstance(item, str)]
@@ -419,15 +439,31 @@ def _concepts(root: Path, value: object) -> tuple[list[str] | None, dict[str, ob
     return identifiers, None
 
 
-def _subsection(value: object) -> str | None:
+def _subsection(root: Path, section_id: str, value: object) -> tuple[str | None, dict[str, object] | None]:
+    """An academic section or subsection id of this chapter, or no placement.
+
+    With an academic blueprint for the chapter, an id it does not plan is
+    rejected instead of silently rendering the paragraph in the chapter
+    introduction. Without one the id is kept as given.
+    """
+
     if value is None:
-        return None
+        return None, None
     if not isinstance(value, str):
-        return None
+        return None, _error("mcp.invalid_input", "subsection must be an academic section or subsection id")
     cleaned = value.strip()
-    if not cleaned or len(cleaned) > 128:
-        return None
-    return cleaned
+    if not cleaned:
+        return None, None
+    if len(cleaned) > 128:
+        return None, _error("mcp.invalid_input", "subsection id is too long")
+    allowed = academic_placement_ids(root, section_id)
+    if allowed is not None and cleaned not in allowed:
+        return None, _error(
+            "paragraph.subsection_unknown",
+            f"subsection {cleaned} is not a section or subsection of {section_id} in the academic blueprint; "
+            f"use one of: {', '.join(allowed)}",
+        )
+    return cleaned, None
 
 
 def _body(state: dict[str, object], record: dict[str, object], *, status: str) -> dict[str, object]:

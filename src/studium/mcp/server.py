@@ -943,6 +943,7 @@ def _dispatch(session: McpSession, name: str, arguments: Mapping[str, object]) -
             role=arguments.get("role") if "role" in arguments else None,
             concepts=arguments.get("concepts") if "concepts" in arguments else None,
             math=arguments.get("math") if "math" in arguments else None,
+            **({"subsection": arguments.get("subsection")} if "subsection" in arguments else {}),
             actor=actor,
         )
     if name == "studium_media_record":
