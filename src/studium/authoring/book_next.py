@@ -24,7 +24,7 @@ from studium.authoring.audit import (
     short_paragraph_id,
     writer_edition,
 )
-from studium.authoring.blueprint import current_sections
+from studium.authoring.blueprint import current_sections, is_support_section
 from studium.authoring.computation import list_computations
 from studium.authoring.derivations import derivations_for_section
 from studium.authoring.excerpts import excerpts_by_id
@@ -271,6 +271,8 @@ def _book_next(root: Path) -> dict[str, object]:
     for section in sections:
         if _paragraph_count(root, section["id"]) == 0:
             return _unwritten_step(state, root, section, _excerpt_for_section(root, section["id"]))
+        if is_support_section(section["id"]):
+            continue
         if _explanation_words(root, section["id"]) < _thresholds(root).min_explanation_words:
             return _explanation_step(state, root, section)
     reference_step = _pending_figure_reference(state, root)
@@ -440,6 +442,8 @@ def _missing_pieces(root: Path, section: dict[str, str]) -> list[str]:
     missing: list[str] = []
     if not _is_written(root, section_id):
         missing.append("paragraphs")
+    if is_support_section(section_id):
+        return missing
     if _explanation_count(root, section_id) < _thresholds(root).min_explanation_sections:
         missing.append("two explanation sections")
     if _explanation_words(root, section_id) < _thresholds(root).min_explanation_words:
@@ -614,7 +618,7 @@ def _pending_problem(root: Path, sections: list[dict[str, str]]) -> dict[str, ob
     profile = _profile(root)
     if profile not in _CODE_OR_CALCULATION or not sections:
         return None
-    section = sections[0]
+    section = next((item for item in sections if not is_support_section(item["id"])), sections[0])
     section_id = section["id"]
     if section_id in blocked_ids(root):
         return None
@@ -1044,17 +1048,17 @@ def _chapter_gate(
             blocked=blocked_sections(root),
         )
     for section in sections:
-        if not _is_written(root, section["id"]):
+        if not _is_written(root, section["id"]) or is_support_section(section["id"]):
             continue
         if _explanation_count(root, section["id"]) < _thresholds(root).min_explanation_sections:
             return _explanation_step(state, root, section, two_sections=True)
     for section in sections:
-        if not _is_written(root, section["id"]):
+        if not _is_written(root, section["id"]) or is_support_section(section["id"]):
             continue
         if _explanation_words(root, section["id"]) < _thresholds(root).min_explanation_words:
             return _explanation_step(state, root, section)
     for section in sections:
-        if not _is_written(root, section["id"]):
+        if not _is_written(root, section["id"]) or is_support_section(section["id"]):
             continue
         if _explanation_words(root, section["id"]) < _thresholds(root).min_explanation_words:
             continue
@@ -1073,7 +1077,7 @@ def _chapter_gate(
             blocked=blocked_sections(root),
         )
     for section in sections:
-        if not _is_written(root, section["id"]):
+        if not _is_written(root, section["id"]) or is_support_section(section["id"]):
             continue
         if _explanation_words(root, section["id"]) < _thresholds(root).min_explanation_words or _explanation_count(root, section["id"]) < _thresholds(root).min_explanation_sections:
             continue
@@ -1373,7 +1377,7 @@ def _pending_length(
 ) -> tuple[str, dict[str, str], str, str | None] | None:
     blocked = blocked_ids(root)
     for section in sections:
-        if section["id"] in blocked:
+        if section["id"] in blocked or is_support_section(section["id"]):
             continue
         paragraphs = [
             record
@@ -1401,7 +1405,7 @@ def _pending_self_check(
 ) -> tuple[dict[str, str], str] | None:
     blocked = blocked_ids(root)
     for section in sections:
-        if section["id"] in blocked:
+        if section["id"] in blocked or is_support_section(section["id"]):
             continue
         paragraphs = [record for record in supported_paragraphs(root) if record.get("section") == section["id"]]
         if not paragraphs or any(record.get("role") == "self_check" for record in paragraphs):
