@@ -38,7 +38,8 @@ class ComputationError(Exception):
 
 _SUPPORTED = (
     "supported: numbers, + - * / **, parentheses, pi, e, and "
-    "sqrt, cbrt, exp, log (natural), ln, log10, sin, cos, tan, asin, acos, atan, sinh, cosh, tanh, abs"
+    "sqrt, cbrt, exp, log (natural), ln, log10, sin, cos, tan, asin, acos, atan, sinh, cosh, tanh, abs, "
+    "factorial (also n!, n up to 170)"
 )
 
 _FUNCTIONS = {
@@ -62,6 +63,63 @@ _FUNCTIONS = {
 _CONSTANTS = {"pi": math.pi, "e": math.e}
 
 
+_TYPOGRAPHIC = str.maketrans(
+    {"×": "*", "·": "*", "⋅": "*", "÷": "/", "−": "-", "–": "-", "^": "**"}
+)
+
+
+_POSTFIX_FACTORIAL = re.compile(r"(?<![\w.])(\d+)!(?!=)")
+_MAX_FACTORIAL = 170
+
+
+_IMPLICIT_TOKEN = re.compile(
+    r"(?P<space>\s+)"
+    r"|(?P<number>(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?)"
+    r"|(?P<name>[A-Za-z_]\w*)"
+    r"|(?P<other>.)",
+    re.DOTALL,
+)
+
+
+def _implicit_multiplication(expression: str) -> str:
+    """Insert ``*`` where typesetting omits it: ``2(3+4)``, ``3pi``, ``(a)(b)``.
+
+    A name directly before ``(`` stays a call (``sqrt(2)``); a constant is never
+    called, and two adjacent numbers (``2 3``) stay an error.
+    """
+
+    pieces: list[str] = []
+    previous: tuple[str, str] | None = None
+    for match in _IMPLICIT_TOKEN.finditer(expression):
+        kind = match.lastgroup or "other"
+        text = match.group()
+        if kind == "space":
+            pieces.append(text)
+            continue
+        if previous is not None:
+            before_kind, before_text = previous
+            left_value = before_kind == "number" or before_text == ")"
+            left_constant = before_kind == "name" and before_text in _CONSTANTS
+            right_value = kind == "name" or text == "("
+            if (left_value and right_value) or (before_text == ")" and kind == "number") or (left_constant and kind == "name"):
+                pieces.append("*")
+        pieces.append(text)
+        previous = (kind, text)
+    return "".join(pieces)
+
+
+def normalize_operators(expression: str) -> str:
+    """Read typeset operators (× · ÷ − ^) and n! as the ASCII they denote."""
+
+    return _POSTFIX_FACTORIAL.sub(r"factorial(\1)", expression.translate(_TYPOGRAPHIC))
+
+
+def normalize_expression(expression: str) -> str:
+    """:func:`normalize_operators` plus omitted products (``2(3+4)``, ``3pi``)."""
+
+    return _implicit_multiplication(normalize_operators(expression))
+
+
 def evaluate(expression: str) -> Fraction:
     """Evaluate a numeric expression; see :func:`evaluate_number`."""
 
@@ -79,7 +137,7 @@ def evaluate_number(expression: str) -> tuple[Fraction, bool]:
 
     if not isinstance(expression, str):
         raise ComputationError("expression is required")
-    cleaned = expression.strip()
+    cleaned = normalize_expression(expression.strip())
     if not cleaned or len(cleaned) > _MAX_EXPRESSION:
         raise ComputationError("expression is required")
     if any(character in cleaned for character in ";|&$`\n\r") or "\\" in cleaned:
@@ -119,7 +177,7 @@ def precision_verdict(claimed: object, actual: Fraction) -> str:
         return "agrees" if claimed == actual else "disagrees"
     if isinstance(claimed, bool):
         return "disagrees"
-    text = repr(claimed) if isinstance(claimed, float) else str(claimed).strip()
+    text = repr(claimed) if isinstance(claimed, float) else _plain_number(str(claimed))
     try:
         written = Decimal(text)
     except (InvalidOperation, ValueError):
@@ -139,6 +197,17 @@ def precision_verdict(claimed: object, actual: Fraction) -> str:
         if isinstance(trimmed, int) and trimmed > exponent and _within(written, trimmed, actual):
             return "ambiguous"
     return "disagrees"
+
+
+_SCIENTIFIC = re.compile(r"^([+-]?[\d.]+)(?:\*|x)10\*\*([+-]?\d+)$")
+
+
+def _plain_number(text: str) -> str:
+    """Read a typeset claim (−3, 8.33×10^7) as the plain decimal it denotes."""
+
+    plain = normalize_operators(text.strip()).replace(" ", "")
+    found = _SCIENTIFIC.match(plain)
+    return f"{found.group(1)}e{found.group(2)}" if found else plain
 
 
 def _within(written: Decimal, exponent: int, actual: Fraction) -> bool:
@@ -325,7 +394,7 @@ def _small_integer_numbers(expression: str) -> set[str] | None:
     """Integers combined with + - * / . A decimal, name, power, or unit is not this class."""
 
     try:
-        tree = ast.parse(expression.strip(), mode="eval")
+        tree = ast.parse(normalize_expression(expression.strip()), mode="eval")
     except SyntaxError:
         return None
     if not isinstance(tree, ast.Expression):
@@ -445,9 +514,13 @@ def _eval(node: ast.AST) -> tuple[Fraction, bool]:
         return _power(left, right, exact)
     if isinstance(node, ast.Call):
         name = node.func.id if isinstance(node.func, ast.Name) else None
-        if name is None or node.keywords or len(node.args) != 1 or (name != "abs" and name not in _FUNCTIONS):
+        if name is None or node.keywords or len(node.args) != 1 or (name not in ("abs", "factorial") and name not in _FUNCTIONS):
             raise ComputationError(f"expression is not a calculation; {_SUPPORTED}")
         argument, exact = _eval(node.args[0])
+        if name == "factorial":
+            if argument.denominator != 1 or not 0 <= argument <= _MAX_FACTORIAL:
+                raise ComputationError(f"factorial needs an integer from 0 to {_MAX_FACTORIAL}")
+            return _bounded(Fraction(math.factorial(int(argument)))), exact
         if name == "abs":
             return abs(argument), exact
         try:
@@ -532,7 +605,7 @@ def _fraction(value: str) -> Fraction | None:
     if not value or len(value) > 80:
         return None
     try:
-        return Fraction(value)
+        return Fraction(_plain_number(value))
     except (ValueError, ZeroDivisionError):
         return None
 

@@ -127,6 +127,35 @@ def test_answer_check_uses_the_unrounded_replayed_value(tmp_path, expression, ex
 
 
 @pytest.mark.parametrize(
+    ("expression", "expected"),
+    [
+        ("2(3+4)", 14),
+        ("(1+1)(2+3)", 10),
+        ("(1+1)3", 6),
+        ("2 (3)", 6),
+        ("3 sqrt(4)", 6),
+        ("2e3", 2000),
+        ("log10(1000)", 3),
+    ],
+)
+def test_omitted_products_are_replayed(expression, expected):
+    value, _ = evaluate_number(expression)
+    assert value == expected
+
+
+def test_omitted_product_with_constants_is_inexact():
+    value, exact = evaluate_number("2pi")
+    assert not exact and abs(float(value) - 6.283185307179586) < 1e-12
+    assert abs(float(evaluate_number("pi e")[0]) - 8.539734222673566) < 1e-12
+
+
+@pytest.mark.parametrize("expression", ["2 3", "sqrt 4", "pi(2)", "2x", "3 m"])
+def test_ambiguous_juxtaposition_stays_refused(expression):
+    with pytest.raises(ComputationError):
+        evaluate_number(expression)
+
+
+@pytest.mark.parametrize(
     ("claimed", "actual", "verdict"),
     [
         ("3924", Fraction(3924), "agrees"),
@@ -214,3 +243,86 @@ def test_public_record_gives_readable_value_for_huge_fraction():
     assert _approximate("11723035734742750928125/140737488355328") == "83297178.8238"
     assert _approximate("6125/4") is None
     assert _approximate("42") is None
+
+
+@pytest.mark.parametrize(
+    ("expression", "expected"),
+    [
+        ("2×3", 6),
+        ("6 ÷ 4", Fraction(3, 2)),
+        ("2·3.5", 7),
+        ("5 − 8", -3),
+        ("2^10", 1024),
+        ("2^-3", Fraction(1, 8)),
+    ],
+)
+def test_typeset_operators_are_read_as_the_ascii_operators(expression, expected):
+    assert evaluate_number(expression)[0] == expected
+
+
+@pytest.mark.parametrize(
+    ("expression", "expected"),
+    [("5!", 120), ("0!", 1), ("factorial(4)", 24), ("10!/(8!*2!)", 45)],
+)
+def test_factorial_is_replayed_exactly(expression, expected):
+    value, exact = evaluate_number(expression)
+    assert value == expected and exact
+
+
+@pytest.mark.parametrize("expression", ["171!", "factorial(2.5)", "factorial(-1)", "2.5!"])
+def test_factorial_outside_domain_is_refused(expression):
+    with pytest.raises(ComputationError):
+        evaluate_number(expression)
+
+
+@pytest.mark.parametrize(
+    ("claimed", "actual", "verdict"),
+    [
+        ("−3", Fraction(-3), "agrees"),
+        ("–3", Fraction(-3), "agrees"),
+        ("8.33×10^7", Fraction(83300000), "agrees"),
+        ("8.33 × 10^7", Fraction(83300000), "agrees"),
+        ("8.33×10^7", Fraction(91000000), "disagrees"),
+        ("−3", Fraction(3), "disagrees"),
+    ],
+)
+def test_typeset_claims_are_read_as_plain_numbers(claimed, actual, verdict):
+    assert precision_verdict(claimed, actual) == verdict
+
+
+def test_factorial_and_typeset_claim_replay_through_the_tool(tmp_path):
+    session, _root = _book(tmp_path)
+    checked = dispatch(
+        "studium_computation_check",
+        {"section": "s1", "expression": "10!/(8!×2!)", "result": "+45"},
+        session=session,
+    )
+    assert checked["status"] == "replayed", checked
+    signed = dispatch(
+        "studium_computation_check",
+        {"section": "s1", "expression": "sqrt(2) − 3", "result": "−1.59"},
+        session=session,
+    )
+    assert signed["status"] == "replayed", signed
+
+
+def test_omitted_product_replays_through_the_json_rpc_server(tmp_path):
+    from studium.mcp.server import handle
+
+    session, _root = _book(tmp_path)
+    reply = handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "studium_computation_check",
+                "arguments": {"section": "s1", "expression": "9.81(1+0.5)", "result": "14.715"},
+            },
+        },
+        session=session,
+    )
+    assert reply is not None
+    body = json.dumps(reply)
+    assert "replayed" in body and "isError\": true" not in body, body
+
