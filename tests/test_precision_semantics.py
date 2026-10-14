@@ -214,3 +214,18 @@ def test_public_record_gives_readable_value_for_huge_fraction():
     assert _approximate("11723035734742750928125/140737488355328") == "83297178.8238"
     assert _approximate("6125/4") is None
     assert _approximate("42") is None
+
+
+@pytest.mark.parametrize(
+    ("expression", "expected"),
+    [
+        ("2×3", 6),
+        ("6 ÷ 4", Fraction(3, 2)),
+        ("2·3.5", 7),
+        ("5 − 8", -3),
+        ("2^10", 1024),
+        ("2^-3", Fraction(1, 8)),
+    ],
+)
+def test_typeset_operators_are_read_as_the_ascii_operators(expression, expected):
+    assert evaluate_number(expression)[0] == expected
