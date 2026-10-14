@@ -42,7 +42,13 @@ def record_excerpt(
     try:
         with project_lock(root):
             state = load_state_holding_lock(root)
-            if _public(root, identifier) is None:
+            source = _public(root, identifier)
+            if source is not None and _is_title_only(body, source.get("title")):
+                return _error(
+                    "excerpt.title_only",
+                    "the excerpt repeats the source title; record a passage the client opened from the page",
+                )
+            if source is None:
                 return {
                     "status": "excerpt.source_missing",
                     "message": "no public source with that id",
@@ -132,6 +138,16 @@ def _body(state: dict[str, object], record: dict[str, object], *, status: str) -
 
 def _public(root: Path, source_id: str) -> dict[str, object] | None:
     return next((item for item in fold_by_id(root / PUBLIC_BIBLIOGRAPHY) if item.get("id") == source_id), None)
+
+
+def _is_title_only(text: str, title: object) -> bool:
+    if not isinstance(title, str):
+        return False
+    return _squash(text) != "" and _squash(text) == _squash(title)
+
+
+def _squash(value: str) -> str:
+    return "".join(ch for ch in value.casefold() if ch.isalnum())
 
 
 def _digest(source_id: str, url: str, text: str) -> str:
