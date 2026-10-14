@@ -146,6 +146,11 @@ def review_stored_problem(
             "answer_arithmetic": answer_check.get("result") if isinstance(answer_check, dict) else "not_checked",
             "model_reproduction": _numeric_status(report.as_dict()),
             "scientific_validity": "not_established",
+            **(
+                {"unanswered_request": answer_check["unanswered_request"]}
+                if isinstance(answer_check, dict) and "unanswered_request" in answer_check
+                else {}
+            ),
         },
         "report": report.as_dict(),
         "advisory": True,

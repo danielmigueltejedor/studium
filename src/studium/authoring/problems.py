@@ -298,6 +298,9 @@ def _check_numeric(root: Path, record: dict[str, object]) -> dict[str, object]:
     updated["correct"] = False
     updated["classification"] = "PENDING"
     answer_check = _answer_check(record.get("expected"), step_checks, final_value)
+    requested = unanswered_request(record.get("prompt"), record.get("solution"))
+    if requested is not None:
+        answer_check["unanswered_request"] = requested
     if step_checks:
         updated["step_checks"] = step_checks
     updated["answer_check"] = answer_check
@@ -366,6 +369,45 @@ def _answer_check(
     if verdict == "ambiguous":
         check["reason"] = _AMBIGUOUS_REASON
     return check
+
+
+_REQUEST = re.compile(
+    r"\b(?:find|determine|calculate|compute|estimate|obtain|what (?:is|are))\b([^.?]*)", re.IGNORECASE
+)
+_SECOND_PART = re.compile(r"^(?:the|its|their|his|her)\b", re.IGNORECASE)
+_RESULT_MARK = re.compile(r"=|\\approx|\\to\b|\\simeq")
+
+
+def unanswered_request(prompt: object, solution: object) -> dict[str, object] | None:
+    """Flag a prompt that asks for several quantities when the solution states fewer.
+
+    Conservative: only a clause such as "the specific volume of the gas and its
+    density" counts as two requests, because the second part opens with a
+    determiner. The check is advisory and never marks a problem correct.
+    """
+
+    if not isinstance(prompt, str) or not isinstance(solution, dict):
+        return None
+    clauses = _REQUEST.findall(prompt)
+    if not clauses:
+        return None
+    parts = [part.strip() for part in re.split(r",\s*and\s+|\s+and\s+", clauses[-1]) if part.strip()]
+    requested = 1 + sum(1 for part in parts[1:] if _SECOND_PART.match(part))
+    if requested < 2:
+        return None
+    result = solution.get("result")
+    texts = [item for item in result if isinstance(item, str)] if isinstance(result, list) else [result]
+    stated = sum(len(_RESULT_MARK.findall(text)) for text in texts if isinstance(text, str))
+    if stated >= requested:
+        return None
+    return {
+        "requested": requested,
+        "stated": stated,
+        "reason": (
+            "the prompt asks for several quantities but the solution result states fewer; "
+            "add a step and a result line for each requested quantity, or narrow the prompt"
+        ),
+    }
 
 
 def _step_checks(record: dict[str, object]) -> "tuple[list[dict[str, object]], Fraction | None]":
