@@ -1420,6 +1420,8 @@ def _failed(payload: Mapping[str, object]) -> bool:
         return False
     if status == "no_active_project" and payload.get("next_action") == "create":
         return False
+    if status in {"two_witnesses", "unchecked"} and isinstance(payload.get("problem"), dict):
+        return False
     if status in {"UNKNOWN", "NONE", "AVAILABLE", "IMPORTED", "SKIPPED"}:
         return False
     if "state" in payload and "local_sources" in payload:

@@ -2708,9 +2708,17 @@ def _solution_lines(root: Path, copy: dict[str, str], language: BookLanguage) ->
     unsolved = len(seen_practice - solved_practice)
     if unsolved:
         if language.babel == "spanish":
-            note = f"{unsolved} ejercicios todavía sin solución comprobada."
+            note = (
+                "1 ejercicio todavía sin solución comprobada."
+                if unsolved == 1
+                else f"{unsolved} ejercicios todavía sin solución comprobada."
+            )
         else:
-            note = f"{unsolved} exercises still without a checked solution."
+            note = (
+                "1 exercise still without a checked solution."
+                if unsolved == 1
+                else f"{unsolved} exercises still without a checked solution."
+            )
         lines.extend(["", r"\noindent\textit{" + latex_escape(note) + "}"])
     if not lines:
         lines.extend(["", r"\noindent " + latex_escape(copy["empty"])])
