@@ -206,3 +206,11 @@ def test_out_of_range_input_is_refused_with_its_reason(expression, fragment):
     with pytest.raises(ComputationError) as raised:
         evaluate_number(expression)
     assert fragment in str(raised.value)
+
+
+def test_public_record_gives_readable_value_for_huge_fraction():
+    from studium.authoring.computation import _approximate
+
+    assert _approximate("11723035734742750928125/140737488355328") == "83297178.8238"
+    assert _approximate("6125/4") is None
+    assert _approximate("42") is None

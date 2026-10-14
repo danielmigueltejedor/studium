@@ -555,6 +555,17 @@ def _canonical(value: Fraction) -> str:
     return str(value.numerator) if value.denominator == 1 else f"{value.numerator}/{value.denominator}"
 
 
+def _approximate(stored: object) -> str | None:
+    """Readable 12-digit value for a stored fraction whose decimal expansion is not short."""
+
+    if not isinstance(stored, str) or "/" not in stored or len(stored) <= 24:
+        return None
+    try:
+        return f"{float(Fraction(stored)):.12g}"
+    except (ValueError, ZeroDivisionError):
+        return None
+
+
 def _section(root: Path, value: object) -> tuple[str | None, dict[str, object] | None]:
     if value is None:
         return None, None
@@ -589,6 +600,9 @@ def _public(record: dict[str, object]) -> dict[str, object]:
     }
     if isinstance(record.get("claimed_text"), str):
         visible["claimed_text"] = record["claimed_text"]
+    approximate = _approximate(record.get("server_result"))
+    if approximate is not None:
+        visible["server_value"] = approximate
     if record.get("corroboration") == "replayed" and visible["correct"] is True:
         visible["corroboration"] = "replayed"
     if isinstance(record.get("section"), str):
@@ -613,6 +627,7 @@ def _body(state: dict[str, object], record: dict[str, object], *, matched: bool)
         "expression": visible.get("expression"),
         "claimed_result": visible.get("claimed_result"),
         "server_result": visible.get("server_result"),
+        **({"server_value": visible["server_value"]} if "server_value" in visible else {}),
         "computation": visible,
         "local_sources": _local(state),
         "project_state": state.get("state"),
