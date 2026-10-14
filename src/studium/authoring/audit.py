@@ -177,9 +177,12 @@ def review_blockers(root: Path) -> list[str]:
             identifier = paragraph.get("id")
             if isinstance(identifier, str) and identifier not in covered:
                 reasons.append(f"{identifier} has no audit record")
-    if open_contradictions(root):
-        names = ", ".join(str(item["quantity"]) for item in open_contradictions(root))
+    contradictions = open_contradictions(root)
+    if contradictions:
+        names = ", ".join(str(item["quantity"]) for item in contradictions)
         reasons.append(f"open contradiction: {names}")
+    if not scan_is_current(root):
+        reasons.append("the contradiction scan is older than this edition: run studium_contradiction_scan")
     for figure in fold_by_id(root / FIGURES):
         section = figure.get("section")
         if isinstance(section, str) and section in gaps:
