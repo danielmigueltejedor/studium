@@ -2571,7 +2571,10 @@ def _fit_block(body: str, *, consume_box: bool) -> list[str]:
         r"\ifnum\count0>\count4",
         r"\resizebox{!}{\dimexpr\textheight/100*38\relax}{" + shipped + r"}%",
         r"\else",
-        r"\resizebox{\wd0}{!}{" + shipped + r"}%",
+        # Natural size: ship the box unscaled. \resizebox{\wd0}{!}{\box0} read
+        # \wd0 after \box0 had emptied the register and drew a zero-width
+        # figure (F37).
+        shipped + r"%",
         r"\fi",
         r"\fi",
         r"\endgroup",
