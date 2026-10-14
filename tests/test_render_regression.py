@@ -435,8 +435,9 @@ class TestNotationTable:
     def test_notation_table_has_units(self):
         assert "Pa" in self.tex
 
-    def test_notation_uses_tabular(self):
-        assert r"\begin{tabular}" in self.tex
+    def test_notation_uses_a_breakable_longtable(self):
+        appendix = self.tex[self.tex.index("presión estática") - 2000 :]
+        assert r"\begin{longtable}" in appendix
 
 
 # ---------------------------------------------------------------------------

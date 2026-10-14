@@ -1333,6 +1333,8 @@ def _textbook_packages() -> list[str]:
         r"\usepackage{xcolor}",
         r"\usepackage{amsmath}",
         r"\usepackage{amssymb}",
+        r"\usepackage{array}",
+        r"\usepackage{longtable}",
         r"\newcounter{studiumfigure}",
         r"\definecolor{studiumInk}{RGB}{28,40,58}",
         r"\definecolor{studiumRule}{RGB}{28,40,58}",
@@ -2668,12 +2670,25 @@ def _notation_lines(root: Path, copy: dict[str, str], language: BookLanguage) ->
     symbol_head = latex_escape(_extra_label(language, "symbol"))
     meaning_head = latex_escape(_extra_label(language, "meaning"))
     units_head = latex_escape(_extra_label(language, "units"))
+    header = rf"\textbf{{{symbol_head}}} & \textbf{{{meaning_head}}} & \textbf{{{units_head}}} \\"
+    # A longtable breaks across pages and repeats its header; a tabular cannot
+    # break, so a long registry was drawn off the page (F38). Fixed fractions
+    # of the line width keep the columns aligned on every page and wrap long
+    # meanings and units instead of overflowing.
     lines = [
         "",
-        r"\begin{center}",
-        r"\begin{tabular}{@{}cp{7cm}l@{}}",
-        rf"\textbf{{{symbol_head}}} & \textbf{{{meaning_head}}} & \textbf{{{units_head}}} \\",
+        r"\begingroup",
+        r"\setlength{\LTpre}{0pt}",
+        r"\setlength{\LTpost}{0pt}",
+        r"\begin{longtable}{@{}>{\centering\arraybackslash}p{0.17\linewidth}"
+        r">{\raggedright\arraybackslash}p{0.55\linewidth}"
+        r">{\raggedright\arraybackslash}p{0.2\linewidth}@{}}",
+        header,
         r"\hline",
+        r"\endfirsthead",
+        header,
+        r"\hline",
+        r"\endhead",
     ]
     for symbol, entry in sorted(registry.items()):
         meaning = latex_escape(str(entry.get("meaning") or ""))
@@ -2681,7 +2696,7 @@ def _notation_lines(root: Path, copy: dict[str, str], language: BookLanguage) ->
         sym_tex = _symbol_tex(symbol)
         sym_col = f"${sym_tex}$" if sym_tex else render_text_run(symbol)
         lines.append(rf"{sym_col} & {meaning} & {units} \\")
-    lines.extend([r"\end{tabular}", r"\end{center}"])
+    lines.extend([r"\end{longtable}", r"\endgroup"])
     return lines
 
 
