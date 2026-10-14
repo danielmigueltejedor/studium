@@ -8,7 +8,6 @@ solution is not correct until the check passes.
 
 import hashlib
 import json
-import math
 import os
 import re
 import shutil
@@ -18,7 +17,7 @@ from pathlib import Path
 
 from studium.authoring.academic_blueprint import academic_concept_ids
 from studium.authoring.blueprint import current_sections
-from studium.authoring.computation import ComputationError, evaluate
+from studium.authoring.computation import ComputationError, agrees, evaluate
 from studium.authoring.excerpts import excerpts_by_id
 from studium.authoring.mathematics import MathError, substitution_latex, symbol_names_of, validate_latex
 from studium.authoring.support import corroboration_for_excerpts, paragraph_citation_blockers
@@ -353,11 +352,9 @@ def _step_checks(record: dict[str, object]) -> list[dict[str, object]]:
             continue
         entry: dict[str, object] = {"index": index, "expression": expression, "value": _decimal(actual)}
         if "expected" in step:
-            expected = _number(step["expected"])
             entry["expected"] = step["expected"]
-            entry["reproduced"] = expected is not None and math.isclose(
-                float(expected), float(actual), rel_tol=1e-9, abs_tol=1e-12
-            )
+            # A stated result is read as rounded to its last written digit.
+            entry["reproduced"] = _number(step["expected"]) is not None and agrees(step["expected"], actual)
         checks.append(entry)
     return checks
 

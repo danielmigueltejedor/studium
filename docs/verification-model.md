@@ -61,3 +61,5 @@ Neither is mathematical proof. Both are recorded honestly.
 ## Structured solutions
 
 A worked problem may include a structured solution with given values, unknowns, governing equations, assumptions, intermediate steps, and a final result. Each step that includes an expression and expected value is replayed independently. A step that does not reproduce is reported, not hidden.
+
+The replay engine evaluates numbers, `+ - * / **`, parentheses, `pi`, `e`, and `sqrt`, `cbrt`, `exp`, `log`/`ln`, `log10`, the trigonometric and hyperbolic functions and their inverses, and `abs`. Rational arithmetic with integer powers stays exact; roots, non-integer powers and functions are evaluated in floating point. A stated result is read as rounded to its last written digit: `31.30` reproduces `sqrt(2*600/1.225) = 31.298…`, while `3920` does not reproduce `3924`.

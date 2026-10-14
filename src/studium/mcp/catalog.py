@@ -436,7 +436,10 @@ _TOOLS: tuple[dict[str, object], ...] = (
         "class": "WRITE",
         "description": (
             "Store an expression and the reported result, then evaluate that expression again. "
-            "The result is accepted only when the server's value matches. "
+            "The result is accepted only when the server's value matches the reported result to the precision "
+            "it is written with (31.30 matches 31.298; 3924 must be 3924). "
+            "Expressions may use numbers, + - * / **, parentheses, pi, e, sqrt, cbrt, exp, log, ln, log10, "
+            "sin, cos, tan, asin, acos, atan, sinh, cosh, tanh, and abs. "
             "An expression that uses only integers and the four operators is accepted only when "
             "every one of those numbers appears in one excerpt cited by a paragraph. "
             "Do not trust a number the model reports. "

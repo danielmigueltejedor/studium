@@ -7,7 +7,9 @@ Acceptance is ``replayed``, not verified, and it is not absolute truth.
 
 import ast
 import hashlib
+import math
 import re
+from decimal import Decimal, InvalidOperation
 from fractions import Fraction
 from pathlib import Path
 
@@ -30,8 +32,46 @@ class ComputationError(Exception):
     """The expression is not a calculation the server can replay."""
 
 
+_SUPPORTED = (
+    "supported: numbers, + - * / **, parentheses, pi, e, and "
+    "sqrt, cbrt, exp, log (natural), ln, log10, sin, cos, tan, asin, acos, atan, sinh, cosh, tanh, abs"
+)
+
+_FUNCTIONS = {
+    "sqrt": math.sqrt,
+    "cbrt": math.cbrt,
+    "exp": math.exp,
+    "log": math.log,
+    "ln": math.log,
+    "log10": math.log10,
+    "sin": math.sin,
+    "cos": math.cos,
+    "tan": math.tan,
+    "asin": math.asin,
+    "acos": math.acos,
+    "atan": math.atan,
+    "sinh": math.sinh,
+    "cosh": math.cosh,
+    "tanh": math.tanh,
+}
+
+_CONSTANTS = {"pi": math.pi, "e": math.e}
+
+
 def evaluate(expression: str) -> Fraction:
-    """Evaluate a numeric expression. Names, calls, and attributes are rejected."""
+    """Evaluate a numeric expression; see :func:`evaluate_number`."""
+
+    return evaluate_number(expression)[0]
+
+
+def evaluate_number(expression: str) -> tuple[Fraction, bool]:
+    """Evaluate a numeric expression and say whether the result is exact.
+
+    Rational arithmetic with integer powers stays exact. Roots, non-integer
+    powers, the constants pi and e, and the allowlisted functions are evaluated
+    in floating point, and the result is marked inexact. Names other than those,
+    attributes, and any other call are rejected.
+    """
 
     if not isinstance(expression, str):
         raise ComputationError("expression is required")
@@ -50,6 +90,34 @@ def evaluate(expression: str) -> Fraction:
     if not isinstance(tree, ast.Expression):
         raise ComputationError("expression is not a calculation")
     return _eval(tree.body)
+
+
+def agrees(claimed: object, actual: Fraction) -> bool:
+    """Whether a claimed number is ``actual`` written to the claim's own precision.
+
+    A claim is read as rounded to its last written digit: ``31.30`` agrees with
+    31.2998 and ``3924`` agrees only with values within half a unit of 3924.
+    """
+
+    if isinstance(claimed, Fraction):
+        written_text = _terminating_decimal(claimed)
+        if written_text is None:
+            return claimed == actual
+        claimed = written_text
+    try:
+        written = Decimal(str(claimed).strip())
+    except (InvalidOperation, ValueError):
+        return False
+    if not written.is_finite():
+        return False
+    if Fraction(written) == actual:
+        return True
+    exponent = written.as_tuple().exponent
+    if not isinstance(exponent, int):
+        return False
+    half_unit = Fraction(1, 2) * Fraction(10) ** exponent
+    slack = abs(actual) * Fraction(1, 10**12)
+    return abs(actual - Fraction(written)) <= half_unit + slack
 
 
 def check_computation(
@@ -149,7 +217,7 @@ def _store(
     section_id: str | None,
     actor: dict[str, object] | None,
 ) -> dict[str, object]:
-    matched = server_result == claimed
+    matched = agrees(claimed, server_result)
     try:
         with project_lock(root):
             record_id = identifier if identifier is not None else allocate_id(root, "PRB")
@@ -275,29 +343,82 @@ def _new_inputs(
     return parsed, claimed, section_id, None
 
 
-def _eval(node: ast.AST) -> Fraction:
+def _terminating_decimal(value: Fraction) -> str | None:
+    """The shortest decimal that is exactly ``value``, or None for a repeating one."""
+
+    denominator = value.denominator
+    places = 0
+    while denominator % 10 == 0 or denominator % 2 == 0 or denominator % 5 == 0:
+        if places > 40:
+            return None
+        places += 1
+        scaled = value * 10**places
+        if scaled.denominator == 1:
+            text = str(abs(scaled.numerator)).rjust(places + 1, "0")
+            sign = "-" if value < 0 else ""
+            return f"{sign}{text[:-places]}.{text[-places:]}"
+        denominator = scaled.denominator
+    return str(value.numerator) if value.denominator == 1 else None
+
+
+def _eval(node: ast.AST) -> tuple[Fraction, bool]:
     if isinstance(node, ast.Constant):
-        return _constant(node.value)
+        return _constant(node.value), True
+    if isinstance(node, ast.Name):
+        if node.id in _CONSTANTS:
+            return _bounded(Fraction(_CONSTANTS[node.id])), False
+        raise ComputationError(f"{node.id!r} is not a number; {_SUPPORTED}")
     if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub)):
-        value = _eval(node.operand)
-        return _bounded(value if isinstance(node.op, ast.UAdd) else -value)
+        value, exact = _eval(node.operand)
+        return _bounded(value if isinstance(node.op, ast.UAdd) else -value), exact
     if isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Add, ast.Sub, ast.Mult, ast.Div, ast.Pow)):
-        left = _eval(node.left)
-        right = _eval(node.right)
+        left, left_exact = _eval(node.left)
+        right, right_exact = _eval(node.right)
+        exact = left_exact and right_exact
         if isinstance(node.op, ast.Add):
-            return _bounded(left + right)
+            return _bounded(left + right), exact
         if isinstance(node.op, ast.Sub):
-            return _bounded(left - right)
+            return _bounded(left - right), exact
         if isinstance(node.op, ast.Mult):
-            return _bounded(left * right)
+            return _bounded(left * right), exact
         if isinstance(node.op, ast.Div):
             if right == 0:
                 raise ComputationError("expression divides by zero")
-            return _bounded(left / right)
-        if right.denominator != 1 or right < 0 or right > _MAX_EXPONENT:
-            raise ComputationError("exponent is outside the replay limit")
-        return _bounded(left ** int(right))
-    raise ComputationError("expression is not a calculation")
+            return _bounded(left / right), exact
+        return _power(left, right, exact)
+    if isinstance(node, ast.Call):
+        name = node.func.id if isinstance(node.func, ast.Name) else None
+        if name is None or node.keywords or len(node.args) != 1 or (name != "abs" and name not in _FUNCTIONS):
+            raise ComputationError(f"expression is not a calculation; {_SUPPORTED}")
+        argument, exact = _eval(node.args[0])
+        if name == "abs":
+            return abs(argument), exact
+        try:
+            result = _FUNCTIONS[name](float(argument))
+        except (ValueError, OverflowError) as exc:
+            raise ComputationError(f"the value is outside the domain of {name} or the replay limit") from exc
+        return _float(result), False
+    raise ComputationError(f"expression is not a calculation; {_SUPPORTED}")
+
+
+def _power(base: Fraction, exponent: Fraction, exact: bool) -> tuple[Fraction, bool]:
+    if exponent.denominator == 1 and abs(exponent) <= _MAX_EXPONENT:
+        if base == 0 and exponent < 0:
+            raise ComputationError("expression divides by zero")
+        return _bounded(base ** int(exponent)), exact
+    if base < 0:
+        raise ComputationError("a negative base with a non-integer exponent is outside the replay limit")
+    try:
+        result = float(base) ** float(exponent)
+    except (ValueError, OverflowError, ZeroDivisionError) as exc:
+        raise ComputationError("the power is outside the replay limit") from exc
+    return _float(result), False
+
+
+def _float(value: float) -> Fraction:
+    if not math.isfinite(value):
+        raise ComputationError("the result is outside the replay limit")
+    return _bounded(Fraction(value))
 
 
 def _constant(value: object) -> Fraction:
