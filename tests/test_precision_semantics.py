@@ -127,6 +127,35 @@ def test_answer_check_uses_the_unrounded_replayed_value(tmp_path, expression, ex
 
 
 @pytest.mark.parametrize(
+    ("expression", "expected"),
+    [
+        ("2(3+4)", 14),
+        ("(1+1)(2+3)", 10),
+        ("(1+1)3", 6),
+        ("2 (3)", 6),
+        ("3 sqrt(4)", 6),
+        ("2e3", 2000),
+        ("log10(1000)", 3),
+    ],
+)
+def test_omitted_products_are_replayed(expression, expected):
+    value, _ = evaluate_number(expression)
+    assert value == expected
+
+
+def test_omitted_product_with_constants_is_inexact():
+    value, exact = evaluate_number("2pi")
+    assert not exact and abs(float(value) - 6.283185307179586) < 1e-12
+    assert abs(float(evaluate_number("pi e")[0]) - 8.539734222673566) < 1e-12
+
+
+@pytest.mark.parametrize("expression", ["2 3", "sqrt 4", "pi(2)", "2x", "3 m"])
+def test_ambiguous_juxtaposition_stays_refused(expression):
+    with pytest.raises(ComputationError):
+        evaluate_number(expression)
+
+
+@pytest.mark.parametrize(
     ("claimed", "actual", "verdict"),
     [
         ("3924", Fraction(3924), "agrees"),
@@ -275,3 +304,25 @@ def test_factorial_and_typeset_claim_replay_through_the_tool(tmp_path):
         session=session,
     )
     assert signed["status"] == "replayed", signed
+
+
+def test_omitted_product_replays_through_the_json_rpc_server(tmp_path):
+    from studium.mcp.server import handle
+
+    session, _root = _book(tmp_path)
+    reply = handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "studium_computation_check",
+                "arguments": {"section": "s1", "expression": "9.81(1+0.5)", "result": "14.715"},
+            },
+        },
+        session=session,
+    )
+    assert reply is not None
+    body = json.dumps(reply)
+    assert "replayed" in body and "isError\": true" not in body, body
+

@@ -72,10 +72,52 @@ _POSTFIX_FACTORIAL = re.compile(r"(?<![\w.])(\d+)!(?!=)")
 _MAX_FACTORIAL = 170
 
 
+_IMPLICIT_TOKEN = re.compile(
+    r"(?P<space>\s+)"
+    r"|(?P<number>(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?)"
+    r"|(?P<name>[A-Za-z_]\w*)"
+    r"|(?P<other>.)",
+    re.DOTALL,
+)
+
+
+def _implicit_multiplication(expression: str) -> str:
+    """Insert ``*`` where typesetting omits it: ``2(3+4)``, ``3pi``, ``(a)(b)``.
+
+    A name directly before ``(`` stays a call (``sqrt(2)``); a constant is never
+    called, and two adjacent numbers (``2 3``) stay an error.
+    """
+
+    pieces: list[str] = []
+    previous: tuple[str, str] | None = None
+    for match in _IMPLICIT_TOKEN.finditer(expression):
+        kind = match.lastgroup or "other"
+        text = match.group()
+        if kind == "space":
+            pieces.append(text)
+            continue
+        if previous is not None:
+            before_kind, before_text = previous
+            left_value = before_kind == "number" or before_text == ")"
+            left_constant = before_kind == "name" and before_text in _CONSTANTS
+            right_value = kind == "name" or text == "("
+            if (left_value and right_value) or (before_text == ")" and kind == "number") or (left_constant and kind == "name"):
+                pieces.append("*")
+        pieces.append(text)
+        previous = (kind, text)
+    return "".join(pieces)
+
+
 def normalize_operators(expression: str) -> str:
-    """Read typeset operators (× · ÷ − ^) as the ASCII operators they denote."""
+    """Read typeset operators (× · ÷ − ^) and n! as the ASCII they denote."""
 
     return _POSTFIX_FACTORIAL.sub(r"factorial(\1)", expression.translate(_TYPOGRAPHIC))
+
+
+def normalize_expression(expression: str) -> str:
+    """:func:`normalize_operators` plus omitted products (``2(3+4)``, ``3pi``)."""
+
+    return _implicit_multiplication(normalize_operators(expression))
 
 
 def evaluate(expression: str) -> Fraction:
@@ -95,7 +137,7 @@ def evaluate_number(expression: str) -> tuple[Fraction, bool]:
 
     if not isinstance(expression, str):
         raise ComputationError("expression is required")
-    cleaned = normalize_operators(expression.strip())
+    cleaned = normalize_expression(expression.strip())
     if not cleaned or len(cleaned) > _MAX_EXPRESSION:
         raise ComputationError("expression is required")
     if any(character in cleaned for character in ";|&$`\n\r") or "\\" in cleaned:
@@ -352,7 +394,7 @@ def _small_integer_numbers(expression: str) -> set[str] | None:
     """Integers combined with + - * / . A decimal, name, power, or unit is not this class."""
 
     try:
-        tree = ast.parse(normalize_operators(expression.strip()), mode="eval")
+        tree = ast.parse(normalize_expression(expression.strip()), mode="eval")
     except SyntaxError:
         return None
     if not isinstance(tree, ast.Expression):
