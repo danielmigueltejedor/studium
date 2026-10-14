@@ -243,13 +243,15 @@ def test_academic_blueprint_round_trips_and_rejects_unknown_concepts(tmp_path, m
 # --- derivations --------------------------------------------------------------
 
 
-def _torricelli(session, equation=r"\(V = \sqrt{2gh}\)"):
+def _torricelli(session, equation=r"\(V = \sqrt{2gh}\)", symbolic="V = sqrt(2*g*h)"):
+    # A check is tied to the stored final equation, so the derivation carries its symbolic form.
     recorded = dispatch(
         "studium_derivation_record",
         {
             "section": "hidrostatica",
             "name": "Torricelli",
             "equation": equation,
+            "symbolic": symbolic,
             "equation_id": "eq-torricelli",
             "assumptions": ["depósito abierto a la atmósfera"],
             "governing_principles": ["conservación de la energía"],
@@ -285,7 +287,7 @@ def test_derivation_checks_combine_into_independent_verification(tmp_path, monke
             },
             "dimensions": {
                 "expression": "sqrt(g*h)",
-                "symbol_units": {"g": "m/s^2", "h": "m"},
+                "symbol_units": {"V": "m/s", "g": "m/s^2", "h": "m"},
                 "expected_unit": "m/s",
             },
         },
@@ -323,7 +325,7 @@ def test_numeric_and_dimensional_agreement_is_not_independent_proof(tmp_path, mo
             },
             "dimensions": {
                 "expression": "sqrt(g*h)",
-                "symbol_units": {"g": "m/s^2", "h": "m"},
+                "symbol_units": {"V": "m/s", "g": "m/s^2", "h": "m"},
                 "expected_unit": "m/s",
             },
         },
@@ -384,7 +386,7 @@ def test_a_failed_derivation_check_is_not_softened(tmp_path, monkeypatch):
     monkeypatch.setattr("urllib.request.urlopen", _explode)
     session, _root = _project(tmp_path)
     _blueprint(session)
-    derivation_id = _torricelli(session, equation=r"\(V = g h\)")
+    derivation_id = _torricelli(session, equation=r"\(V = g h\)", symbolic="V = g*h")
 
     checked = dispatch(
         "studium_derivation_check",
@@ -787,7 +789,7 @@ def test_failed_derivation_blocks_completeness(tmp_path, monkeypatch):
             session=session,
         )
 
-    derivation_id = _torricelli(session, equation=r"\(V = g h\)")
+    derivation_id = _torricelli(session, equation=r"\(V = g h\)", symbolic="V = g*h")
     dispatch(
         "studium_derivation_check",
         {

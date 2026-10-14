@@ -399,6 +399,31 @@ def _limit_point(point: str, declared: set[str]) -> tuple[sympy.Expr, str]:
     return parse_expression(text.strip(), symbols=declared).expr, direction
 
 
+def proportional(left: str, right: str, *, timeout: float = DEFAULT_TIMEOUT) -> bool:
+    """Whether ``left`` is a nonzero constant multiple of ``right`` (the factor may be 1).
+
+    Used to tell whether two relations, written as residuals, say the same thing.
+    Anything that cannot be parsed or decided within the budget is ``False``.
+    """
+
+    try:
+        first = parse_expression(left.replace("^", "**")).expr
+        second = parse_expression(right.replace("^", "**")).expr
+    except ExpressionError:
+        return False
+
+    def decide() -> bool:
+        if sympy.simplify(second) == 0:
+            return bool(sympy.simplify(first) == 0)
+        ratio = sympy.simplify(first / second)
+        return bool(ratio.is_number and ratio.is_nonzero is True)
+
+    try:
+        return _run_bounded(decide, timeout)
+    except Exception:
+        return False
+
+
 def verify_dimensions(
     expression: str,
     symbol_units: dict[str, str],
