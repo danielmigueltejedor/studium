@@ -28,6 +28,7 @@ from studium.authoring.blueprint import current_sections
 from studium.authoring.computation import list_computations
 from studium.authoring.derivations import derivations_for_section
 from studium.authoring.excerpts import excerpts_by_id
+from studium.authoring.figures import figure_reference_map, uncited_figures, unresolved_figure_references
 from studium.authoring.languages import (
     BookLanguage,
     active_language,
@@ -272,6 +273,9 @@ def _book_next(root: Path) -> dict[str, object]:
             return _unwritten_step(state, root, section, _excerpt_for_section(root, section["id"]))
         if _explanation_words(root, section["id"]) < _thresholds(root).min_explanation_words:
             return _explanation_step(state, root, section)
+    reference_step = _pending_figure_reference(state, root)
+    if reference_step is not None:
+        return reference_step
     unchecked_deriv = _pending_derivation_check(root, sections)
     if unchecked_deriv is not None:
         return _step(
@@ -573,6 +577,20 @@ def _unwritten_step(
     )
 
 
+def _render_reason(root: Path) -> str:
+    """The render step's message, naming any checked figure that no prose cites."""
+
+    reason = "Render the DRAFT once. Do not stop mid-book for a preview. Do not request release."
+    uncited = uncited_figures(root)
+    if uncited:
+        keys = sorted(str(record.get("key") or record.get("id")) for record in uncited)
+        reason += (
+            f" {len(uncited)} checked figure(s) have no reference from the prose ({', '.join(keys)}); "
+            "cite each with a {{fig:key}} marker from a paragraph, or remove the figure."
+        )
+    return reason
+
+
 def _render_step(
     state: dict[str, object],
     root: Path,
@@ -587,7 +605,7 @@ def _render_step(
         state,
         "studium_render",
         {},
-        "Render the DRAFT once. Do not stop mid-book for a preview. Do not request release.",
+        _render_reason(root),
         blocked=blocked_sections(root),
     )
 
@@ -1418,6 +1436,46 @@ def _pending_derivation_check(
                 if isinstance(identifier, str):
                     return {"id": identifier, "section": section["id"]}
     return None
+
+
+def _pending_figure_reference(
+    state: dict[str, object],
+    root: Path,
+) -> dict[str, object] | None:
+    """A prose figure reference that names no stored, checked figure.
+
+    Return the concrete fix: store the missing figure, or rerun a stored but
+    unchecked one. The prose already names the key, so the agent knows which.
+    """
+
+    unresolved = unresolved_figure_references(root)
+    if not unresolved:
+        return None
+    item = unresolved[0]
+    paragraph = item["paragraph"] or "a paragraph"
+    if item["reason"] == "unchecked":
+        target = figure_reference_map(root).get(item["key"].lower())
+        identifier = target.get("id") if isinstance(target, dict) else None
+        return _step(
+            state,
+            "studium_figure_check",
+            {"id": identifier} if isinstance(identifier, str) else {},
+            (
+                f"{paragraph} references figure {item['key']}, which is stored but not checked. "
+                "Run its source until the drawing renders."
+            ),
+            blocked=blocked_sections(root),
+        )
+    return _step(
+        state,
+        "studium_figure_record",
+        {},
+        (
+            f"{paragraph} references figure {item['key']}, which is not stored. "
+            f"Store a figure with key {item['key']} and the excerpts it illustrates, or remove the reference."
+        ),
+        blocked=blocked_sections(root),
+    )
 
 
 def _pending_audit(root: Path) -> str | None:

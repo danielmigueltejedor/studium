@@ -15,6 +15,7 @@ from studium.authoring.academic_blueprint import academic_concepts_for_chapter, 
 from studium.authoring.audit import audited_paragraph_ids
 from studium.authoring.blueprint import current_sections
 from studium.authoring.contradictions import open_contradictions
+from studium.authoring.depth.planner import planned_figures_for_chapter
 from studium.authoring.derivations import derivations_for_section
 from studium.authoring.problems import problem_result_current
 from studium.domain.profiles import depth_thresholds
@@ -152,7 +153,17 @@ def _section_report(root: Path, section_id: str, context: dict[str, object]) -> 
         ]
         check("derivations_checked", True, bool(derivations) and not unchecked, f"{len(unchecked)} derivations UNVERIFIED or FAILED")
         check("exercise_difficulties", True, len(difficulties) >= 2, f"{len(difficulties)} exercise difficulty levels recorded")
-        check("figures_checked", not figures or profile == "STEM", not figures or len(figures_checked) == len(figures), f"{len(figures_checked)} of {len(figures)} figures checked")
+        # A STEM chapter teaches with drawings: geometry, fields, profiles and
+        # devices are not visualisable from prose alone. At least one figure is
+        # required, and the depth plan may require more. A figure only counts
+        # once its stored source has been re-run and its output exists.
+        planned_figures = max(1, planned_figures_for_chapter(root, section_id))
+        check(
+            "figures_checked",
+            True,
+            len(figures_checked) >= planned_figures and len(figures_checked) == len(figures),
+            f"{len(figures_checked)} of {planned_figures} planned figures checked ({len(figures)} recorded)",
+        )
         check("notation", True, notation_count > 0, f"{notation_count} notation entries registered")
     else:
         for identifier in _STEM_ONLY:

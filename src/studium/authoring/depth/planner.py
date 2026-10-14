@@ -44,6 +44,13 @@ _DERIVATION_KEYWORDS = ("ecuacion", "conservacion", "teorema", "deriv", "investi
 _EXAMPLE_KEYWORDS = ("aplicac", "problem", "medicion", "instrument", "flujo en", "diseno")
 # Exercise count per concept at each academic level.
 _EXERCISES_PER_CONCEPT = {1: 1.0, 2: 1.6, 3: 2.0, 4: 2.4, 5: 2.8}
+# Planned figures per concept at each academic level. A figure is an educational
+# component, not decoration: geometry, fields, profiles and devices are taught
+# with diagrams, and the ratio rises with the level because the phenomena stop
+# being directly visualisable. The number is a plan, not a quota: the
+# completeness contract only counts a figure once it is stored and its source is
+# re-run.
+_FIGURES_PER_CONCEPT = {1: 0.5, 2: 0.6, 3: 0.7, 4: 0.8, 5: 0.9}
 
 
 def build_depth_plan(
@@ -80,6 +87,7 @@ def build_depth_plan(
         return _error("mcp.invalid_input", _INVALID_CURRICULUM)
 
     exercises_total = _exercises_total(profile, topics)
+    figures_total = _figures_total(profile, topics)
     chapters = len(topics)
     scope = estimate_book_scope(
         profile=profile,
@@ -88,7 +96,7 @@ def build_depth_plan(
         derivations=derivations_total,
         worked_examples=_examples_total(topics),
         exercises=exercises_total,
-        figures=0,
+        figures=figures_total,
         sources=_source_count(root),
         preference=preference,
     )
@@ -124,7 +132,7 @@ def build_depth_plan(
             "derivations": derivations_total,
             "worked_examples": _examples_total(topics),
             "exercises": exercises_total,
-            "figures": 0,
+            "figures": figures_total,
             "sources": _source_count(root),
         },
         "chapters": per_chapter,
@@ -162,6 +170,30 @@ def plan_requires_academic_blueprint(plan: dict[str, object] | None) -> bool:
     if not isinstance(plan, dict):
         return False
     return plan.get("source") == "academic_blueprint"
+
+
+def planned_figures_for_chapter(root: Path, chapter_id: str) -> int:
+    """The figure target the stored plan assigns to one chapter.
+
+    Returns 0 when no plan is stored or the plan declares no target, so callers
+    can fall back to a disciplinary floor instead of inventing a number.
+    """
+
+    rows = fold_by_id(root / DEPTH_PLANS)
+    current = next((item for item in rows if item.get("id") == "plan"), None)
+    if current is None:
+        return 0
+    plan = _public_plan(current)
+    chapters = plan.get("chapters")
+    if not isinstance(chapters, list):
+        return 0
+    for chapter in chapters:
+        if not isinstance(chapter, dict) or chapter.get("chapter") != chapter_id:
+            continue
+        value = chapter.get("figures")
+        if isinstance(value, int) and not isinstance(value, bool):
+            return value
+    return 0
 
 
 def _public_plan(record: dict[str, object]) -> dict[str, object]:
@@ -259,6 +291,7 @@ def _chapter_requirements(
         "derivations": derivations,
         "worked_examples": max(1, _count(topic, "_examples")),
         "exercises": exercises,
+        "figures": _figures_for_concepts(profile.academic_level, concepts),
         "sources_needed": max(2, (concepts + derivations + 2) // 3),
         "objectives": [f"teach the planned concepts of {topic.get('title')}"],
         "prerequisites": list(profile.prerequisites),
@@ -302,6 +335,20 @@ def _exercises_total(profile: AcademicProfile, topics: list[dict[str, object]]) 
         concepts = _count(topic, "_concepts")
         total += max(1, round(concepts * _EXERCISES_PER_CONCEPT.get(profile.academic_level, 2.0)))
     return total
+
+
+def _figures_total(profile: AcademicProfile, topics: list[dict[str, object]]) -> int:
+    total = 0
+    for topic in topics:
+        total += _figures_for_concepts(profile.academic_level, _count(topic, "_concepts"))
+    return total
+
+
+def _figures_for_concepts(academic_level: int, concepts: int) -> int:
+    if concepts <= 0:
+        return 0
+    factor = _FIGURES_PER_CONCEPT.get(academic_level, 0.6)
+    return max(1, round(concepts * factor))
 
 
 def _examples_total(topics: list[dict[str, object]]) -> int:
