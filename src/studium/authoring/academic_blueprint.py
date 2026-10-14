@@ -48,6 +48,162 @@ _CONCEPT_KEYS = frozenset(
 )
 
 
+def scaffold_academic_blueprint(
+    root: Path,
+    *,
+    subject: object = None,
+    profile_key: object = None,
+    chapters_per_part: object = None,
+    sections_per_chapter: object = None,
+    concepts_per_section: object = None,
+    actor: dict[str, object] | None = None,
+) -> dict[str, object]:
+    """Generate an academic blueprint scaffold from the flat outline.
+
+    Reads the stored flat blueprint sections, groups them into parts, and
+    creates a structured academic blueprint where each flat section becomes a
+    chapter with multiple sections and concepts. The AI agent can then refine
+    this scaffold by calling store_academic_blueprint with an expanded version.
+
+    Does not fabricate content — titles are structural labels derived from the
+    flat outline.
+    """
+
+    from studium.authoring.blueprint import current_sections
+    from studium.authoring.depth.profiles import resolve_depth_profile
+
+    sections = current_sections(root)
+    if not sections:
+        return _error("mcp.invalid_input", "store a flat blueprint first")
+
+    existing = current_academic_blueprint(root)
+    if existing is not None:
+        return _error(
+            "mcp.invalid_input",
+            "an academic blueprint already exists; use studium_academic_blueprint_store to replace it",
+        )
+
+    profile = None
+    if profile_key is not None:
+        profile, depth_error = resolve_depth_profile(profile_key)
+        if depth_error is not None:
+            return depth_error
+
+    depth_label = profile.key if profile is not None else None
+
+    cpp = 5
+    if isinstance(chapters_per_part, int) and 2 <= chapters_per_part <= 20:
+        cpp = chapters_per_part
+
+    spc = _SCAFFOLD_SECTIONS_PER_CHAPTER
+    if isinstance(sections_per_chapter, int) and 1 <= sections_per_chapter <= 6:
+        spc = sections_per_chapter
+
+    cps = _SCAFFOLD_CONCEPTS_PER_SECTION
+    if isinstance(concepts_per_section, int) and 1 <= concepts_per_section <= 5:
+        cps = concepts_per_section
+
+    parts = _scaffold_parts(sections, depth_label, cpp, spc, cps)
+    return store_academic_blueprint(
+        root,
+        parts=parts,
+        subject=subject,
+        profile_key=profile_key,
+        actor=actor,
+    )
+
+
+_SCAFFOLD_SECTIONS_PER_CHAPTER = 3
+_SCAFFOLD_CONCEPTS_PER_SECTION = 2
+_SCAFFOLD_EXERCISES_PER_CONCEPT = 3
+
+_SECTION_LABELS = [
+    ("fundamentos", "Fundamentos y definiciones"),
+    ("desarrollo", "Desarrollo teórico"),
+    ("aplicaciones", "Aplicaciones y problemas"),
+    ("avanzado", "Análisis avanzado"),
+    ("integracion", "Integración y síntesis"),
+    ("evaluacion", "Evaluación y verificación"),
+]
+
+_CONCEPT_SUFFIXES = [
+    "definiciones y principios",
+    "relaciones y ecuaciones",
+    "análisis cuantitativo",
+    "casos y condiciones límite",
+    "verificación experimental",
+]
+
+
+def _scaffold_parts(
+    sections: list[dict[str, str]],
+    depth: str | None,
+    chapters_per_part: int,
+    sections_per_chapter: int = _SCAFFOLD_SECTIONS_PER_CHAPTER,
+    concepts_per_section: int = _SCAFFOLD_CONCEPTS_PER_SECTION,
+) -> list[dict[str, object]]:
+    """Group flat sections into parts, each with chapters, sections, concepts.
+
+    Each chapter gets *sections_per_chapter* sections (default 3) and each
+    section gets *concepts_per_section* concepts (default 2), giving the AI
+    agent a rich structure to refine. Section and concept titles are structural
+    labels derived from the chapter title — not fabricated academic content.
+    """
+
+    parts: list[dict[str, object]] = []
+    chunk_start = 0
+    part_number = 0
+
+    while chunk_start < len(sections):
+        part_number += 1
+        chunk_end = min(chunk_start + chapters_per_part, len(sections))
+        chunk = sections[chunk_start:chunk_end]
+
+        chapters: list[dict[str, object]] = []
+        for sec in chunk:
+            chapter_sections: list[dict[str, object]] = []
+            n_secs = min(sections_per_chapter, len(_SECTION_LABELS))
+            for si in range(n_secs):
+                label_id, label_title = _SECTION_LABELS[si]
+                sec_id = f"{sec['id']}.{label_id}"
+                concepts: list[dict[str, object]] = []
+                for ci in range(concepts_per_section):
+                    suffix = _CONCEPT_SUFFIXES[ci] if ci < len(_CONCEPT_SUFFIXES) else f"concepto {ci + 1}"
+                    concept: dict[str, object] = {
+                        "id": f"{sec_id}.c{ci + 1}",
+                        "title": f"{sec['title']} — {suffix}",
+                        "exercises": _SCAFFOLD_EXERCISES_PER_CONCEPT,
+                    }
+                    if depth is not None:
+                        concept["depth"] = depth
+                    concepts.append(concept)
+                section: dict[str, object] = {
+                    "id": sec_id,
+                    "title": label_title,
+                    "concepts": concepts,
+                }
+                if depth is not None:
+                    section["depth"] = depth
+                chapter_sections.append(section)
+
+            chapter: dict[str, object] = {
+                "id": sec["id"],
+                "title": sec["title"],
+                "sections": chapter_sections,
+            }
+            chapters.append(chapter)
+
+        part: dict[str, object] = {
+            "id": f"part-{part_number}",
+            "title": f"Part {part_number}",
+            "chapters": chapters,
+        }
+        parts.append(part)
+        chunk_start = chunk_end
+
+    return parts
+
+
 def store_academic_blueprint(
     root: Path,
     *,

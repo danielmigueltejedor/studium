@@ -1026,6 +1026,8 @@ def test_book_next_passes_subsection_with_academic_blueprint(tmp_path, monkeypat
                 {
                     "id": "p1",
                     "title": "Fundamentals",
+                    # Every chapter needs >=2 sections and >=3 concepts to satisfy
+                    # the blueprint depth gate in book_next.
                     "chapters": [
                         {
                             "id": "ch1",
@@ -1042,7 +1044,14 @@ def test_book_next_passes_subsection_with_academic_blueprint(tmp_path, monkeypat
                                             "learning_objectives": ["lo1"],
                                             "depth": "ADVANCED_UNDERGRADUATE",
                                             "exercises": 1,
-                                        }
+                                        },
+                                        {
+                                            "id": "c1b",
+                                            "title": "Thermal equilibrium",
+                                            "learning_objectives": ["lo1"],
+                                            "depth": "ADVANCED_UNDERGRADUATE",
+                                            "exercises": 1,
+                                        },
                                     ],
                                 },
                                 {
@@ -1076,9 +1085,29 @@ def test_book_next_passes_subsection_with_academic_blueprint(tmp_path, monkeypat
                                                 "learning_objectives": [f"lo{i}"],
                                                 "depth": "ADVANCED_UNDERGRADUATE",
                                                 "exercises": 1,
+                                            },
+                                            {
+                                                "id": f"c{i}1",
+                                                "title": f"Concept {i}b",
+                                                "learning_objectives": [f"lo{i}"],
+                                                "depth": "ADVANCED_UNDERGRADUATE",
+                                                "exercises": 1,
+                                            },
+                                        ],
+                                    },
+                                    {
+                                        "id": f"ch{i}.s2",
+                                        "title": f"Section {i}.2",
+                                        "concepts": [
+                                            {
+                                                "id": f"c{i}2",
+                                                "title": f"Concept {i}c",
+                                                "learning_objectives": [f"lo{i}"],
+                                                "depth": "ADVANCED_UNDERGRADUATE",
+                                                "exercises": 1,
                                             }
                                         ],
-                                    }
+                                    },
                                 ],
                             }
                             for i in range(2, 9)

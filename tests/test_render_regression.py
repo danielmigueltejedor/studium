@@ -291,6 +291,9 @@ class TestDocumentStructure:
     def test_appendix_present(self):
         assert r"\appendix" in self.tex
 
+    def test_chapter_label(self):
+        assert r"\label{chap:presion}" in self.tex
+
 
 # ---------------------------------------------------------------------------
 # Integration: formulas in LaTeX output
@@ -334,6 +337,41 @@ class TestNotationTable:
 
     def test_notation_uses_tabular(self):
         assert r"\begin{tabular}" in self.tex
+
+
+# ---------------------------------------------------------------------------
+# Regression: notation table subscript symbols
+# ---------------------------------------------------------------------------
+
+
+class TestNotationSubscriptSymbols:
+    @pytest.fixture(autouse=True)
+    def _setup(self, tmp_path, monkeypatch):
+        self.session, self.root = _full_setup(tmp_path, monkeypatch)
+        dispatch(
+            "studium_notation_record",
+            {"section": "presion", "symbol": "F_B", "meaning": "fuerza de empuje", "units": "N"},
+            session=self.session,
+        )
+        dispatch(
+            "studium_notation_record",
+            {"section": "presion", "symbol": "ρ", "meaning": "densidad del fluido", "units": "kg/m³"},
+            session=self.session,
+        )
+        render_draft(self.root)
+        self.tex = (self.root / "latex" / "draft.tex").read_text(encoding="utf-8")
+
+    def test_subscript_symbol_in_math_mode(self):
+        assert r"$F_{B}$" in self.tex
+
+    def test_subscript_not_escaped(self):
+        assert r"F\_B" not in self.tex
+
+    def test_greek_symbol_in_math_mode(self):
+        assert r"$\rho$" in self.tex
+
+    def test_greek_symbol_not_text_wrapped(self):
+        assert r"\mathrm{\(\rho\)}" not in self.tex
 
 
 # ---------------------------------------------------------------------------
@@ -772,3 +810,175 @@ class TestStudyPlan:
 
     def test_amssymb_loaded(self):
         assert r"\usepackage{amssymb}" in self.tex
+
+
+# ---------------------------------------------------------------------------
+# Integration: LaTeX cross-reference labels
+# ---------------------------------------------------------------------------
+
+
+class TestCrossReferenceLabels:
+    @pytest.fixture(autouse=True)
+    def _setup(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("urllib.request.urlopen", _explode)
+        session, root = _project(tmp_path)
+        dispatch(
+            "studium_blueprint_store",
+            {"sections": [{"id": "thermo", "title": "Thermodynamics"}]},
+            session=session,
+        )
+        excerpts = _excerpts(session)
+        for text in (
+            "Heat flows from hot to cold bodies.",
+            "Energy is conserved in isolated systems.",
+        ):
+            dispatch(
+                "studium_paragraph_record",
+                {"section": "thermo", "text": text, "excerpts": excerpts},
+                session=session,
+            )
+        dispatch(
+            "studium_derivation_record",
+            {
+                "section": "thermo",
+                "name": "Ideal gas law",
+                "equation": r"\(PV = nRT\)",
+                "equation_id": "eq-ideal-gas",
+                "steps": ["Start from kinetic theory"],
+                "variables": {"P": {"meaning": "pressure", "units": "Pa"}},
+            },
+            session=session,
+        )
+        render_draft(root)
+        self.tex = (root / "latex" / "draft.tex").read_text(encoding="utf-8")
+
+    def test_chapter_label_present(self):
+        assert r"\label{chap:thermo}" in self.tex
+
+    def test_equation_label_present(self):
+        assert r"\label{eq:eq-ideal-gas}" in self.tex
+
+
+# ---------------------------------------------------------------------------
+# Unit: symbol and unit TeX helpers
+# ---------------------------------------------------------------------------
+
+
+class TestSymbolAndUnitTex:
+    def test_greek_symbol_renders_math(self):
+        from studium.authoring.render import _symbol_tex
+
+        assert _symbol_tex("ρ") == r"\rho"
+        assert _symbol_tex("η") == r"\eta"
+
+    def test_ascii_symbol_through_sympy(self):
+        from studium.authoring.render import _symbol_tex
+
+        assert _symbol_tex("p") == "p"
+        assert _symbol_tex("p_0") == "p_{0}"
+        assert _symbol_tex("F_B") == "F_{B}"
+
+    def test_subscript_braces_preserved(self):
+        from studium.authoring.render import _symbol_tex
+
+        result = _symbol_tex("V_{desp}")
+        assert "desp" in result
+        assert r"\{" not in result
+
+    def test_unit_unicode_superscript(self):
+        from studium.authoring.render import _unit_tex
+
+        result = _unit_tex("kg/m³")
+        assert r"\(" not in result
+        assert "mathrm" in result
+
+    def test_unit_unicode_squared(self):
+        from studium.authoring.render import _unit_tex
+
+        result = _unit_tex("m/s²")
+        assert r"\(" not in result
+        assert "mathrm" in result
+
+    def test_unit_ascii_exponent(self):
+        from studium.authoring.render import _unit_tex
+
+        result = _unit_tex("kg/m^3")
+        assert "mathrm" in result
+        assert r"\(" not in result
+
+    def test_multi_char_greek_latin_spacing(self):
+        from studium.authoring.render import _symbol_tex
+
+        result = _symbol_tex("Δp")
+        assert result == r"\Delta p"
+        assert r"\Deltap" not in result
+
+    def test_greek_greek_spacing(self):
+        from studium.authoring.render import _symbol_tex
+
+        result = _symbol_tex("ρg")
+        assert result == r"\rho g"
+
+
+# ---------------------------------------------------------------------------
+# Integration: derivation steps with math content
+# ---------------------------------------------------------------------------
+
+
+class TestDerivationStepMath:
+    @pytest.fixture(autouse=True)
+    def _setup(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("urllib.request.urlopen", _explode)
+        session, root = _project(tmp_path)
+        dispatch(
+            "studium_blueprint_store",
+            {"sections": [{"id": "hydrostat", "title": "Hydrostatics"}]},
+            session=session,
+        )
+        excerpts = _excerpts(session)
+        for text in (
+            "Pressure increases linearly with depth.",
+            "The hydrostatic equation relates pressure to depth.",
+        ):
+            dispatch(
+                "studium_paragraph_record",
+                {"section": "hydrostat", "text": text, "excerpts": excerpts},
+                session=session,
+            )
+        dispatch(
+            "studium_derivation_record",
+            {
+                "section": "hydrostat",
+                "name": "Hydrostatic equation",
+                "equation": r"\(p = p_0 + \rho g h\)",
+                "equation_id": "eq-hydro",
+                "steps": [
+                    r"Start from \(dp/dz = -\rho g\)",
+                    r"Integrate: \(p - p_0 = -\rho g (z - z_0)\)",
+                    r"Define depth \(h = -(z - z_0)\)",
+                    r"Result: \(p = p_0 + \rho g h\)",
+                ],
+                "variables": {
+                    "ρ": {"meaning": "fluid density", "units": "kg/m³"},
+                    "p": {"meaning": "pressure at depth h", "units": "Pa"},
+                    "g": {"meaning": "gravitational acceleration", "units": "m/s²"},
+                },
+            },
+            session=session,
+        )
+        render_draft(root)
+        self.tex = (root / "latex" / "draft.tex").read_text(encoding="utf-8")
+
+    def test_explicit_math_in_steps_preserved(self):
+        assert r"\(p = p_0 + \rho g h\)" in self.tex or r"p = p_0 + \rho g h" in self.tex
+
+    def test_greek_symbol_in_variables_valid(self):
+        assert r"$\rho$" in self.tex
+        assert r"\mathrm{\(\rho\)}" not in self.tex
+
+    def test_unicode_unit_renders_cleanly(self):
+        assert r"\mathrm{\(^{3}\)}" not in self.tex
+        assert r"\mathrm{\(^{2}\)}" not in self.tex
+
+    def test_equation_label_present(self):
+        assert r"\label{eq:eq-hydro}" in self.tex

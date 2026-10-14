@@ -536,6 +536,17 @@ _TOOLS: tuple[dict[str, object], ...] = (
         ),
     },
     {
+        "name": "studium_academic_blueprint_scaffold",
+        "class": "WRITE",
+        "description": (
+            "Generate an academic blueprint scaffold from the stored flat outline and a depth profile. "
+            "Each flat section becomes a chapter with one section and one concept. "
+            "Chapters are grouped into parts. The scaffold is a starting point: "
+            "refine it with studium_academic_blueprint_store. "
+            "Requires a flat blueprint. Refuses when an academic blueprint already exists."
+        ),
+    },
+    {
         "name": "studium_academic_blueprint_store",
         "class": "WRITE",
         "description": (
@@ -1477,6 +1488,25 @@ def _schema(tool: Mapping[str, object]) -> dict[str, object]:
                 "id": {"type": "string", "description": "Excerpt id returned by studium_excerpt_record."},
             },
             "required": ["id"],
+            "additionalProperties": True,
+        }
+    elif name == "studium_academic_blueprint_scaffold":
+        input_schema = {
+            "type": "object",
+            "properties": {
+                "project": _project_property(),
+                "subject": {"type": "string", "description": "Subject of the textbook."},
+                "profile_key": {
+                    "type": "string",
+                    "enum": ["INTRODUCTORY", "UNDERGRADUATE", "ADVANCED_UNDERGRADUATE", "GRADUATE", "RESEARCH"],
+                    "description": "Academic depth profile for the scaffold.",
+                },
+                "chapters_per_part": {
+                    "type": "integer",
+                    "description": "Chapters per part (2-20, default 5).",
+                },
+            },
+            "required": [],
             "additionalProperties": True,
         }
     elif name == "studium_academic_blueprint_store":

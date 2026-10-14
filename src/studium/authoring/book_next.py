@@ -9,7 +9,11 @@ import re
 from contextvars import ContextVar
 from pathlib import Path
 
-from studium.authoring.academic_blueprint import academic_sections_for_chapter
+from studium.authoring.academic_blueprint import (
+    academic_concepts_for_chapter,
+    academic_sections_for_chapter,
+    current_academic_blueprint,
+)
 from studium.authoring.audit import (
     audited_paragraph_ids,
     explicit_gap_ids,
@@ -189,6 +193,9 @@ def _book_next(root: Path) -> dict[str, object]:
     outline = _outline_gate(state, root, sections)
     if outline is not None:
         return outline
+    depth_issue = _blueprint_depth_gate(state, root)
+    if depth_issue is not None:
+        return depth_issue
     quality = _chapter_gate(state, root, sections)
     if quality is not None:
         return quality
@@ -298,6 +305,9 @@ def _book_next(root: Path) -> dict[str, object]:
     outline = _outline_gate(state, root, sections)
     if outline is not None:
         return outline
+    depth_issue = _blueprint_depth_gate(state, root)
+    if depth_issue is not None:
+        return depth_issue
     quality = _chapter_gate(state, root, sections)
     if quality is not None:
         return quality
@@ -365,8 +375,39 @@ def _unfinished_step(
         gap = _shape_gap(state, root, section)
         if gap is not None:
             return gap
+        uncovered = _uncovered_concepts(root, section["id"])
+        if uncovered:
+            return _concept_step(state, root, section, uncovered)
         return _explanation_step(state, root, section)
     return None
+
+
+def _concept_step(
+    state: dict[str, object],
+    root: Path,
+    section: dict[str, str],
+    uncovered: list[str],
+) -> dict[str, object]:
+    """Direct the agent to write content covering uncovered planned concepts."""
+
+    excerpt_id = _excerpt_for_section(root, section["id"])
+    if excerpt_id is None:
+        return _step(state, "studium_public_source_record", {}, _need_sources(root))
+    listing = ", ".join(uncovered[:5])
+    more = f" and {len(uncovered) - 5} more" if len(uncovered) > 5 else ""
+    reason = (
+        f"Write an explanation paragraph for {section['id']} ({section['title']}) "
+        f"covering planned concepts: {listing}{more}. "
+        f"Pass the concept ids in the 'concepts' field of studium_paragraph_record. "
+        "Research from stored excerpts. Do not fabricate sources."
+    )
+    return _step(
+        state,
+        "studium_paragraph_record",
+        {"section": section["id"], "excerpts": [excerpt_id], "role": "explanation"},
+        _named(root, section, reason),
+        blocked=blocked_sections(root),
+    )
 
 
 def _missing_pieces(root: Path, section: dict[str, str]) -> list[str]:
@@ -390,6 +431,9 @@ def _missing_pieces(root: Path, section: dict[str, str]) -> list[str]:
         missing.append("worked problem")
     if not _has_autoficha(root, section_id):
         missing.append(self_check_word(_current_language()))
+    uncovered = _uncovered_concepts(root, section_id)
+    if uncovered:
+        missing.append(f"{len(uncovered)} uncovered concepts")
     return missing
 
 
@@ -772,6 +816,101 @@ def _study_sections(root: Path) -> list[dict[str, str]]:
     ]
 
 
+_MIN_SECTIONS_PER_CHAPTER = 2
+_MIN_CONCEPTS_PER_CHAPTER = 3
+
+
+def _blueprint_depth_gate(
+    state: dict[str, object],
+    root: Path,
+) -> dict[str, object] | None:
+    """Block writing when the academic blueprint is too shallow.
+
+    Detects chapters with too few sections or concepts and directs the agent
+    to expand the blueprint before writing content. This is qualitative
+    guidance, not a quantitative threshold on word count.
+    """
+
+    blueprint = current_academic_blueprint(root)
+    if blueprint is None:
+        return None
+
+    parts = blueprint.get("parts")
+    if not isinstance(parts, list):
+        return None
+
+    shallow_chapters: list[str] = []
+    few_concepts: list[str] = []
+    missing_exercises: list[str] = []
+
+    for part in parts:
+        if not isinstance(part, dict):
+            continue
+        for chapter in part.get("chapters", []):
+            if not isinstance(chapter, dict):
+                continue
+            ch_id = chapter.get("id", "?")
+            ch_title = chapter.get("title", ch_id)
+            sections = chapter.get("sections", [])
+            if not isinstance(sections, list):
+                sections = []
+
+            if len(sections) < _MIN_SECTIONS_PER_CHAPTER:
+                shallow_chapters.append(f"{ch_id} ({ch_title})")
+
+            concept_count = 0
+            has_exercises = False
+            for section in sections:
+                if not isinstance(section, dict):
+                    continue
+                for concept in section.get("concepts", []):
+                    if isinstance(concept, dict):
+                        concept_count += 1
+                        if concept.get("exercises"):
+                            has_exercises = True
+                for subsection in section.get("subsections", []):
+                    if isinstance(subsection, dict):
+                        for concept in subsection.get("concepts", []):
+                            if isinstance(concept, dict):
+                                concept_count += 1
+                                if concept.get("exercises"):
+                                    has_exercises = True
+
+            if concept_count < _MIN_CONCEPTS_PER_CHAPTER:
+                few_concepts.append(f"{ch_id} ({ch_title}): {concept_count} concepts")
+            if not has_exercises:
+                missing_exercises.append(ch_id)
+
+    if not shallow_chapters and not few_concepts:
+        return None
+
+    problems: list[str] = []
+    if shallow_chapters:
+        problems.append(
+            f"Chapters with fewer than {_MIN_SECTIONS_PER_CHAPTER} sections: "
+            + ", ".join(shallow_chapters)
+        )
+    if few_concepts:
+        problems.append(
+            f"Chapters with fewer than {_MIN_CONCEPTS_PER_CHAPTER} concepts: "
+            + ", ".join(few_concepts)
+        )
+    if missing_exercises:
+        problems.append(
+            "Chapters with no exercises planned: " + ", ".join(missing_exercises)
+        )
+
+    reason = (
+        "The academic blueprint is too shallow to produce a rigorous textbook. "
+        + " ".join(problems)
+        + ". Expand the blueprint with studium_academic_blueprint_store before writing content. "
+        "Each chapter needs at least 2 sections and 3 concepts with exercises planned. "
+        "Do not fabricate content — derive section and concept titles from the subject matter."
+    )
+
+    return _step(state, "studium_academic_blueprint_store", {}, reason)
+
+
 def _outline_gate(
     state: dict[str, object],
     root: Path,
@@ -952,6 +1091,23 @@ def _role_step(
         _named(root, section, reason),
         blocked=blocked_sections(root),
     )
+
+
+def _uncovered_concepts(root: Path, section_id: str) -> list[str]:
+    """Planned concepts for this chapter not yet claimed by any paragraph."""
+
+    planned = academic_concepts_for_chapter(root, section_id)
+    if not planned:
+        return []
+    planned_ids = {str(c["id"]) for c in planned if isinstance(c.get("id"), str)}
+    covered: set[str] = set()
+    for record in supported_paragraphs(root):
+        if record.get("section") != section_id:
+            continue
+        concepts = record.get("concepts")
+        if isinstance(concepts, list):
+            covered.update(str(c) for c in concepts if isinstance(c, str))
+    return sorted(planned_ids - covered)
 
 
 def _is_written(root: Path, section_id: str) -> bool:

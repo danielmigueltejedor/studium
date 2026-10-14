@@ -43,6 +43,7 @@ from studium.storage.records import (
 
 _TEX_NAME = "draft.tex"
 _PDF_NAME = "draft.pdf"
+_LABEL_SAFE = re.compile(r"[^A-Za-z0-9._:-]")
 
 
 def _str_field(record: dict[str, object], key: str, default: str = "") -> str:
@@ -53,6 +54,13 @@ def _str_field(record: dict[str, object], key: str, default: str = "") -> str:
 def _list_field(record: dict[str, object], key: str) -> list[object]:
     value = record.get(key)
     return value if isinstance(value, list) else []
+
+
+def _label(prefix: str, identifier: str) -> str:
+    safe = _LABEL_SAFE.sub("-", identifier)
+    return r"\label{" + prefix + ":" + safe + "}"
+
+
 _LATEX = {
     "\\": r"\textbackslash{}",
     "{": r"\{",
@@ -1195,6 +1203,10 @@ def _preamble(footer: str, language: BookLanguage, copy: dict[str, str], *, tikz
             r"\usepackage{graphicx}",
             *( [r"\usepackage{tikz}"] if tikz else [] ),
             *_textbook_packages(),
+            r"\titleformat{\section}{\Large\bfseries}{\thesection}{0.8em}{}",
+            r"\titleformat{\subsection}{\large\bfseries}{\thesubsection}{0.7em}{}",
+            r"\setcounter{secnumdepth}{3}",
+            r"\setcounter{tocdepth}{2}",
             r"\usepackage{fancyhdr}",
             r"\pagestyle{fancy}",
             r"\fancyhf{}",
@@ -1321,7 +1333,7 @@ def _document(root: Path) -> str:
             if not section_paragraphs:
                 unwritten.append(title)
                 continue
-            lines.extend(["", r"\chapter{" + latex_escape(title) + "}"])
+            lines.extend(["", r"\chapter{" + latex_escape(title) + "}", _label("chap", section["id"])])
             lines.extend(_chapter_lines(root, section["id"], section_paragraphs, copy, language))
     lines.extend(
         [
@@ -1390,7 +1402,7 @@ def _hierarchical_body(
             if not chapter_paragraphs:
                 unwritten.append(ch_title)
                 continue
-            lines.extend(["", r"\chapter{" + latex_escape(ch_title) + "}"])
+            lines.extend(["", r"\chapter{" + latex_escape(ch_title) + "}", _label("chap", ch_id)])
             bp_sections = chapter.get("sections")
             if isinstance(bp_sections, list) and bp_sections:
                 lines.extend(
@@ -1798,14 +1810,53 @@ def _symbol_tex(name: str) -> str:
     try:
         return symbolic_latex(cleaned)
     except MathError:
-        return r"\mathrm{" + latex_escape(cleaned) + "}"
+        pass
+    mapped: list[str] = []
+    for ch in cleaned:
+        token = _MATH.get(ch)
+        if token is not None:
+            if mapped and mapped[-1].startswith("\\") and mapped[-1][-1].isalpha() and (token[0].isalpha() or token.startswith("\\")):
+                mapped.append(" ")
+            mapped.append(token)
+        elif ch == "{":
+            mapped.append("{")
+        elif ch == "}":
+            mapped.append("}")
+        elif ch == "_":
+            mapped.append("_")
+        elif ch == "^":
+            mapped.append("^")
+        else:
+            if mapped and mapped[-1].startswith("\\") and mapped[-1][-1].isalpha() and ch.isalpha():
+                mapped.append(" ")
+            mapped.append(ch)
+    return "".join(mapped)
 
 
 def _unit_tex(unit: str) -> str:
+    normalized = _normalize_math_text(unit)
     try:
-        return unit_latex(unit)
+        return unit_latex(normalized)
     except MathError:
-        return r"\mathrm{" + latex_escape(unit.strip()) + "}"
+        return r"\mathrm{" + _normalize_math_text(unit.strip()) + "}"
+
+
+def _normalize_math_text(text: str) -> str:
+    """Replace Unicode super/subscripts and Greek with ASCII equivalents."""
+    _SUPER_MAP = {chr(0x2070 + i): str(i) for i in range(10)}
+    _SUPER_MAP.update({"¹": "1", "²": "2", "³": "3"})
+    _SUB_MAP = {chr(0x2080 + i): str(i) for i in range(10)}
+    out: list[str] = []
+    for ch in text:
+        if ch in _SUPER_MAP:
+            out.append("^" + _SUPER_MAP[ch])
+        elif ch in _SUB_MAP:
+            out.append("_" + _SUB_MAP[ch])
+        elif ch in _GREEK:
+            out.append("\\" + _GREEK[ch].lstrip("\\"))
+        else:
+            out.append(ch)
+    return "".join(out)
 
 
 def _display_math(tex: str) -> list[str]:
@@ -1989,9 +2040,12 @@ def _derivation_box(root: Path, section_id: str, language: BookLanguage) -> list
     for record in records:
         name = _str_field(record, "name")
         equation = _str_field(record, "equation")
+        equation_id = _str_field(record, "equation_id")
         body.extend(["", r"\noindent\textbf{" + latex_escape(name.strip() or label) + "}"])
         if equation.strip():
             body.extend(_display_math(equation))
+            if equation_id.strip():
+                body.append(_label("eq", equation_id))
         for key, label_key in (
             ("assumptions", "assumptions"),
             ("governing_principles", "principles"),
@@ -2240,7 +2294,9 @@ def _notation_lines(root: Path, copy: dict[str, str], language: BookLanguage) ->
     for symbol, entry in sorted(registry.items()):
         meaning = latex_escape(str(entry.get("meaning") or ""))
         units = _format_units(str(entry.get("units") or ""))
-        lines.append(rf"{render_text_run(symbol)} & {meaning} & {units} \\")
+        sym_tex = _symbol_tex(symbol)
+        sym_col = f"${sym_tex}$" if sym_tex else render_text_run(symbol)
+        lines.append(rf"{sym_col} & {meaning} & {units} \\")
     lines.extend([r"\end{tabular}", r"\end{center}"])
     return lines
 

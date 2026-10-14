@@ -800,5 +800,162 @@ def _until_tool(session, tool: str | None) -> dict[str, object]:
     raise AssertionError(f"book_next did not reach {tool}: {last.get('tool')}")
 
 
+def test_blueprint_depth_gate_blocks_shallow_blueprint(tmp_path, monkeypatch):
+    """book_next blocks writing when academic blueprint has <2 sections per chapter."""
+    monkeypatch.setattr("urllib.request.urlopen", _explode)
+    session = open_workspace(str(tmp_path))
+    dispatch(
+        "studium_project_create",
+        {"slug": "fluidos", "topic": "Mecánica de Fluidos"},
+        session=session,
+    )
+    sections = [{"id": f"ch-{i}", "title": f"Chapter {i}"} for i in range(1, 9)]
+    dispatch("studium_blueprint_store", {"sections": sections}, session=session)
+
+    # Store a shallow blueprint: 1 section, 1 concept per chapter
+    parts = [{
+        "id": "part-1",
+        "title": "Part 1",
+        "chapters": [{
+            "id": f"ch-{i}",
+            "title": f"Chapter {i}",
+            "sections": [{
+                "id": f"ch-{i}.s1",
+                "title": f"Section {i}.1",
+                "concepts": [{"id": f"ch-{i}.s1.c1", "title": f"Concept {i}.1"}],
+            }],
+        } for i in range(1, 9)],
+    }]
+    stored = dispatch("studium_academic_blueprint_store", {"parts": parts}, session=session)
+    assert stored["status"] == "recorded"
+
+    # Register sources so outline gate doesn't fire
+    for j in range(1, 13):
+        src = dispatch(
+            "studium_public_source_record",
+            {"title": f"Source {j}", "url": f"https://example.com/{j}", "text": "Open text"},
+            session=session,
+        )
+        src_id = src["candidate"]["id"]
+        dispatch("studium_public_source_open_supplement", {"id": src_id, "open_supplement": True, "open_licensed": True}, session=session)
+        dispatch("studium_excerpt_record", {"source_id": src_id, "url": f"https://example.com/{j}", "text": f"Excerpt {j}"}, session=session)
+
+    nxt = dispatch("studium_book_next", {}, session=session)
+    assert nxt["tool"] == "studium_academic_blueprint_store"
+    assert "shallow" in nxt["reason"].lower() or "fewer than" in nxt["reason"].lower()
+
+
+def test_blueprint_depth_gate_passes_deep_blueprint(tmp_path, monkeypatch):
+    """book_next does NOT block when blueprint has >=2 sections, >=3 concepts per chapter."""
+    monkeypatch.setattr("urllib.request.urlopen", _explode)
+    session = open_workspace(str(tmp_path))
+    dispatch(
+        "studium_project_create",
+        {"slug": "fluidos2", "topic": "Mecánica de Fluidos"},
+        session=session,
+    )
+    sections = [{"id": f"ch-{i}", "title": f"Chapter {i}"} for i in range(1, 9)]
+    dispatch("studium_blueprint_store", {"sections": sections}, session=session)
+
+    # Use scaffold which now generates 3 sections × 2 concepts = 6 concepts per chapter
+    result = dispatch(
+        "studium_academic_blueprint_scaffold",
+        {"profile_key": "UNDERGRADUATE"},
+        session=session,
+    )
+    assert result["status"] == "recorded"
+    assert result["concepts"] >= 3 * 8  # at least 3 concepts per chapter
+
+    # Register enough sources
+    for j in range(1, 13):
+        src = dispatch(
+            "studium_public_source_record",
+            {"title": f"Source {j}", "url": f"https://example.com/{j}", "text": "Open text"},
+            session=session,
+        )
+        src_id = src["candidate"]["id"]
+        dispatch("studium_public_source_open_supplement", {"id": src_id, "open_supplement": True, "open_licensed": True}, session=session)
+        dispatch("studium_excerpt_record", {"source_id": src_id, "url": f"https://example.com/{j}", "text": f"Excerpt {j}"}, session=session)
+
+    nxt = dispatch("studium_book_next", {}, session=session)
+    # Should NOT be blocked by blueprint depth — should proceed to writing
+    assert nxt["tool"] != "studium_academic_blueprint_store"
+
+
+def test_concept_coverage_blocks_chapter_completion(tmp_path, monkeypatch):
+    """A chapter with uncovered concepts is not considered complete."""
+    monkeypatch.setattr("urllib.request.urlopen", _explode)
+    session = open_workspace(str(tmp_path))
+    dispatch(
+        "studium_project_create",
+        {"slug": "concepts", "topic": "Physics"},
+        session=session,
+    )
+    sections = [{"id": "ch-1", "title": "Chapter 1"}]
+    dispatch("studium_blueprint_store", {"sections": sections}, session=session)
+
+    # Blueprint with 2 sections, 3 concepts
+    parts = [{
+        "id": "part-1", "title": "Part 1",
+        "chapters": [{
+            "id": "ch-1", "title": "Chapter 1",
+            "sections": [
+                {"id": "ch-1.s1", "title": "Section 1",
+                 "concepts": [
+                     {"id": "ch-1.s1.c1", "title": "Force"},
+                     {"id": "ch-1.s1.c2", "title": "Mass"},
+                 ]},
+                {"id": "ch-1.s2", "title": "Section 2",
+                 "concepts": [
+                     {"id": "ch-1.s2.c1", "title": "Acceleration"},
+                 ]},
+            ],
+        }],
+    }]
+    dispatch("studium_academic_blueprint_store", {"parts": parts}, session=session)
+
+    # Register sources
+    for j in range(1, 13):
+        src = dispatch(
+            "studium_public_source_record",
+            {"title": f"Source {j}", "url": f"https://example.com/{j}", "text": "Open text"},
+            session=session,
+        )
+        src_id = src["candidate"]["id"]
+        dispatch("studium_public_source_open_supplement", {"id": src_id, "open_supplement": True, "open_licensed": True}, session=session)
+        dispatch("studium_excerpt_record", {"source_id": src_id, "url": f"https://example.com/{j}", "text": f"Excerpt {j}"}, session=session)
+
+    # Write a paragraph WITHOUT concept_ids
+    dispatch(
+        "studium_paragraph_record",
+        {"section": "ch-1", "text": "Force equals mass times acceleration.", "excerpts": ["EVD-0001", "EVD-0002"]},
+        session=session,
+    )
+
+    # Check: unfinished_chapter should list uncovered concepts
+    from pathlib import Path
+
+    from studium.authoring.book_next import unfinished_chapter
+    root = Path(tmp_path) / "concepts"
+    result = unfinished_chapter(root)
+    assert result is not None, "Chapter should be unfinished"
+    _sec, missing = result
+    assert any("uncovered concepts" in piece for piece in missing), f"Expected uncovered concepts in {missing}"
+
+    # Now write a paragraph WITH concept_ids covering all 3
+    dispatch(
+        "studium_paragraph_record",
+        {"section": "ch-1", "text": "Newton's second law F=ma relates force, mass, and acceleration.",
+         "excerpts": ["EVD-0001", "EVD-0002"],
+         "concepts": ["ch-1.s1.c1", "ch-1.s1.c2", "ch-1.s2.c1"]},
+        session=session,
+    )
+
+    result_after = unfinished_chapter(root)
+    if result_after is not None:
+        _sec2, missing_after = result_after
+        assert not any("uncovered concepts" in piece for piece in missing_after), f"Concepts should be covered: {missing_after}"
+
+
 def _explode(*_args, **_kwargs):
     raise AssertionError("must not fetch")
