@@ -7,6 +7,7 @@ or pdflatex is on PATH. A missing engine leaves no PDF behind.
 import re
 import shutil
 import subprocess
+from fractions import Fraction
 from pathlib import Path
 
 from studium.authoring.academic_blueprint import current_academic_blueprint
@@ -1956,7 +1957,7 @@ def _worked_box(root: Path, section_id: str, copy: dict[str, str], language: Boo
     expected = _str_field(problem, "expected")
     source = _str_field(problem, "source_text")
     expression = _str_field(computation, "expression")
-    result = _str_field(computation, "server_result")
+    result = _computation_result(computation)
     statement = prompt.strip() or expression.strip()
     working = expression.strip() if expression.strip() and expression.strip() != statement else source.strip()
     if not working and expression.strip():
@@ -2316,6 +2317,24 @@ def _step_check_lines(step_checks: list[object], language: BookLanguage) -> list
         lines.append(r"\item " + item)
     lines.append(r"\end{itemize}")
     return lines
+
+
+def _computation_result(record: dict[str, object]) -> str:
+    """A replayed result as the author wrote it, never a raw binary fraction."""
+
+    written = record.get("claimed_text")
+    if isinstance(written, str) and written.strip() and record.get("status") == "replayed":
+        return written.strip()
+    raw = _str_field(record, "server_result").strip()
+    if not raw:
+        return ""
+    try:
+        value = Fraction(raw)
+    except (ValueError, ZeroDivisionError):
+        return raw
+    if value.denominator == 1:
+        return str(value.numerator)
+    return f"{float(value):.6g}"
 
 
 _ANSWER_PHRASES = {
@@ -2745,7 +2764,7 @@ def _solution_lines(root: Path, copy: dict[str, str], language: BookLanguage) ->
         if record.get("status") != "replayed" or record.get("correct") is not True:
             continue
         expression = _str_field(record, "expression")
-        result = _str_field(record, "server_result")
+        result = _computation_result(record)
         lines.extend(["", _formula_line(f"{expression} = {result}")])
     unsolved = len(seen_practice - solved_practice)
     if unsolved:

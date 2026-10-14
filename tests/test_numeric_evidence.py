@@ -108,3 +108,24 @@ def test_a_computation_verdict_is_a_result_not_a_tool_error(tmp_path):
     assert checked["status"] == "mismatch"
     assert _failed(checked) is False
     assert _failed({"status": "mismatch"}) is True
+
+
+def test_an_inexact_replayed_computation_is_printed_as_written_not_as_a_raw_fraction(tmp_path):
+    session, root, excerpts = _book(tmp_path)
+    for role in ("purpose", "explanation"):
+        dispatch(
+            "studium_paragraph_record",
+            {"section": "bernoulli", "role": role, "excerpts": excerpts[:1],
+             "text": "El tubo de Pitot compara la presión total con la estática para obtener la velocidad del aire."},
+            session=session,
+        )
+    checked = dispatch(
+        "studium_computation_check",
+        {"section": "bernoulli", "expression": "sqrt(2*600/1.225)", "result": "31.30"},
+        session=session,
+    )
+    assert checked["status"] == "replayed", checked
+    dispatch("studium_render", {}, session=session)
+    tex = (root / "latex" / "draft.tex").read_text(encoding="utf-8")
+    assert "8809725378152433" not in tex
+    assert "31.30" in tex or "31{,}30" in tex
