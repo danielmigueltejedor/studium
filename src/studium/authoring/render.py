@@ -13,7 +13,7 @@ from studium.authoring.academic_blueprint import current_academic_blueprint
 from studium.authoring.blueprint import current_sections
 from studium.authoring.derivations import derivations_for_section
 from studium.authoring.excerpts import excerpts_by_id
-from studium.authoring.figures import figures_in_section
+from studium.authoring.figures import FIGURE_REF, figures_in_section
 from studium.authoring.languages import (
     INVALID_LANGUAGE,
     BookLanguage,
@@ -176,7 +176,181 @@ _SUPERSCRIPTS = {
     "ⁿ": r"^{n}",
     "ⁱ": r"^{i}",
 }
-_MATH = {**_GREEK, **_SUBSCRIPTS, **_SUPERSCRIPTS}
+#: Unicode operators that carry no analogue in the Greek/sub/superscript maps.
+#: ``√`` is listed with a bare radical as a fallback for the plain-escape path;
+#: the formula renderer consumes its argument and emits ``\sqrt{...}``.
+_MATH_EXTRA = {
+    "µ": r"\mu",
+    "⋅": r"\cdot",
+    "∝": r"\propto",
+    "≡": r"\equiv",
+    "⇒": r"\Rightarrow",
+    "⇔": r"\Leftrightarrow",
+    "→": r"\to",
+    "←": r"\leftarrow",
+    "÷": r"\div",
+    "√": r"\surd",
+    "∛": r"\sqrt[3]{}",
+    "∜": r"\sqrt[4]{}",
+    "∑": r"\sum",
+    "∏": r"\prod",
+    "∫": r"\int",
+    "∘": r"\circ",
+    "⊥": r"\perp",
+    "∠": r"\angle",
+    "∆": r"\Delta",
+    "∈": r"\in",
+    "∅": r"\varnothing",
+    "½": r"\frac{1}{2}",
+    "⅓": r"\frac{1}{3}",
+    "⅔": r"\frac{2}{3}",
+    "¼": r"\frac{1}{4}",
+    "¾": r"\frac{3}{4}",
+    "⅕": r"\frac{1}{5}",
+    "⅖": r"\frac{2}{5}",
+    "⅗": r"\frac{3}{5}",
+    "⅘": r"\frac{4}{5}",
+    "ṁ": r"\dot{m}",
+    "ẋ": r"\dot{x}",
+    "ẏ": r"\dot{y}",
+    "ṫ": r"\dot{t}",
+    "ṙ": r"\dot{r}",
+    "ṗ": r"\dot{p}",
+    "ṡ": r"\dot{s}",
+    "ż": r"\dot{z}",
+    "ẇ": r"\dot{w}",
+}
+#: Radical sign -> the optional root index inside ``\sqrt[...]``.
+_ROOTS = {"√": "", "∛": "3", "∜": "4"}
+_MATH = {**_GREEK, **_SUBSCRIPTS, **_SUPERSCRIPTS, **_MATH_EXTRA}
+
+#: Characters that cannot stand alone as the base of a super/subscript. A script
+#: run that follows one of these (or starts the run) is given an empty group so
+#: the output stays valid LaTeX.
+_NO_BASE = set(" \t=+-*/,(<>|")
+
+
+def _script_inner(value: str) -> str:
+    """The content of a ``^{...}`` or ``_{...}`` mapping, without the group."""
+
+    return value[2:-1]
+
+
+def _root_argument(text: str, index: int) -> tuple[str, int]:
+    r"""The argument of a Unicode radical at ``index``.
+
+    Accepts a braced group, a parenthesised group, one alphanumeric run, or one
+    single math character. The parentheses around a radical argument are not
+    part of the argument, so ``√(g h)`` becomes ``\sqrt{g h}``.
+    """
+
+    if index >= len(text):
+        return "", index
+    opener = text[index]
+    if opener in "{(":
+        closer = "}" if opener == "{" else ")"
+        depth = 0
+        cursor = index
+        while cursor < len(text):
+            character = text[cursor]
+            if character == opener:
+                depth += 1
+            elif character == closer:
+                depth -= 1
+                if depth == 0:
+                    return text[index + 1 : cursor], cursor + 1
+            cursor += 1
+        return text[index + 1 :], len(text)
+    if opener.isalnum():
+        cursor = index
+        while cursor < len(text) and text[cursor].isalnum():
+            cursor += 1
+        return text[index:cursor], cursor
+    if opener in _MATH:
+        return text[index], index + 1
+    return "", index
+
+
+def _map_math_run(text: str, *, escape: bool = False) -> str:
+    r"""Translate a run of Unicode mathematics into LaTeX math content.
+
+    Greek and operator characters map to control words; a consecutive run of
+    Unicode super- or subscripts becomes a single braced group (so ``⁻³`` is
+    ``^{-3}``, never a double superscript); a radical consumes its argument and
+    becomes ``\sqrt{...}``. ASCII mathematics (``_``, ``^``, ``{``, ``}``) is
+    passed through unchanged, so author-written ``p_{man}`` stays valid.
+    """
+
+    parts: list[str] = []
+    index = 0
+    length = len(text)
+    while index < length:
+        character = text[index]
+        if character in _ROOTS:
+            index += 1
+            inner, index = _root_argument(text, index)
+            option = _ROOTS[character]
+            head = r"\sqrt" + (f"[{option}]" if option else "")
+            parts.append(head + "{" + _map_math_run(inner, escape=escape) + "}")
+            continue
+        if character in _SUPERSCRIPTS or character in _SUBSCRIPTS:
+            superscript = character in _SUPERSCRIPTS
+            table = _SUPERSCRIPTS if superscript else _SUBSCRIPTS
+            run: list[str] = []
+            while index < length and text[index] in table:
+                run.append(_script_inner(table[text[index]]))
+                index += 1
+            tail = parts[-1] if parts else ""
+            if not tail or tail[-1] in _NO_BASE:
+                parts.append("{}")
+            parts.append(("^" if superscript else "_") + "{" + "".join(run) + "}")
+            continue
+        # Group an ASCII subscript when it is immediately followed by
+        # a Unicode superscript. For example:
+        # V_entrada² -> V_{entrada}^{2}
+        #
+        # Keep ordinary author-written ASCII notation unchanged.
+        if character == "_" and index + 1 < length:
+            cursor = index + 1
+
+            while (
+                cursor < length
+                and text[cursor].isascii()
+                and text[cursor].isalnum()
+            ):
+                cursor += 1
+
+            if (
+                cursor > index + 1
+                and cursor < length
+                and text[cursor] in _SUPERSCRIPTS
+            ):
+                parts.append(
+                    "_{" + text[index + 1:cursor] + "}"
+                )
+                index = cursor
+                continue
+
+        mapped = _MATH.get(character)
+        if mapped is not None:
+            if mapped.startswith("\\") and mapped[-1:].isalpha():
+                following = text[index + 1] if index + 1 < length else ""
+                if following.isascii() and following.isalpha():
+                    mapped += " "
+            parts.append(mapped)
+            index += 1
+            continue
+        if escape and character in "%#&":
+            parts.append("\\" + character)
+            index += 1
+            continue
+        if escape and character == "\\":
+            parts.append(r"\backslash ")
+            index += 1
+            continue
+        parts.append(character)
+        index += 1
+    return "".join(parts)
 
 
 def render_draft(root: Path) -> dict[str, object]:
@@ -298,13 +472,12 @@ def latex_escape(value: str) -> str:
 
     def flush_math() -> None:
         if math:
-            parts.append(r"\(" + "".join(math) + r"\)")
+            parts.append(r"\(" + _map_math_run("".join(math)) + r"\)")
             math.clear()
 
     for character in value:
-        token = _MATH.get(character)
-        if token is not None:
-            math.append(token)
+        if character in _MATH:
+            math.append(character)
             continue
         flush_math()
         replacement = _LATEX.get(character)
@@ -539,8 +712,13 @@ def render_text_run(value: str) -> str:
     return "".join(parts)
 
 
-def emit_prose(value: str, *, italic: bool = False) -> list[str]:
-    """Turn stored paragraphs into paragraphs, display math, and listings."""
+def emit_prose(value: str, *, italic: bool = False, figure_ref: str = "") -> list[str]:
+    """Turn stored paragraphs into paragraphs, display math, and listings.
+
+    ``figure_ref`` is the localized figure word (``figura``). When it is set,
+    a ``{{fig:key}}`` marker becomes ``figura~\\ref{fig:key}``, so the number is
+    produced by LaTeX and the author never maintains it.
+    """
 
     text = value.replace("\r\n", "\n").replace("\r", "\n")
     lines: list[str] = []
@@ -553,7 +731,7 @@ def emit_prose(value: str, *, italic: bool = False) -> list[str]:
         text_buf.clear()
         paragraphs = [part.strip() for part in re.split(r"\n\s*\n", chunk) if part.strip()]
         for paragraph in paragraphs:
-            rendered = render_text_run(paragraph)
+            rendered = _render_figure_refs(paragraph, figure_ref)
             if _pure_inline_formula(paragraph, rendered):
                 inner = rendered.strip()[2:-2].strip()
                 lines.append("\\[\n" + inner + "\n\\]")
@@ -574,6 +752,33 @@ def emit_prose(value: str, *, italic: bool = False) -> list[str]:
             lines.append(payload)
     flush()
     return lines
+
+
+def _figure_label_key(key: str) -> str:
+    """The LaTeX-safe label fragment two sides of a reference must agree on."""
+
+    return _LABEL_SAFE.sub("-", key.strip().lower())
+
+
+def _figure_ref_text(key: str, label: str) -> str:
+    """Localized word plus a hyperlinked, auto-numbered ``\\ref``."""
+
+    return latex_escape(label) + "~\\ref{fig:" + _figure_label_key(key) + "}"
+
+
+def _render_figure_refs(paragraph: str, figure_ref: str) -> str:
+    """Escape prose, resolving ``{{fig:key}}`` into a numbered reference."""
+
+    if not figure_ref or "{{" not in paragraph:
+        return render_text_run(paragraph)
+    parts: list[str] = []
+    cursor = 0
+    for match in FIGURE_REF.finditer(paragraph):
+        parts.append(render_text_run(paragraph[cursor : match.start()]))
+        parts.append(_figure_ref_text(match.group(1), figure_ref))
+        cursor = match.end()
+    parts.append(render_text_run(paragraph[cursor:]))
+    return "".join(parts)
 
 
 def _pure_inline_formula(original: str, rendered: str) -> bool:
@@ -626,54 +831,35 @@ def _match_explicit(text: str, index: int) -> tuple[int, int, str] | None:
 def _dollar_ok(inner: str) -> bool:
     if not inner.strip() or "\n" in inner or len(inner) > 300:
         return False
-    if inner.lstrip()[:1].isdigit() and "=" not in inner and "\\" not in inner:
+    if (
+        inner.lstrip()[:1].isdigit()
+        and "=" not in inner
+        and "\\" not in inner
+        and "{" not in inner
+        and "}" not in inner
+    ):
         return False
     if any(character in _MATH for character in inner) or re.search(r"[=^_\\]", inner):
         return True
     if re.search(r"[A-Za-z]{3,}", inner):
         return False
-    return re.fullmatch(r"[A-Za-z0-9 +\-*/().,^_]+", inner) is not None and bool(
+    return re.fullmatch(r"[A-Za-z0-9 +\-*/().,^_{}]+", inner) is not None and bool(
         re.search(r"[A-Za-z0-9]", inner)
     )
 
 
 def _math_chars(text: str) -> str:
-    parts: list[str] = []
-    for index, character in enumerate(text):
-        mapped = _MATH.get(character)
-        if mapped is None:
-            parts.append(character)
-            continue
-        if mapped.startswith("\\") and mapped[-1:].isalpha():
-            following = text[index + 1] if index + 1 < len(text) else ""
-            if following.isascii() and following.isalpha():
-                mapped += " "
-        parts.append(mapped)
-    return "".join(parts)
+    return _map_math_run(text)
+
+
+def _script_content(mapping: dict[str, str], character: str) -> str:
+    """The LaTeX payload of a subscript/superscript character, e.g. "^{-}" -> "-"."""
+
+    return mapping[character][2:-1]
 
 
 def _formula_tex(span: str) -> str:
-    parts: list[str] = []
-    for index, character in enumerate(span):
-        mapped = _MATH.get(character)
-        if mapped is not None:
-            if mapped.startswith("\\") and mapped[-1:].isalpha():
-                following = span[index + 1] if index + 1 < len(span) else ""
-                if following.isascii() and following.isalpha():
-                    mapped += " "
-            parts.append(mapped)
-            continue
-        if character == "%":
-            parts.append(r"\%")
-        elif character == "#":
-            parts.append(r"\#")
-        elif character == "&":
-            parts.append(r"\&")
-        elif character == "\\":
-            parts.append(r"\backslash ")
-        else:
-            parts.append(character)
-    return "\\(" + "".join(parts) + "\\)"
+    return "\\(" + _map_math_run(span, escape=True) + "\\)"
 
 
 def _formula_spans(text: str, blocked: list[tuple[int, int, str]]) -> list[tuple[int, int]]:
@@ -692,11 +878,47 @@ def _formula_spans(text: str, blocked: list[tuple[int, int, str]]) -> list[tuple
         start, end, kind = tokens[token_index]
         if kind in {"math", "op", "num"}:
             return True
-        if kind != "word" or end - start != 1:
+        if kind != "word":
             return False
-        if adjacent or (formula_side is not None and formula_side[2] == "op"):
-            return True
-        return text[start] not in _STOP_LETTERS
+        if end - start == 1:
+            if adjacent:
+                return True
+            if (
+                formula_side is not None
+                and formula_side[2] == "op"
+                and text[formula_side[0]] not in ")]}"
+            ):
+                return True
+            return text[start] not in _STOP_LETTERS
+        # A multi-letter word is part of the formula when it is bound to a script
+        # or brace group (rho_fluido, p_{man}), tightly bound to a binding
+        # operator (dv/dy, R*T), or heads an assignment (Fr = ..., Re = ...).
+        # A long prose word is left as prose.
+        if token_index > 0:
+            previous = tokens[token_index - 1]
+            if previous[2] == "op" and text[previous[0]] in "_^{":
+                return True
+        if token_index + 1 < len(tokens):
+            following = tokens[token_index + 1]
+            if following[2] == "op" and text[following[0]] in "_^{":
+                return True
+            if following[2] == "math" and (text[following[0]] in _SUBSCRIPTS or text[following[0]] in _SUPERSCRIPTS):
+                return True
+        if 2 <= end - start <= 4 and text[start].isascii() and text[start].isalpha():
+            if token_index > 0:
+                previous = tokens[token_index - 1]
+                if previous[2] == "op" and text[previous[0]] in "/^*":
+                    return True
+            following = token_index + 1
+            if following < len(tokens) and tokens[following][2] == "op" and text[tokens[following][0]] in "/^*":
+                return True
+        if end - start == 2 and text[start] not in _STOP_LETTERS:
+            following = token_index + 1
+            if following < len(tokens) and tokens[following][2] == "space" and _one_space(text, tokens[following]):
+                following += 1
+            if following < len(tokens) and tokens[following][2] == "op" and text[tokens[following][0]] == "=":
+                return True
+        return False
 
     def next_index(current: int, direction: int) -> int | None:
         nxt = current + direction
@@ -759,9 +981,13 @@ def _tokenize(text: str) -> list[tuple[int, int, str]]:
     index = 0
     while index < len(text):
         character = text[index]
-        if character.isascii() and character.isalpha():
+        if character in _MATH:
+            tokens.append((index, index + 1, "math"))
+            index += 1
+            continue
+        if character.isalpha():
             end = index + 1
-            while end < len(text) and text[end].isascii() and text[end].isalpha():
+            while end < len(text) and text[end] not in _MATH and text[end].isalpha():
                 end += 1
             tokens.append((index, end, "word"))
             index = end
@@ -784,9 +1010,12 @@ def _tokenize(text: str) -> list[tuple[int, int, str]]:
             tokens.append((index, end, "space"))
             index = end
             continue
-        if character in _MATH:
-            tokens.append((index, index + 1, "math"))
-            index += 1
+        if character in "_^" and index + 1 < len(text) and text[index + 1].isascii() and text[index + 1].isalnum():
+            end = index + 1
+            while end < len(text) and text[end].isascii() and text[end].isalnum():
+                end += 1
+            tokens.append((index, end, "math"))
+            index = end
             continue
         if character in _ASCII_OPERATORS:
             tokens.append((index, index + 1, "op"))
@@ -1091,6 +1320,7 @@ def _textbook_packages() -> list[str]:
         r"\usepackage{xcolor}",
         r"\usepackage{amsmath}",
         r"\usepackage{amssymb}",
+        r"\newcounter{studiumfigure}",
         r"\definecolor{studiumInk}{RGB}{28,40,58}",
         r"\definecolor{studiumRule}{RGB}{28,40,58}",
         r"\definecolor{studiumTipBack}{RGB}{232,244,236}",
@@ -1465,8 +1695,11 @@ def _hierarchical_chapter(
             intro_paragraphs.append(paragraph)
 
     lines: list[str] = []
+    figures_shown: set[str] = set()
     if intro_paragraphs:
-        lines.extend(_chapter_lines(root, chapter_id, intro_paragraphs, copy, language))
+        lines.extend(
+            _chapter_lines(root, chapter_id, intro_paragraphs, copy, language, figures_shown, chapter_boxes=False)
+        )
 
     for sec_id in section_ids:
         sec_paragraphs = by_subsection.get(sec_id, [])
@@ -1475,7 +1708,9 @@ def _hierarchical_chapter(
             continue
         lines.extend(["", r"\section{" + latex_escape(title) + "}"])
         if sec_paragraphs:
-            lines.extend(_chapter_lines(root, chapter_id, sec_paragraphs, copy, language))
+            lines.extend(
+                _chapter_lines(root, chapter_id, sec_paragraphs, copy, language, figures_shown, chapter_boxes=False)
+            )
         subsections = section_subsections.get(sec_id, [])
         for subsec in subsections:
             subsec_id = _str_field(subsec, "id")
@@ -1485,7 +1720,12 @@ def _hierarchical_chapter(
             subsec_paragraphs = by_subsection.get(subsec_id, [])
             if subsec_paragraphs:
                 lines.extend(["", r"\subsection{" + latex_escape(subsec_title) + "}"])
-                lines.extend(_chapter_lines(root, chapter_id, subsec_paragraphs, copy, language))
+                lines.extend(
+                    _chapter_lines(
+                        root, chapter_id, subsec_paragraphs, copy, language, figures_shown, chapter_boxes=False
+                    )
+                )
+    lines.extend(_chapter_back_matter(root, chapter_id, copy, language))
     return lines
 
 
@@ -1495,8 +1735,16 @@ def _chapter_lines(
     paragraphs: list[dict[str, object]],
     copy: dict[str, str],
     language: BookLanguage,
+    figures_shown: set[str] | None = None,
+    chapter_boxes: bool = True,
 ) -> list[str]:
-    """Lead and explanation stay in the body. Only four kinds are boxes."""
+    """Lead and explanation stay in the body. Only four kinds are boxes.
+
+    ``chapter_boxes`` is False when the caller renders the chapter's derivation,
+    worked problem and practice set once at the end of the chapter instead of
+    after every academic section. Those records are keyed by chapter, so a
+    caller that renders several sections would otherwise repeat them.
+    """
 
     purpose: list[str] = []
     consejo: list[str] = []
@@ -1521,33 +1769,54 @@ def _chapter_lines(
         else:
             body.append(raw)
     lines: list[str] = []
-    lines.extend(_italic(purpose))
-    lines.extend(_body_lines(root, section_id, body, copy))
-    lines.extend(_box(copy["consejo"], _plain(consejo), "consejo"))
+    figure_ref = copy.get("figure_ref", "")
+    lines.extend(_italic(purpose, figure_ref))
+    lines.extend(_body_lines(root, section_id, body, copy, figures_shown))
+    lines.extend(_box(copy["consejo"], _plain(consejo, figure_ref), "consejo"))
     for text in definitions:
-        lines.extend(_box(copy["definition"], _plain([text]), "definition"))
-    lines.extend(_derivation_box(root, section_id, language))
-    lines.extend(_worked_box(root, section_id, copy, language))
-    lines.extend(_exercise_box(root, section_id, language))
-    lines.extend(_box(copy["self_check"], _plain(self_check), "self_check"))
+        lines.extend(_box(copy["definition"], _plain([text], figure_ref), "definition"))
+    if chapter_boxes:
+        lines.extend(_chapter_back_matter(root, section_id, copy, language))
+    lines.extend(_box(copy["self_check"], _plain(self_check, figure_ref), "self_check"))
     return lines
 
 
-def _body_lines(root: Path, section_id: str, body: list[str], copy: dict[str, str]) -> list[str]:
+def _chapter_back_matter(root: Path, chapter_id: str, copy: dict[str, str], language: BookLanguage) -> list[str]:
+    """The chapter's derivation, worked problem and practice set, in order.
+
+    They are stored once per chapter, so they belong once at the end of the
+    chapter rather than once after each of its academic sections.
+    """
+
+    lines: list[str] = []
+    lines.extend(_derivation_box(root, chapter_id, language))
+    lines.extend(_worked_box(root, chapter_id, copy, language))
+    lines.extend(_exercise_box(root, chapter_id, language))
+    return lines
+
+
+def _body_lines(
+    root: Path,
+    section_id: str,
+    body: list[str],
+    copy: dict[str, str],
+    figures_shown: set[str] | None = None,
+) -> list[str]:
     """Consecutive explanation paragraphs are one body. A new section uses the paragraph's own title."""
 
     lines: list[str] = []
     placed = False
+    figure_ref = copy.get("figure_ref", "")
     for kind, value in _body_chunks(body):
         if kind == "section":
             lines.extend(["", r"\section{" + latex_escape(value) + "}"])
             continue
-        lines.extend(_plain([value]))
+        lines.extend(_plain([value], figure_ref))
         if not placed:
-            lines.extend(_figure_lines(root, section_id, copy))
+            lines.extend(_figure_lines(root, section_id, copy, figures_shown))
             placed = True
     if not placed:
-        lines.extend(_figure_lines(root, section_id, copy))
+        lines.extend(_figure_lines(root, section_id, copy, figures_shown))
     return lines
 
 
@@ -1601,19 +1870,19 @@ def _box_body(raw: str, label: str | None, rest: str, kind: str | None, language
     return raw
 
 
-def _italic(chunks: list[str]) -> list[str]:
+def _italic(chunks: list[str], figure_ref: str = "") -> list[str]:
     lines: list[str] = []
     for text in chunks:
-        emitted = emit_prose(text, italic=True)
+        emitted = emit_prose(text, italic=True, figure_ref=figure_ref)
         if emitted:
             lines.extend(["", *emitted])
     return lines
 
 
-def _plain(chunks: list[str]) -> list[str]:
+def _plain(chunks: list[str], figure_ref: str = "") -> list[str]:
     lines: list[str] = []
     for text in chunks:
-        emitted = emit_prose(text)
+        emitted = emit_prose(text, figure_ref=figure_ref)
         if emitted:
             lines.extend(["", *emitted])
     return lines
@@ -1869,6 +2138,8 @@ def _display_math(tex: str) -> list[str]:
         return ["", r"\[" + stripped[2:-2] + r"\]"]
     if stripped.startswith("$") and stripped.endswith("$") and len(stripped) > 2:
         return ["", r"\[" + stripped[1:-1] + r"\]"]
+    if "\\" not in stripped:
+        return ["", r"\[", _formula_tex(stripped)[2:-2], r"\]"]
     return ["", r"\[", stripped, r"\]"]
 
 
@@ -2096,14 +2367,35 @@ def _exercise_box(root: Path, section_id: str, language: BookLanguage) -> list[s
     return _box(label, body, "exercise")
 
 
-def _figure_lines(root: Path, section_id: str, _copy: dict[str, str]) -> list[str]:
-    """Checked drawings inline. No float, so a short drawing does not take a page."""
+def _figure_lines(
+    root: Path,
+    section_id: str,
+    copy: dict[str, str],
+    shown: set[str] | None = None,
+) -> list[str]:
+    """Checked drawings inline. No float, so a short drawing does not take a page.
+
+    Each drawn figure advances ``studiumfigure`` and carries ``\\label{fig:key}``
+    (the author's stable key, or the figure id when none was given). A
+    ``{{fig:key}}`` reference in the prose therefore resolves to the same
+    number without the author maintaining it.
+
+    ``shown`` carries the figure ids already emitted for this chapter. A chapter
+    with academic sections calls :func:`_chapter_lines` once per section, but its
+    figures are stored per chapter, so without this set every section would
+    repeat the same drawings.
+    """
 
     lines: list[str] = []
     for record in figures_in_section(root, section_id):
+        identifier = record.get("id")
+        if shown is not None and isinstance(identifier, str) and identifier in shown:
+            continue
         output = _checked_output(root, record)
         if output is None:
             continue
+        if shown is not None and isinstance(identifier, str):
+            shown.add(identifier)
         if record.get("kind") == "tikz" and isinstance(record.get("source"), str):
             body = "\n".join(
                 [
@@ -2116,6 +2408,7 @@ def _figure_lines(root: Path, section_id: str, _copy: dict[str, str]) -> list[st
         else:
             fitted = _fit_block(r"\includegraphics{" + output + "}", consume_box=True)
         caption = _str_field(record, "caption")
+        prefix = _figure_caption_prefix(record, copy)
         lines.extend(
             [
                 "",
@@ -2126,7 +2419,7 @@ def _figure_lines(root: Path, section_id: str, _copy: dict[str, str]) -> list[st
         )
         lines.extend(fitted)
         if caption.strip():
-            lines.extend([r"\par\nopagebreak", r"{\small " + render_text_run(caption) + r"\par}"])
+            lines.extend([r"\par\nopagebreak", r"{\small " + prefix + render_text_run(caption) + r"\par}"])
         lines.extend(
             [
                 r"\end{minipage}",
@@ -2134,6 +2427,32 @@ def _figure_lines(root: Path, section_id: str, _copy: dict[str, str]) -> list[st
             ]
         )
     return lines
+
+
+def _figure_caption_prefix(record: dict[str, object], copy: dict[str, str]) -> str:
+    """Advance the figure counter, set the label, and print ``Figura N.``.
+
+    Empty when the record has no usable key, so an old project without keys
+    still renders a plain caption.
+    """
+
+    key = record.get("key")
+    if not isinstance(key, str) or not key.strip():
+        identifier = record.get("id")
+        key = identifier if isinstance(identifier, str) else ""
+    if not key.strip():
+        return ""
+    label = copy.get("figure_ref", "figura")
+    word = latex_escape(label[:1].upper() + label[1:])
+    return (
+        r"\refstepcounter{studiumfigure}"
+        + r"\label{fig:"
+        + _figure_label_key(key)
+        + r"}"
+        + r"\textbf{"
+        + word
+        + r"~\thestudiumfigure.} "
+    )
 
 
 def _checked_tikz(root: Path) -> bool:
@@ -2317,7 +2636,7 @@ def _formula_sheet_lines(root: Path, copy: dict[str, str]) -> list[str]:
         equation = str(record["equation"]).strip()
         if name:
             lines.extend(["", r"\noindent\textbf{" + latex_escape(name) + "}"])
-        lines.extend(["", *emit_prose(equation)])
+        lines.extend(_display_math(equation))
     return lines
 
 
@@ -2356,12 +2675,30 @@ def _solution_lines(root: Path, copy: dict[str, str], language: BookLanguage) ->
             solved_practice.add(identifier)
             number = numbering.get(identifier, 0)
             lines.extend(["", r"\noindent\textbf{" + latex_escape(f"{exercise_label} {number}") + "}"])
+        solution = record.get("solution")
+        if is_practice and isinstance(solution, dict) and solution:
+            # A practice problem with a stored solution gets the same full
+            # engineering solution the worked problem does, so the appendix is a
+            # real solutions manual instead of a bare answer list.
+            lines.extend(_solution_body(record, solution, copy, language))
+            continue
         lines.extend(["", *emit_prose(prompt)])
-        expected = _str_field(record, "expected")
-        if expected.strip() and witnessed:
-            lines.extend(
-                ["", r"\noindent\textbf{" + latex_escape(copy["respuesta"]) + "} " + latex_escape(expected.strip())]
-            )
+        if witnessed:
+            result = solution.get("result") if isinstance(solution, dict) else None
+            if isinstance(result, str) and result.strip():
+                # A problem with a structured solution already typesets its
+                # answer; reuse it so the appendix never prints a raw float.
+                lines.extend(["", r"\noindent\textbf{" + latex_escape(copy["respuesta"]) + "}"])
+                lines.extend(_display_math(result))
+            else:
+                expected = _str_field(record, "expected")
+                if expected.strip():
+                    lines.extend(
+                        [
+                            "",
+                            r"\noindent\textbf{" + latex_escape(copy["respuesta"]) + "} " + latex_escape(expected.strip()),
+                        ]
+                    )
     for record in fold_by_id(root / COMPUTATIONS):
         if record.get("status") != "replayed" or record.get("correct") is not True:
             continue

@@ -193,6 +193,28 @@ def _build_parser() -> StudiumParser:
 
 
 def _mcp(args: argparse.Namespace) -> int:
+    if getattr(args, "check", False):
+        from studium.mcp.reconnect import code_fingerprint, tool_names_on_disk
+
+        installed = tool_names_on_disk()
+        print(
+            json.dumps(
+                {
+                    "version": __version__,
+                    "code_fingerprint": code_fingerprint(),
+                    "tool_count": len(installed),
+                    "tools": installed,
+                    "how_to_reconnect": (
+                        "If your MCP client shows mcp.unknown_tool for a tool listed here, the running "
+                        "server is stale. Call studium_server_reload, or restart the `studium mcp` process "
+                        "and reconnect, then call studium_server_info to confirm the fingerprints match."
+                    ),
+                },
+                ensure_ascii=False,
+                indent=1,
+            )
+        )
+        return 0
     if args.workspace is not None and not Path(args.workspace).expanduser().is_dir():
         print("workspace not found", file=sys.stderr)
         return 3

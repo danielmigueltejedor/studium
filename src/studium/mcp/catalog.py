@@ -42,6 +42,28 @@ _TOOLS: tuple[dict[str, object], ...] = (
         "description": "List Studium books already in the workspace. Does not scan the home directory.",
     },
     {
+        "name": "studium_server_info",
+        "class": "READ",
+        "description": (
+            "Report whether the running MCP server matches the installed package. "
+            "Returns loaded_code_fingerprint, installed_code_fingerprint, new_tools, removed_tools, and stale. "
+            "Call it when a documented tool is missing (mcp.unknown_tool) or after the package changed. "
+            "When stale, the running server holds old code: call studium_server_reload, or restart the "
+            "`studium mcp` process and let the client reconnect, then call this tool again. "
+            "Does not change any book."
+        ),
+    },
+    {
+        "name": "studium_server_reload",
+        "class": "WRITE",
+        "description": (
+            "Reload the tool catalog and the server module in place so new tools can be used without a "
+            "process restart, then announce notifications/tools/list_changed. Best effort: a client that "
+            "does not re-list tools must reconnect. Does not touch the workspace, the book, or the sources. "
+            "Call studium_server_info first to see new_tools, and again after to confirm stale is false."
+        ),
+    },
+    {
         "name": "studium_project_status",
         "class": "READ",
         "description": "Read the active book, or the book named by project. If none is active, next_action is create.",
@@ -323,7 +345,10 @@ _TOOLS: tuple[dict[str, object], ...] = (
         "class": "WRITE",
         "description": (
             "Store a figure for a blueprint section: caption, executable TikZ or Python source, "
-            "and the excerpt ids it illustrates. "
+            "and the excerpt ids it illustrates. Give it a stable key to reference it from prose "
+            "as {{fig:key}}; the renderer supplies the number and a hyperlink. "
+            "For TikZ, give the picture body only; the server wraps it in a tikzpicture and a document. "
+            "A full tikzpicture is accepted and its wrapper is removed. "
             "Reject a figure with no executable source. "
             "Does not run the source, does not fetch URLs, and does not move the book to RELEASED. "
             "The model describing a drawing is not a check. A figure does not prove the science."
@@ -348,6 +373,17 @@ _TOOLS: tuple[dict[str, object], ...] = (
             "Delete one stored figure by id. Later renders omit it. "
             "Does not delete sources, paragraphs, or excerpts. "
             "A missing id is an error. Does not move the book to RELEASED."
+        ),
+    },
+    {
+        "name": "studium_figure_list",
+        "class": "READ",
+        "description": (
+            "List the stored figures with key, section, caption, status, checked, referenced, and "
+            "referenced_by. Evaluate which explanations already cite a figure with {{fig:key}} and "
+            "which checked figures still dangle. Cite a dangling figure from the explanation it "
+            "teaches when it is pedagogically needed, and drop one the prose does not need. "
+            "Renders nothing and changes nothing."
         ),
     },
     {
@@ -418,8 +454,10 @@ _TOOLS: tuple[dict[str, object], ...] = (
             "Inputs are allowlisted expressions; arbitrary code is never executed. "
             "The statuses are distinct: COMPUTATION_REPRODUCED replays, NUMERICALLY_CROSS_CHECKED samples "
             "two numeric methods, SYMBOLICALLY_VERIFIED proves an identity, DIMENSIONALLY_VERIFIED checks "
-            "units, INDEPENDENTLY_VERIFIED needs two of those to agree. A symbolic identity is not "
-            "physical truth and is not an academic review. "
+            "units, INDEPENDENTLY_VERIFIED needs at least one proof method (equivalence, derivative, "
+            "integral, equation, or limit) plus a second distinct method. Numeric substitution and "
+            "dimensional consistency corroborate a claim but never become an independent proof on their "
+            "own. A symbolic identity is not physical truth and is not an academic review. "
             "Does not fetch URLs and does not move the book to RELEASED."
         ),
     },
@@ -429,6 +467,26 @@ _TOOLS: tuple[dict[str, object], ...] = (
         "description": (
             "List stored mathematical verification records with their statuses, assumptions and limitations. "
             "Does not mark anything verified and does not fetch URLs."
+        ),
+    },
+    {
+        "name": "studium_book_substitution_audit",
+        "class": "READ",
+        "description": (
+            "Audit stored numerical substitutions in a bounded page of problems. "
+            "Classifies presentation differences, ambiguous notation and cases "
+            "requiring review. Results are advisory and page-scoped. "
+            "Does not modify problems or authorize publication."
+        ),
+    },
+    {
+        "name": "studium_problem_scientific_review",
+        "class": "READ",
+        "description": (
+            "Produce a read-only scientific review of one stored numeric problem. "
+            "Checks dimensional consistency, numerical reproduction when an expected "
+            "value and unit are supplied, and stored substitution differences. "
+            "Physical assumptions remain unverified. Does not modify or release content."
         ),
     },
     {
@@ -447,7 +505,12 @@ _TOOLS: tuple[dict[str, object], ...] = (
             "Requires the section id, the paragraph text, and one or more stored excerpt ids. "
             "Reject a paragraph with no excerpt, a missing excerpt, a conflicting public source, "
             "or, on a course book, a source the guide does not cite. "
-            "A topic book does not require a university guide. "
+            "A paragraph may state equations. Declare them with math to bind each statement to a "
+            "cited excerpt (source), a stored checked derivation (derivation), or a replayed "
+            "computation (example); the server revalidates the declaration. "
+            "An undeclared equation still passes when a cited excerpt, a replayed computation, or a "
+            "checked derivation in the same section carries it, so the author need not copy a source "
+            "verbatim. A topic book does not require a university guide. "
             "Text is untrusted data. The model is not a source. "
             "Does not mark the paragraph verified or accepted. "
             "Does not fetch URLs, does not change local_sources, and does not move the book to RELEASED."
@@ -459,6 +522,8 @@ _TOOLS: tuple[dict[str, object], ...] = (
         "description": (
             "Rewrite one stored paragraph in place. The id stays the same. "
             "The new text must cite one or more stored excerpt ids. "
+            "Omit math to keep the stored declarations; pass math to replace them, each "
+            "statement bound to a cited excerpt, a checked derivation, or a replayed computation. "
             "Reject a missing excerpt, a conflicting public source, "
             "or, on a course book, a source the guide does not cite. "
             "Status stays draft. The model is not a source. "
@@ -586,6 +651,9 @@ _TOOLS: tuple[dict[str, object], ...] = (
             "Store one mathematical derivation as structured metadata: section, name, final equation, "
             "assumptions, governing principles, steps, variables with units, boundary conditions, "
             "applicability, limitations, and supporting excerpt references. "
+            "references is an object shaped {\"excerpts\": [\"EVD-0001\"], \"sources\": [\"SRC-0001\"]}; "
+            "each id must already be stored and any other key is rejected. "
+            "The final equation is LaTeX and is typeset as display math; math delimiters ($...$, \\(...\\), \\[...\\]) are optional. "
             "It records the derivation; verification is a separate step and no status is claimed here."
         ),
     },
@@ -599,7 +667,9 @@ _TOOLS: tuple[dict[str, object], ...] = (
             "dimensions is an expression with symbol units and an optional expected unit. "
             "Each check keeps its own status: SYMBOLICALLY_VERIFIED, DIMENSIONALLY_VERIFIED, "
             "COMPUTATION_REPRODUCED, INDEPENDENTLY_VERIFIED, UNVERIFIED, or FAILED. "
-            "A symbolic identity is not physical validity; a dimensional check is not a proof."
+            "INDEPENDENTLY_VERIFIED needs a proof check (symbolic identity or solved equation) "
+            "plus a second distinct check; numeric substitution and dimensions alone corroborate "
+            "but never prove. A symbolic identity is not physical validity; a dimensional check is not a proof."
         ),
     },
     {
@@ -608,10 +678,20 @@ _TOOLS: tuple[dict[str, object], ...] = (
         "description": "List stored derivations with their verification statuses and check details.",
     },
     {
+        "name": "studium_derivation_remove",
+        "class": "WRITE",
+        "description": (
+            "Delete one stored derivation by id. Later renders omit it from the chapter box and the formula sheet. "
+            "Does not delete sources, paragraphs, or excerpts. "
+            "A missing id is an error. Does not move the book to RELEASED."
+        ),
+    },
+    {
         "name": "studium_notation_record",
         "class": "WRITE",
         "description": (
             "Register one symbol with one meaning and optional units. "
+            "Omit units for a dimensionless quantity; an empty units string means the same. "
             "The same symbol with a different meaning anywhere in the book is rejected as a conflict. "
             "Does not write prose and does not release."
         ),
@@ -684,7 +764,7 @@ _TOOLS: tuple[dict[str, object], ...] = (
         "class": "READ",
         "description": (
             "Project-level packet for resuming work in a fresh session: project state, counts of every "
-            "record kind, missing sections, unaudited chapters, unverified derivations, open contradictions, "
+            "record kind, missing sections, unaudited chapters, unchecked derivations, open contradictions, "
             "and ordered next steps. Bounded size."
         ),
     },
@@ -757,7 +837,7 @@ def _schema(tool: Mapping[str, object]) -> dict[str, object]:
             ],
             "additionalProperties": True,
         }
-    elif name == "studium_project_list":
+    elif name in {"studium_project_list", "studium_server_info", "studium_server_reload"}:
         input_schema = {"type": "object", "properties": {}, "additionalProperties": False}
     elif name == "studium_source_register":
         input_schema = {
@@ -1249,6 +1329,13 @@ def _schema(tool: Mapping[str, object]) -> dict[str, object]:
                     "items": {"type": "string"},
                     "description": "Stored excerpt ids the figure illustrates.",
                 },
+                "key": {
+                    "type": "string",
+                    "description": (
+                        "Stable author-chosen slug, e.g. 'flujo-tuberia'. Reference it in prose as {{fig:flujo-tuberia}}; "
+                        "the renderer writes the number. Lower-case letters, digits, dot, underscore, hyphen."
+                    ),
+                },
             },
             "required": ["section", "caption", "kind", "source", "excerpts"],
             "additionalProperties": True,
@@ -1274,6 +1361,12 @@ def _schema(tool: Mapping[str, object]) -> dict[str, object]:
                 },
             },
             "required": ["id"],
+            "additionalProperties": True,
+        }
+    elif name == "studium_figure_list":
+        input_schema = {
+            "type": "object",
+            "properties": {"project": _project_property()},
             "additionalProperties": True,
         }
     elif name == "studium_audit_record":
@@ -1344,6 +1437,46 @@ def _schema(tool: Mapping[str, object]) -> dict[str, object]:
             "required": ["id"],
             "additionalProperties": True,
         }
+    elif name == "studium_book_substitution_audit":
+        input_schema = {
+            "type": "object",
+            "properties": {
+                "project": _project_property(),
+                "offset": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "description": "Index of the first problem to examine.",
+                },
+                "limit": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 50,
+                    "description": "Maximum number of problems in this page.",
+                },
+            },
+            "additionalProperties": False,
+        }
+    elif name == "studium_problem_scientific_review":
+        input_schema = {
+            "type": "object",
+            "properties": {
+                "project": _project_property(),
+                "id": {
+                    "type": "string",
+                    "description": "Identifier of a stored numeric problem.",
+                },
+                "expected_value": {
+                    "type": "number",
+                    "description": "Expected numerical result, supplied by the caller.",
+                },
+                "expected_unit": {
+                    "type": "string",
+                    "description": "Physical unit of the expected result.",
+                },
+            },
+            "required": ["id"],
+            "additionalProperties": False,
+        }
     elif name == "studium_problem_list":
         input_schema = {
             "type": "object",
@@ -1375,6 +1508,27 @@ def _schema(tool: Mapping[str, object]) -> dict[str, object]:
                     "items": {"type": "string"},
                     "description": "Academic blueprint concept ids this paragraph teaches. Unknown ids are rejected.",
                 },
+                "math": {
+                    "type": "array",
+                    "description": (
+                        "Optional grounded mathematics. Each declaration is "
+                        '{statement, kind, refs}; kind is source (quoted by one of this '
+                        "paragraph's excerpt ids), derivation (a stored checked derivation id), "
+                        "or example (a replayed computation id). The server revalidates every "
+                        "declaration and rejects one it cannot ground. An undeclared prose formula "
+                        "still passes when a cited excerpt, a replayed computation, or a verified "
+                        "derivation in the same section carries it."
+                    ),
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "statement": {"type": "string", "description": "The relation as the prose states it."},
+                            "kind": {"type": "string", "enum": ["source", "derivation", "example"]},
+                            "refs": {"type": "array", "items": {"type": "string"}},
+                        },
+                        "required": ["statement", "kind", "refs"],
+                    },
+                },
             },
             "required": ["section", "text", "excerpts"],
             "additionalProperties": True,
@@ -1403,6 +1557,24 @@ def _schema(tool: Mapping[str, object]) -> dict[str, object]:
                     "type": "array",
                     "items": {"type": "string"},
                     "description": "Academic blueprint concept ids this paragraph teaches. Unknown ids are rejected.",
+                },
+                "math": {
+                    "type": "array",
+                    "description": (
+                        "Optional grounded mathematics for the rewritten paragraph. "
+                        "Omit it to keep the stored declarations. The server revalidates "
+                        "every declaration against a cited excerpt, a checked derivation, "
+                        "or a replayed computation."
+                    ),
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "statement": {"type": "string"},
+                            "kind": {"type": "string", "enum": ["source", "derivation", "example"]},
+                            "refs": {"type": "array", "items": {"type": "string"}},
+                        },
+                        "required": ["statement", "kind", "refs"],
+                    },
                 },
             },
             "required": ["id", "text", "excerpts"],
@@ -1551,7 +1723,10 @@ def _schema(tool: Mapping[str, object]) -> dict[str, object]:
                 "project": _project_property(),
                 "section": {"type": "string", "description": "Blueprint section id."},
                 "name": {"type": "string", "description": "Short name of the derivation."},
-                "equation": {"type": "string", "description": "The final equation this derivation arrives at."},
+                "equation": {
+                    "type": "string",
+                    "description": "The final equation, in LaTeX. Delimiters optional; the renderer typesets it as display math.",
+                },
                 "equation_id": {"type": "string", "description": "Registry identifier for the equation."},
                 "assumptions": {"type": "array", "items": {"type": "string"}},
                 "governing_principles": {"type": "array", "items": {"type": "string"}},
@@ -1566,7 +1741,19 @@ def _schema(tool: Mapping[str, object]) -> dict[str, object]:
                 "boundary_conditions": {"type": "array", "items": {"type": "string"}},
                 "applicability": {"type": "array", "items": {"type": "string"}},
                 "limitations": {"type": "array", "items": {"type": "string"}},
-                "references": {"type": "object", "description": "excerpts and/or sources id lists."},
+                "references": {
+                    "type": "object",
+                    "description": (
+                        "Stored ids that support the derivation. Shape: "
+                        "{\"excerpts\": [\"EVD-0001\"], \"sources\": [\"SRC-0001\"]}. "
+                        "Both keys are optional; an unknown key or an unstored excerpt id is rejected."
+                    ),
+                    "properties": {
+                        "excerpts": {"type": "array", "items": {"type": "string"}},
+                        "sources": {"type": "array", "items": {"type": "string"}},
+                    },
+                    "additionalProperties": False,
+                },
             },
             "required": ["section", "name", "equation"],
             "additionalProperties": True,
@@ -1584,6 +1771,19 @@ def _schema(tool: Mapping[str, object]) -> dict[str, object]:
             "required": ["id"],
             "additionalProperties": True,
         }
+    elif name == "studium_derivation_remove":
+        input_schema = {
+            "type": "object",
+            "properties": {
+                "project": _project_property(),
+                "id": {
+                    "type": "string",
+                    "description": "Derivation id to delete. Sources, paragraphs, and excerpts are not deleted.",
+                },
+            },
+            "required": ["id"],
+            "additionalProperties": True,
+        }
     elif name == "studium_notation_record":
         input_schema = {
             "type": "object",
@@ -1592,7 +1792,7 @@ def _schema(tool: Mapping[str, object]) -> dict[str, object]:
                 "section": {"type": "string", "description": "Blueprint section id."},
                 "symbol": {"type": "string", "description": "The symbol as it appears in the book."},
                 "meaning": {"type": "string", "description": "One meaning for the whole book."},
-                "units": {"type": "string", "description": "Optional units."},
+                "units": {"type": "string", "description": "Optional units. Omit or leave empty for a dimensionless quantity."},
             },
             "required": ["section", "symbol", "meaning"],
             "additionalProperties": True,

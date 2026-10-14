@@ -3,7 +3,10 @@
 import json
 from fractions import Fraction
 
+from studium.authoring.audit import review_edition
 from studium.mcp.server import dispatch, handle, open_workspace, tool_names
+from studium.storage.migrate import utc_now
+from studium.storage.records import REVIEWS, append_jsonl
 
 _PASSAGE = "A stored excerpt is data, not a source of authority."
 _TOO_SHORT = "The study book is too short. Store at least 8 blueprint sections before writing or rendering."
@@ -57,6 +60,111 @@ def test_book_next_on_an_empty_topic_book(tmp_path, monkeypatch):
     assert "ask the user" not in json.dumps(nxt).lower().replace("do not ask the user how to format the page.", "")
     assert "studium_book_next" in tool_names()
     assert "studium_computation_check" in tool_names()
+
+
+def test_course_book_leaves_course_discovery_before_source_discovery(tmp_path, monkeypatch):
+    """The guided flow advances the state machine before any authoring.
+
+    A course book must apply ``course_recorded`` once its official document is
+    stored. Skipping that step would author and render a draft while the
+    project still claims to be discovering the course, which is incoherent.
+    """
+    monkeypatch.setattr("urllib.request.urlopen", _explode)
+    session = open_workspace(str(tmp_path))
+    created = dispatch(
+        "studium_project_create",
+        {
+            "slug": "fluidos",
+            "course": "Mecánica de Fluidos",
+            "university": "Universidad de León",
+            "degree": "Grado en Ingeniería Aeroespacial",
+            "language": "en",
+        },
+        session=session,
+    )
+    assert created["status"] == "created"
+
+    first = dispatch("studium_book_next", {}, session=session)
+    assert first["tool"] == "studium_course_document_record"
+    assert first["project_state"] == "COURSE_DISCOVERY"
+
+    recorded = dispatch(
+        "studium_course_document_record",
+        {
+            "title": "Guía docente",
+            "url": "https://www.unileon.es/guia-fluidos",
+            "text": "Bibliografía: Frank M. White, Fluid Mechanics.",
+        },
+        session=session,
+    )
+    assert recorded["status"] == "recorded"
+
+    second = dispatch("studium_book_next", {}, session=session)
+    assert second["tool"] == "studium_course_recorded"
+    assert second["project_state"] == "COURSE_DISCOVERY"
+
+    moved = dispatch("studium_course_recorded", {}, session=session)
+    assert moved["state"] == "SOURCE_DISCOVERY"
+
+    third = dispatch("studium_book_next", {}, session=session)
+    assert third["tool"] == "studium_public_source_record"
+    assert third["project_state"] == "SOURCE_DISCOVERY"
+    assert third["released"] is False
+
+
+def test_draft_waits_for_a_passed_review(tmp_path, monkeypatch):
+    """book_next must not render an edition whose review never passed.
+
+    Ignoring the offered review, or recording one that failed ``audit_passed``,
+    keeps the draft closed: the draft is coherent only with a passed review.
+    """
+    monkeypatch.setattr("urllib.request.urlopen", _explode)
+    session, root = _topic(tmp_path, "historia", "Historia medieval")
+    excerpts = [_opened_source(session, index) for index in range(12)]
+    dispatch("studium_blueprint_store", {"sections": _eight_sections()}, session=session)
+    _fill_contract(session, excerpts)
+
+    for _ in range(24):
+        nxt = dispatch("studium_book_next", {}, session=session)
+        if nxt["tool"] == "studium_book_review":
+            break
+        assert nxt["tool"] != "studium_render"
+        _perform_next(session, nxt, excerpts)
+    else:
+        raise AssertionError("book_next never offered the review step")
+    assert nxt["tool"] == "studium_book_review"
+
+    # Skipping the review must not unlock the draft.
+    skipped = dispatch("studium_book_next", {}, session=session)
+    assert skipped["tool"] == "studium_book_review"
+    assert skipped["tool"] != "studium_render"
+    assert skipped["released"] is False
+
+    # A failed review stays closed and names its blockers.
+    append_jsonl(
+        root / REVIEWS,
+        {
+            "schema_version": "1.0.0",
+            "id": "edition",
+            "edition": review_edition(root),
+            "status": "blocked",
+            "audit_passed": False,
+            "reasons": ["open contradiction: density"],
+            "released": False,
+            "recorded_at": utc_now(),
+        },
+    )
+    blocked = dispatch("studium_book_next", {}, session=session)
+    assert blocked["tool"] == "studium_book_review"
+    assert "open contradiction: density" in blocked["reason"]
+    assert blocked["released"] is False
+
+    # Only a passed review unlocks the draft.
+    reviewed = _perform_next(session, nxt, excerpts)
+    assert reviewed["audit_passed"] is True, reviewed.get("reasons")
+    unlocked = dispatch("studium_book_next", {}, session=session)
+    assert unlocked["tool"] == "studium_render"
+    assert unlocked["released"] is False
 
 
 def test_book_next_refuses_to_render_a_two_section_book(tmp_path, monkeypatch):
@@ -608,6 +716,33 @@ def test_contract_complete_book_may_render_once_and_stays_unreleased(tmp_path, m
     assert "render once" in str(status["next_action"])
     assert "Do not stop mid-book for a preview." in str(status["next_action"])
     assert status["state"] != "RELEASED"
+
+
+def test_render_reason_names_uncited_figures(tmp_path, monkeypatch):
+    """A checked figure that no prose cites is named on the render step.
+
+    The MCP track shipped ten checked figures that no paragraph referenced; the
+    only warning was in the final quality report. The render step now says so
+    before the draft is rendered.
+    """
+
+    from studium.authoring import book_next as bn
+
+    monkeypatch.setattr(bn, "uncited_figures", lambda root: [{"id": "FIG-0001", "key": "flujo"}])
+    reason = bn._render_reason(tmp_path)
+    assert "1 checked figure(s)" in reason
+    assert "flujo" in reason
+    assert "{{fig:key}}" in reason
+    assert "Do not request release." in reason
+
+
+def test_render_reason_is_plain_without_uncited_figures(tmp_path, monkeypatch):
+    from studium.authoring import book_next as bn
+
+    monkeypatch.setattr(bn, "uncited_figures", lambda root: [])
+    assert bn._render_reason(tmp_path) == (
+        "Render the DRAFT once. Do not stop mid-book for a preview. Do not request release."
+    )
 
 
 def _assert_writes_the_chapter(nxt: dict[str, object], title: str) -> None:

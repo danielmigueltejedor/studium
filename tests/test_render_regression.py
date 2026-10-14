@@ -9,6 +9,7 @@ These tests must pass before and after type-safety fixes to render.py.
 import pytest
 
 from studium.authoring.render import (
+    _display_math,
     emit_prose,
     latex_escape,
     render_draft,
@@ -59,10 +60,61 @@ def test_render_text_run_dollar_math():
     assert "Force is" in result
 
 
+def test_render_text_run_spanish_decimal_dollar_math():
+    # A digit-leading explicit span with braces is math, not currency:
+    # "$0{,}01$" must become \(0{,}01\), never \$0\{,\}01\$.
+    result = render_text_run("por debajo de $0{,}01$ del total")
+    assert r"\(0{,}01\)" in result
+    assert "\\$" not in result
+
+
 def test_render_text_run_escapes_special():
     result = render_text_run("100% done & ready")
     assert r"\%" in result
     assert r"\&" in result
+
+
+def test_render_text_run_groups_consecutive_unicode_superscripts():
+    # A run of Unicode superscripts must become one group: "s⁻¹" -> ^{ -1 },
+    # never "^{-}^{1}", which LaTeX rejects as a double superscript.
+    result = render_text_run("gradiente de 100 s⁻¹ constante")
+    assert "^{-1}" in result
+    assert "^{-}^{" not in result
+
+
+def test_display_math_translates_unicode_formula():
+    """Regression: a stored result in Unicode becomes LaTeX math.
+
+    ``_display_math`` wraps stored solution strings in display math but used to
+    emit them raw, so a result like ``F = 1,8·10⁻³ N`` failed to compile. It must
+    translate Unicode operators and group consecutive superscripts.
+    """
+
+    rendered = "\n".join(_display_math("F = 1,8·10⁻³ N"))
+    assert r"\cdot" in rendered
+    assert "10^{-3}" in rendered
+    assert "⁻" not in rendered
+    assert "^{-}^{" not in rendered
+
+
+def test_display_math_keeps_bare_latex():
+    """Regression: a stored equation in bare LaTeX is passed through unchanged.
+
+    Bare LaTeX must not be routed through the Unicode translator, which would
+    turn ``\\frac`` into ``\\backslash frac``.
+    """
+
+    rendered = "\n".join(_display_math(r"Re = \frac{\rho V L}{\mu}"))
+    assert r"\frac{\rho V L}{\mu}" in rendered
+    assert r"\backslash" not in rendered
+
+
+def test_render_text_run_ascii_subscript_with_unicode_superscript():
+    # "V_entrada²" mixes an ASCII subscript with a Unicode superscript and must
+    # stay inside a single formula: V_{entrada}^{2}, not "V_)" + "^{2}".
+    result = render_text_run("como ρ(V_entrada² - V_salida²)/2")
+    assert "_{entrada}" in result
+    assert "V_{entrada}^{2}" in result
 
 
 # ---------------------------------------------------------------------------
@@ -316,6 +368,54 @@ class TestFormulaRendering:
     def test_derivation_box_present(self):
         assert r"\begin{tcolorbox}" in self.tex
 
+    def test_formula_sheet_typesets_bare_latex(self):
+        """Regression: a bare-LaTeX equation is display math, not escaped prose.
+
+        The formula sheet previously passed the stored equation through
+        ``emit_prose``, which turned ``\\frac`` into ``\\textbackslash{}frac``
+        and broke the LaTeX build. The chapter derivation box already used
+        ``_display_math``; the formula sheet must agree with it.
+        """
+
+        dispatch(
+            "studium_derivation_record",
+            {
+                "section": "presion",
+                "name": "Número de Reynolds",
+                "equation": r"Re = \frac{\rho V L}{\mu}",
+            },
+            session=self.session,
+        )
+        render_draft(self.root)
+        tex = (self.root / "latex" / "draft.tex").read_text(encoding="utf-8")
+        assert r"\frac{\rho V L}{\mu}" in tex
+        assert r"\textbackslash{}frac" not in tex
+
+
+class TestDerivationRemove:
+    def test_remove_derivation_hides_it_everywhere(self, tmp_path, monkeypatch):
+        session, root = _full_setup(tmp_path, monkeypatch)
+        recorded = dispatch(
+            "studium_derivation_record",
+            {"section": "presion", "name": "Borrable", "equation": r"e = m c^2"},
+            session=session,
+        )
+        derivation_id = recorded["derivation"]["id"]
+        state_before = (root / ".studium" / "state.json").read_bytes()
+        paragraphs_before = (root / "draft" / "paragraphs.jsonl").read_bytes()
+        removed = dispatch("studium_derivation_remove", {"id": derivation_id}, session=session)
+        assert removed["status"] == "removed"
+        assert removed["derivation_id"] == derivation_id
+        assert removed["released"] is False
+        assert (root / ".studium" / "state.json").read_bytes() == state_before
+        assert (root / "draft" / "paragraphs.jsonl").read_bytes() == paragraphs_before
+        listed = dispatch("studium_derivation_list", {}, session=session)
+        assert all(item["id"] != derivation_id for item in listed["derivations"])
+        missing = dispatch("studium_derivation_remove", {"id": "DER-9999"}, session=session)
+        assert missing["status"] == "derivation.not_found"
+        blank = dispatch("studium_derivation_remove", {}, session=session)
+        assert blank["status"] == "mcp.invalid_input"
+
 
 # ---------------------------------------------------------------------------
 # Integration: notation table
@@ -420,6 +520,90 @@ class TestExercisesAndProblems:
 
 
 # ---------------------------------------------------------------------------
+# Integration: the solutions appendix is a manual, not a list of raw floats
+# ---------------------------------------------------------------------------
+
+
+def _solutions_setup(tmp_path, monkeypatch):
+    """A worked problem and a practice problem that carry a stored solution."""
+
+    from studium.authoring.excerpts import excerpts_by_id
+
+    session, root = _full_setup(tmp_path, monkeypatch)
+    excerpts = list(excerpts_by_id(root))[:2]
+    dispatch(
+        "studium_problem_record",
+        {
+            "section": "presion",
+            "prompt": "Explica el método y calcula la presión a 4.905 m.",
+            "expected": "48118.05",
+            "excerpts": excerpts,
+            "role": "practice",
+            "difficulty": "INTERMEDIATE",
+            "learning_objectives": ["pressure"],
+            "solution": {
+                "given": [{"symbol": "h", "value": "4.905", "unit": "m", "meaning": "profundidad"}],
+                "unknown": "presión manométrica en el fondo",
+                "model": [{"name": "Hidrostática", "latex": r"p = \rho g h"}],
+                "assumptions": ["el fluido está en reposo"],
+                "steps": [{"text": "Se aplica la ecuación fundamental.", "equation": r"p = \rho g h"}],
+                "result": r"p = 4{,}81\times10^{4}\ \mathrm{Pa}",
+                "interpretation": "La presión crece de forma lineal con la profundidad.",
+            },
+        },
+        session=session,
+    )
+    dispatch(
+        "studium_problem_record",
+        {
+            "section": "presion",
+            "prompt": "Caso resuelto cuya respuesta está tipografiada.",
+            "expected": "5.0",
+            "excerpts": excerpts,
+            "role": "worked",
+            "solution": {
+                "given": [{"symbol": "p", "value": "5.0", "unit": "Pa", "meaning": "presión"}],
+                "unknown": "comprobación del resultado",
+                "model": [{"name": "Modelo de prueba", "latex": r"p = 5"}],
+                "steps": [{"text": "Se lee el resultado.", "equation": r"p = 5"}],
+                "result": r"p = 5{,}0\ \mathrm{Pa}",
+            },
+        },
+        session=session,
+    )
+    return session, root
+
+
+class TestSolutionsAppendix:
+    """A practice problem with a stored solution renders the full solution."""
+
+    @pytest.fixture(autouse=True)
+    def _setup(self, tmp_path, monkeypatch):
+        self.session, self.root = _solutions_setup(tmp_path, monkeypatch)
+        render_draft(self.root)
+        self.tex = (self.root / "latex" / "draft.tex").read_text(encoding="utf-8")
+
+    def test_practice_solution_rendered(self):
+        # The structured solution body, not just the prompt of the exercise.
+        assert r"\noindent\textbf{Datos}" in self.tex
+        assert r"\noindent\textbf{Modelo físico}" in self.tex
+
+    def test_practice_solution_result_is_typeset(self):
+        # The author's typeset result reaches the appendix.
+        assert r"4{,}81\times10^{4}" in self.tex
+
+    def test_worked_appendix_answer_is_typeset(self):
+        # A worked problem with a structured solution prints its typeset result
+        # instead of a raw machine value.
+        assert r"5{,}0\ \mathrm{Pa}" in self.tex
+
+    def test_problem_without_solution_keeps_bare_answer(self):
+        # Backwards compatibility: a problem with no structured solution still
+        # prints its replayed expected value.
+        assert "96236.1" in self.tex
+
+
+# ---------------------------------------------------------------------------
 # Integration: references (no PAR- ids leak into output)
 # ---------------------------------------------------------------------------
 
@@ -499,6 +683,31 @@ class TestAuditGrouping:
 # ---------------------------------------------------------------------------
 # Integration: hierarchical rendering with academic blueprint
 # ---------------------------------------------------------------------------
+
+
+def test_figure_lines_skips_figures_already_shown(monkeypatch, tmp_path):
+    # A chapter with academic sections calls _chapter_lines once per section,
+    # but its figures are stored per chapter. The shared ``shown`` set must stop
+    # the same drawing from being emitted again for every section.
+    from studium.authoring import render as render_mod
+
+    record = {
+        "id": "FIG-1",
+        "section": "ch1",
+        "kind": "tikz",
+        "source": r"\draw (0,0) -- (1,1);",
+        "caption": "A line.",
+    }
+    monkeypatch.setattr(render_mod, "figures_in_section", lambda root, section_id: [record])
+    monkeypatch.setattr(render_mod, "_checked_output", lambda root, item: tmp_path / "figure.pdf")
+
+    shown: set[str] = set()
+    first = render_mod._figure_lines(tmp_path, "ch1", {}, shown)
+    second = render_mod._figure_lines(tmp_path, "ch1", {}, shown)
+
+    assert first, "the first call must emit the figure"
+    assert second == [], "a figure already shown must not be emitted again"
+    assert shown == {"FIG-1"}
 
 
 class TestHierarchicalRendering:
@@ -787,6 +996,155 @@ class TestSubsectionRouting:
         assert sec_pos < sec_content_pos < subsec_pos
 
 
+class TestChapterBackMatterOnce:
+    """A chapter's derivation and problems render once, at the chapter's end.
+
+    The records are keyed by chapter, but a chapter with several academic
+    sections calls the renderer once per section. Before the fix the derivation,
+    the worked problem and the practice set repeated after every section and the
+    equation label was multiply defined.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _setup(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("urllib.request.urlopen", _explode)
+        self.session, self.root = _project(tmp_path)
+        dispatch(
+            "studium_blueprint_store",
+            {"sections": [{"id": "ch1", "title": "Chapter One"}]},
+            session=self.session,
+        )
+        dispatch(
+            "studium_academic_blueprint_store",
+            {
+                "profile_key": "ADVANCED_UNDERGRADUATE",
+                "subject": "Test",
+                "parts": [
+                    {
+                        "id": "p1",
+                        "title": "Part One",
+                        "chapters": [
+                            {
+                                "id": "ch1",
+                                "title": "Chapter One",
+                                "learning_objectives": ["lo"],
+                                "sections": [
+                                    {
+                                        "id": "ch1.sec1",
+                                        "title": "Sec One",
+                                        "concepts": [
+                                            {
+                                                "id": "c1",
+                                                "title": "C1",
+                                                "learning_objectives": ["lo1"],
+                                                "depth": "ADVANCED_UNDERGRADUATE",
+                                                "exercises": 1,
+                                            }
+                                        ],
+                                    },
+                                    {
+                                        "id": "ch1.sec2",
+                                        "title": "Sec Two",
+                                        "concepts": [
+                                            {
+                                                "id": "c2",
+                                                "title": "C2",
+                                                "learning_objectives": ["lo2"],
+                                                "depth": "ADVANCED_UNDERGRADUATE",
+                                                "exercises": 1,
+                                            }
+                                        ],
+                                    },
+                                ],
+                            }
+                        ],
+                    }
+                ],
+            },
+            session=self.session,
+        )
+        excerpts = _excerpts(self.session)
+        for subsection in ("ch1.sec1", "ch1.sec2"):
+            dispatch(
+                "studium_paragraph_record",
+                {
+                    "section": "ch1",
+                    "subsection": subsection,
+                    "text": f"Explicación almacenada para {subsection} con suficiente longitud.",
+                    "excerpts": excerpts,
+                },
+                session=self.session,
+            )
+        dispatch(
+            "studium_derivation_record",
+            {
+                "section": "ch1",
+                "name": "Ecuación de prueba",
+                "equation": r"\(p = \rho g h\)",
+                "equation_id": "eq-prueba",
+                "steps": ["Point of departure", "Integrate"],
+                "variables": {"p": {"meaning": "presión", "units": "Pa"}},
+            },
+            session=self.session,
+        )
+        from studium.authoring.computation import evaluate
+
+        expression = "2*3*4"
+        expected = f"{float(evaluate(expression)):.12g}"
+        dispatch(
+            "studium_computation_check",
+            {"expression": expression, "result": expected, "section": "ch1"},
+            session=self.session,
+        )
+        dispatch(
+            "studium_problem_record",
+            {
+                "section": "ch1",
+                "prompt": "Calcula el caso resuelto.",
+                "expected": expected,
+                "excerpts": excerpts,
+                "role": "worked",
+            },
+            session=self.session,
+        )
+        dispatch(
+            "studium_problem_record",
+            {
+                "section": "ch1",
+                "prompt": "Resuelve el caso de práctica.",
+                "expected": expected,
+                "excerpts": excerpts,
+                "role": "practice",
+                "difficulty": "INTERMEDIATE",
+                "learning_objectives": ["c1"],
+            },
+            session=self.session,
+        )
+        rendered = render_draft(self.root)
+        assert rendered["status"] in ("rendered", "compiler_missing", "incomplete"), rendered
+        self.tex = (self.root / "latex" / "draft.tex").read_text(encoding="utf-8")
+
+    def test_two_academic_sections_present(self):
+        assert r"\section{Sec One}" in self.tex
+        assert r"\section{Sec Two}" in self.tex
+
+    def test_derivation_box_appears_once(self):
+        assert self.tex.count("title={Derivaciones}") == 1
+
+    def test_equation_label_is_not_multiply_defined(self):
+        assert self.tex.count(r"\label{eq:eq-prueba}") == 1
+
+    def test_worked_and_practice_appear_once(self):
+        main = self.tex[: self.tex.index(r"\appendix")] if r"\appendix" in self.tex else self.tex
+        assert main.count("Calcula el caso resuelto.") == 1
+        assert main.count("Resuelve el caso de práctica.") == 1
+
+    def test_back_matter_comes_after_the_last_section(self):
+        sec_two = self.tex.index(r"\section{Sec Two}")
+        derivation = self.tex.index("title={Derivaciones}")
+        assert sec_two < derivation
+
+
 # ---------------------------------------------------------------------------
 # Integration: study plan with academic blueprint
 # ---------------------------------------------------------------------------
@@ -982,3 +1340,231 @@ class TestDerivationStepMath:
 
     def test_equation_label_present(self):
         assert r"\label{eq:eq-hydro}" in self.tex
+
+
+# ---------------------------------------------------------------------------
+# Unit: figure numbering and in-text references
+# ---------------------------------------------------------------------------
+
+
+def test_figure_caption_prefix_numbers_and_labels():
+    from studium.authoring.render import _figure_caption_prefix
+
+    prefix = _figure_caption_prefix({"id": "FIG-3", "key": "flujo"}, {"figure_ref": "figura"})
+    assert r"\refstepcounter{studiumfigure}" in prefix
+    assert r"\label{fig:flujo}" in prefix
+    assert r"Figura~\thestudiumfigure." in prefix
+
+
+def test_figure_caption_prefix_falls_back_to_the_id():
+    from studium.authoring.render import _figure_caption_prefix
+
+    prefix = _figure_caption_prefix({"id": "FIG-3"}, {"figure_ref": "figura"})
+    assert r"\label{fig:fig-3}" in prefix
+
+
+def test_figure_caption_prefix_speaks_the_book_language():
+    from studium.authoring.render import _figure_caption_prefix
+
+    prefix = _figure_caption_prefix({"id": "FIG-1", "key": "x"}, {"figure_ref": "Abbildung"})
+    assert "Abbildung~" in prefix
+
+
+def test_figure_caption_prefix_empty_without_key_or_id():
+    from studium.authoring.render import _figure_caption_prefix
+
+    assert _figure_caption_prefix({}, {"figure_ref": "figura"}) == ""
+
+
+def test_emit_prose_resolves_figure_reference():
+    lines = emit_prose("Como muestra la {{fig:flujo}}, la velocidad cae.", figure_ref="figura")
+    joined = "\n".join(lines)
+    assert r"figura~\ref{fig:flujo}" in joined
+    assert "{{fig:" not in joined
+
+
+def test_emit_prose_leaves_marker_literal_without_label():
+    lines = emit_prose("Ver {{fig:flujo}}.")
+    joined = "\n".join(lines)
+    assert r"\{\{" in joined
+    assert r"\ref" not in joined
+
+
+def test_figure_reference_key_is_lowercased_for_the_label():
+    from studium.authoring.render import _figure_label_key
+
+    assert _figure_label_key("Flujo-Tuberia") == "flujo-tuberia"
+    assert _figure_label_key("FIG-0001") == "fig-0001"
+
+
+# ---------------------------------------------------------------------------
+# Integration: figure keys, unresolved references, uncited figures
+# ---------------------------------------------------------------------------
+
+
+def _figure_project(tmp_path, monkeypatch):
+    monkeypatch.setattr("urllib.request.urlopen", _explode)
+    session, root = _project(tmp_path)
+    dispatch(
+        "studium_blueprint_store",
+        {"sections": [{"id": "ch", "title": "Chapter"}]},
+        session=session,
+    )
+    excerpts = _excerpts(session)
+    dispatch(
+        "studium_paragraph_record",
+        {
+            "section": "ch",
+            "text": "Como se ve en la {{fig:flujo}}, la presión sube con la profundidad.",
+            "excerpts": excerpts,
+        },
+        session=session,
+    )
+    return session, root, excerpts
+
+
+class TestFigureReferences:
+    def test_a_key_is_stored_and_reported(self, tmp_path, monkeypatch):
+        session, _root, excerpts = _figure_project(tmp_path, monkeypatch)
+        created = dispatch(
+            "studium_figure_record",
+            {
+                "section": "ch",
+                "caption": "Perfil de presión.",
+                "kind": "tikz",
+                "source": r"\draw (0,0) -- (1,1);",
+                "excerpts": excerpts,
+                "key": "flujo",
+            },
+            session=session,
+        )
+        assert created["status"] == "recorded", created
+        assert created["figure"]["key"] == "flujo"
+
+    def test_invalid_key_is_rejected(self, tmp_path, monkeypatch):
+        session, _root, excerpts = _figure_project(tmp_path, monkeypatch)
+        bad = dispatch(
+            "studium_figure_record",
+            {
+                "section": "ch",
+                "caption": "Perfil.",
+                "kind": "tikz",
+                "source": r"\draw (0,0) -- (1,1);",
+                "excerpts": excerpts,
+                "key": "Not A Slug",
+            },
+            session=session,
+        )
+        assert bad["status"] == "figure.key_invalid"
+
+    def test_duplicate_key_is_rejected(self, tmp_path, monkeypatch):
+        session, _root, excerpts = _figure_project(tmp_path, monkeypatch)
+        first = dispatch(
+            "studium_figure_record",
+            {"section": "ch", "caption": "A.", "kind": "tikz", "source": r"\draw (0,0)--(1,1);", "excerpts": excerpts, "key": "flujo"},
+            session=session,
+        )
+        assert first["status"] == "recorded", first
+        second = dispatch(
+            "studium_figure_record",
+            {"section": "ch", "caption": "B.", "kind": "tikz", "source": r"\draw (0,0)--(2,2);", "excerpts": excerpts, "key": "flujo"},
+            session=session,
+        )
+        assert second["status"] == "figure.key_taken"
+
+    def test_missing_reference_is_reported(self, tmp_path, monkeypatch):
+        from studium.authoring.figures import unresolved_figure_references
+
+        _session, root, _ = _figure_project(tmp_path, monkeypatch)
+        items = unresolved_figure_references(root)
+        assert [item["key"] for item in items] == ["flujo"]
+        assert items[0]["reason"] == "missing"
+
+    def test_unchecked_reference_is_reported(self, tmp_path, monkeypatch):
+        from studium.authoring.figures import unresolved_figure_references
+
+        session, root, excerpts = _figure_project(tmp_path, monkeypatch)
+        dispatch(
+            "studium_figure_record",
+            {"section": "ch", "caption": "Perfil.", "kind": "tikz", "source": r"\draw (0,0)--(1,1);", "excerpts": excerpts, "key": "flujo"},
+            session=session,
+        )
+        items = unresolved_figure_references(root)
+        assert [item["reason"] for item in items] == ["unchecked"]
+
+    def test_reference_resolves_after_record_with_key(self, tmp_path, monkeypatch):
+        from studium.authoring.figures import figure_reference_map, referenced_figure_keys
+
+        session, root, excerpts = _figure_project(tmp_path, monkeypatch)
+        dispatch(
+            "studium_figure_record",
+            {"section": "ch", "caption": "Perfil.", "kind": "tikz", "source": r"\draw (0,0)--(1,1);", "excerpts": excerpts, "key": "flujo"},
+            session=session,
+        )
+        assert referenced_figure_keys(root) == ["flujo"]
+        assert "flujo" in figure_reference_map(root)
+
+
+class TestFigureRendering:
+    """The rendered LaTeX numbers the figure and links the reference to it."""
+
+    @pytest.fixture(autouse=True)
+    def _setup(self, tmp_path, monkeypatch):
+        from studium.authoring import render as render_mod
+
+        self.session, self.root, excerpts = _figure_project(tmp_path, monkeypatch)
+        dispatch(
+            "studium_figure_record",
+            {
+                "section": "ch",
+                "caption": "Perfil de presión con la profundidad.",
+                "kind": "tikz",
+                "source": r"\draw (0,0) -- (2,2);",
+                "excerpts": excerpts,
+                "key": "flujo",
+            },
+            session=self.session,
+        )
+        # Force the drawing to count as rendered without invoking pdflatex.
+        monkeypatch.setattr(render_mod, "_checked_output", lambda root, record: "figures/FIG-x/figure.pdf")
+        rendered = render_draft(self.root)
+        assert rendered["status"] in ("rendered", "compiler_missing", "incomplete"), rendered
+        self.tex = (self.root / "latex" / "draft.tex").read_text(encoding="utf-8")
+
+    def test_counter_declared_in_preamble(self):
+        assert r"\newcounter{studiumfigure}" in self.tex
+
+    def test_figure_label_uses_the_stable_key(self):
+        assert r"\label{fig:flujo}" in self.tex
+
+    def test_prose_reference_is_numbered_by_latex(self):
+        assert r"figura~\ref{fig:flujo}" in self.tex
+
+    def test_caption_carries_the_localized_number(self):
+        assert r"Figura~\thestudiumfigure." in self.tex
+
+
+
+
+def test_mixed_ascii_subscript_and_unicode_power():
+    from studium.authoring.render import render_text_run
+
+    cases = [
+        ("V_entrada²", "V_{entrada}^{2}"),
+        ("V_salida³", "V_{salida}^{3}"),
+        ("V_entrada⁻²", "V_{entrada}^{-2}"),
+    ]
+
+    for expression, expected in cases:
+        rendered = render_text_run(
+            "La expresión es " + expression + " y continúa."
+        )
+        assert expected in rendered, rendered
+
+
+def test_plain_ascii_subscript_remains_unchanged():
+    from studium.authoring.render import render_text_run
+
+    rendered = render_text_run("p_man = ρ g h")
+
+    assert "p_man" in rendered

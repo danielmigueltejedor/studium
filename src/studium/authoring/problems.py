@@ -1117,10 +1117,16 @@ def _solution(value: object) -> tuple[dict[str, object] | None, dict[str, object
         normalized["model"] = model
     if steps:
         normalized["steps"] = steps
+    # Preserve provenance when an already-normalized solution is processed again.
+    # Provenance is metadata, not proof of mathematical correctness.
+    if value.get("substitution_origin") == "generated" and "substitution" in normalized:
+        normalized["substitution_origin"] = "generated"
+
     if "substitution" not in normalized and model and given:
         computed = _auto_substitution(model, given)
         if computed is not None:
             normalized["substitution"] = computed
+            normalized["substitution_origin"] = "generated"
     if not normalized:
         return None, _error("mcp.invalid_input", "solution has no usable field")
     return normalized, None

@@ -19,6 +19,8 @@ from studium.authoring.contradictions import open_contradictions
 from studium.authoring.coverage import source_coverage
 from studium.authoring.depth.planner import depth_plan_status
 from studium.authoring.excerpts import excerpts_by_id
+from studium.authoring.figures import referenced_figure_keys, uncited_figures, unresolved_figure_references
+from studium.authoring.grounding import grounding_summary
 from studium.authoring.notation import notation_registry
 from studium.authoring.paragraphs import supported_paragraphs
 from studium.authoring.problems import problem_result_current
@@ -63,11 +65,20 @@ def quality_report(root: Path) -> dict[str, object]:
         derivation_statuses[status] = derivation_statuses.get(status, 0) + 1
     figures = fold_by_id(root / FIGURES)
     figures_checked = [row for row in figures if row.get("status") == "checked"]
+    exercise_difficulties: dict[str, int] = {}
+    for row in problems:
+        key = str(row.get("difficulty") or "UNSPECIFIED")
+        exercise_difficulties[key] = exercise_difficulties.get(key, 0) + 1
     words = sum(len(str(row.get("text") or "").split()) for row in paragraphs)
     completeness = chapter_completeness(root)
     coverage = source_coverage(root)
     consistency = consistency_report(root)
     plan = depth_plan_status(root)
+    figures_planned = _planned_figures(plan)
+    figure_references = referenced_figure_keys(root)
+    uncited = uncited_figures(root)
+    unresolved = unresolved_figure_references(root)
+    math_grounding = grounding_summary(root)
 
     limitations: list[str] = []
     limitations.append(
@@ -90,6 +101,21 @@ def quality_report(root: Path) -> dict[str, object]:
     ]
     if unverified:
         limitations.append(f"{len(unverified)} derivations carry no deterministic check result")
+    if figures_planned and len(figures_checked) < figures_planned:
+        limitations.append(
+            f"{len(figures_checked)} of {figures_planned} planned figures are recorded and checked"
+        )
+    if unresolved:
+        limitations.append(
+            f"{len(unresolved)} in-text figure references do not resolve to a checked figure"
+        )
+    if uncited:
+        limitations.append(f"{len(uncited)} checked figures are not referenced from the prose")
+    ungrounded_formulas = math_grounding.get("formulas_ungrounded")
+    if isinstance(ungrounded_formulas, int) and ungrounded_formulas > 0:
+        limitations.append(
+            f"{ungrounded_formulas} prose formulas are not grounded by a source, a checked derivation, or a replay"
+        )
 
     return {
         "status": "ok",
@@ -117,6 +143,9 @@ def quality_report(root: Path) -> dict[str, object]:
             "derivations": len(derivations),
             "figures": len(figures),
             "figures_checked": len(figures_checked),
+            "figures_planned": figures_planned,
+            "figure_references": len(figure_references),
+            "figures_uncited": len(uncited),
             "notation_entries": len(fold_by_id(root / NOTATION)),
             "notation_symbols": len(notation_registry(root)),
             "terminology_entries": len(fold_by_id(root / TERMINOLOGY)),
@@ -125,6 +154,8 @@ def quality_report(root: Path) -> dict[str, object]:
             "open_contradictions": len(contradictions),
         },
         "derivation_statuses": derivation_statuses,
+        "exercise_difficulties": exercise_difficulties,
+        "math_grounding": math_grounding,
         "completeness": completeness.get("summary"),
         "coverage": coverage.get("totals"),
         "consistent": consistency.get("consistent"),
@@ -163,6 +194,24 @@ def _section_coverage(
         "academic_sections_total": total_academic_sections,
         "academic_sections_covered": covered_academic_sections,
     }
+
+
+def _planned_figures(plan: dict[str, object]) -> int:
+    """Total figure target the stored depth plan declares, or 0 without a plan."""
+
+    inner = plan.get("plan")
+    if not isinstance(inner, dict):
+        return 0
+    chapters = inner.get("chapters")
+    if not isinstance(chapters, list):
+        return 0
+    total = 0
+    for chapter in chapters:
+        if isinstance(chapter, dict):
+            value = chapter.get("figures")
+            if isinstance(value, int) and not isinstance(value, bool):
+                total += value
+    return total
 
 
 def _statuses(derivations: list[dict[str, object]], computations: list[dict[str, object]], problems: list[dict[str, object]]) -> list[str]:

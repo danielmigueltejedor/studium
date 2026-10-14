@@ -327,7 +327,9 @@ def test_formula_missing_from_the_excerpt_and_not_replayed_is_rejected(tmp_path,
         session=session,
     )
     assert refused["status"] == "audit.rejected"
-    assert refused["message"].startswith("the formula is not in the cited excerpts and was not replayed: ")
+    assert refused["message"].startswith(
+        "the formula is not grounded by a cited excerpt, a replayed example, or a checked derivation: "
+    )
     assert "F = C × 9/5 + 32" in refused["message"]
     assert "du/dx + dv/dy + dw/dz = 0" in refused["message"]
     assert refused["prose_added"] is False

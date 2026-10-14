@@ -28,6 +28,7 @@ from studium.authoring.blueprint import current_sections
 from studium.authoring.computation import list_computations
 from studium.authoring.derivations import derivations_for_section
 from studium.authoring.excerpts import excerpts_by_id
+from studium.authoring.figures import figure_reference_map, uncited_figures, unresolved_figure_references
 from studium.authoring.languages import (
     BookLanguage,
     active_language,
@@ -44,9 +45,11 @@ from studium.authoring.paragraphs import supported_paragraphs, supported_section
 from studium.authoring.problems import REPRODUCIBILITY_TEXT, RUST_NOT_WORKED_PROBLEM, problem_result_current
 from studium.authoring.section_blocks import blocked_ids, blocked_sections, mark_blocked, offers_for, remember_offer
 from studium.authoring.support import draft_source_usable
+from studium.domain.enums import ProjectState
 from studium.domain.profiles import BOOK_TOPIC, DepthThresholds, depth_thresholds
 from studium.research.course_documents import list_course_documents
 from studium.research.public_sources import license_forbids_use
+from studium.state.gates import COURSE_JSON, gate_for
 from studium.storage.init_project import book_kind, load_project_toml, load_state
 from studium.storage.init_project import domain_profile as _profile
 from studium.storage.records import (
@@ -55,6 +58,7 @@ from studium.storage.records import (
     CLAIMS,
     COMPUTATIONS,
     CONTRADICTIONS,
+    COURSE_CANDIDATES,
     EXCERPTS,
     FIGURES,
     PARAGRAPHS,
@@ -137,13 +141,21 @@ def book_next(root: Path) -> dict[str, object]:
 
 def _book_next(root: Path) -> dict[str, object]:
     state = load_state(root)
-    if book_kind(root) != BOOK_TOPIC and not _course_documents(root):
-        return _step(
-            state,
-            "studium_course_document_record",
-            {},
-            "Open the official course document and record its title and url.",
-        )
+    if book_kind(root) != BOOK_TOPIC:
+        if not _course_documents(root):
+            return _step(
+                state,
+                "studium_course_document_record",
+                {},
+                "Open the official course document and record its title and url.",
+            )
+        if _course_transition_pending(root, state):
+            return _step(
+                state,
+                "studium_course_recorded",
+                {},
+                "Apply course_recorded now the official course document is stored, then continue to source discovery.",
+            )
     attached = _known_source_file(root, state)
     if attached is not None:
         return _step(
@@ -261,6 +273,9 @@ def _book_next(root: Path) -> dict[str, object]:
             return _unwritten_step(state, root, section, _excerpt_for_section(root, section["id"]))
         if _explanation_words(root, section["id"]) < _thresholds(root).min_explanation_words:
             return _explanation_step(state, root, section)
+    reference_step = _pending_figure_reference(state, root)
+    if reference_step is not None:
+        return reference_step
     unchecked_deriv = _pending_derivation_check(root, sections)
     if unchecked_deriv is not None:
         return _step(
@@ -314,6 +329,14 @@ def _book_next(root: Path) -> dict[str, object]:
     unfinished = _unfinished_step(state, root, sections)
     if unfinished is not None:
         return unfinished
+    if not _review_passed(root):
+        return _step(
+            state,
+            "studium_book_review",
+            {},
+            _review_reason(root),
+            blocked=blocked_sections(root),
+        )
     if not _draft_is_current(root):
         return _render_step(state, root, sections)
     return _step(
@@ -554,6 +577,20 @@ def _unwritten_step(
     )
 
 
+def _render_reason(root: Path) -> str:
+    """The render step's message, naming any checked figure that no prose cites."""
+
+    reason = "Render the DRAFT once. Do not stop mid-book for a preview. Do not request release."
+    uncited = uncited_figures(root)
+    if uncited:
+        keys = sorted(str(record.get("key") or record.get("id")) for record in uncited)
+        reason += (
+            f" {len(uncited)} checked figure(s) have no reference from the prose ({', '.join(keys)}); "
+            "cite each with a {{fig:key}} marker from a paragraph, or remove the figure."
+        )
+    return reason
+
+
 def _render_step(
     state: dict[str, object],
     root: Path,
@@ -568,7 +605,7 @@ def _render_step(
         state,
         "studium_render",
         {},
-        "Render the DRAFT once. Do not stop mid-book for a preview. Do not request release.",
+        _render_reason(root),
         blocked=blocked_sections(root),
     )
 
@@ -738,6 +775,63 @@ def _course_documents(root: Path) -> bool:
     listed = list_course_documents(root)
     documents = listed.get("documents")
     return isinstance(documents, list) and len(documents) > 0
+
+
+def _course_transition_pending(root: Path, state: dict[str, object]) -> bool:
+    """True while a course book has not yet left ``COURSE_DISCOVERY``.
+
+    The state machine only advances on ``course_recorded``. Offering that step
+    here keeps the project state coherent with the guided flow: a draft is
+    never authored while the project still claims to be discovering the course.
+    It is offered only when the ``course_json`` gate already passes, so the
+    client never loops on a transition that cannot apply.
+    """
+
+    if state.get("state") != ProjectState.COURSE_DISCOVERY.value:
+        return False
+    course = load_project_toml(root).get("course")
+    gate = gate_for(
+        COURSE_JSON,
+        course if isinstance(course, dict) else None,
+        fold_by_id(root / COURSE_CANDIDATES),
+    )
+    return gate.ok
+
+
+def _edition_review(root: Path) -> dict[str, object] | None:
+    """This edition's stored review, or ``None`` when it is absent or stale."""
+
+    record = next((item for item in fold_by_id(root / REVIEWS) if item.get("id") == "edition"), None)
+    if isinstance(record, dict) and record.get("edition") == review_edition(root):
+        return record
+    return None
+
+
+def _review_passed(root: Path) -> bool:
+    """True when this edition's stored review passed ``audit_passed``.
+
+    ``book_next`` must not render an edition whose review is missing, stale, or
+    failed: an open contradiction is not re-checked later in the flow, so
+    without this guard the draft could be generated after a failed review.
+    """
+
+    record = _edition_review(root)
+    return isinstance(record, dict) and record.get("audit_passed") is True
+
+
+def _review_reason(root: Path) -> str:
+    """The review step's reason, naming a failed review's blockers when known."""
+
+    record = _edition_review(root)
+    if isinstance(record, dict):
+        reasons = record.get("reasons")
+        if isinstance(reasons, list) and reasons:
+            return (
+                "The last review did not pass audit_passed: "
+                + "; ".join(str(reason) for reason in reasons)
+                + ". Resolve the blockers, then review again before the draft."
+            )
+    return "Review this edition. audit_passed does not release the book."
 
 
 def _known_source_file(root: Path, state: dict[str, object]) -> str | None:
@@ -1342,6 +1436,46 @@ def _pending_derivation_check(
                 if isinstance(identifier, str):
                     return {"id": identifier, "section": section["id"]}
     return None
+
+
+def _pending_figure_reference(
+    state: dict[str, object],
+    root: Path,
+) -> dict[str, object] | None:
+    """A prose figure reference that names no stored, checked figure.
+
+    Return the concrete fix: store the missing figure, or rerun a stored but
+    unchecked one. The prose already names the key, so the agent knows which.
+    """
+
+    unresolved = unresolved_figure_references(root)
+    if not unresolved:
+        return None
+    item = unresolved[0]
+    paragraph = item["paragraph"] or "a paragraph"
+    if item["reason"] == "unchecked":
+        target = figure_reference_map(root).get(item["key"].lower())
+        identifier = target.get("id") if isinstance(target, dict) else None
+        return _step(
+            state,
+            "studium_figure_check",
+            {"id": identifier} if isinstance(identifier, str) else {},
+            (
+                f"{paragraph} references figure {item['key']}, which is stored but not checked. "
+                "Run its source until the drawing renders."
+            ),
+            blocked=blocked_sections(root),
+        )
+    return _step(
+        state,
+        "studium_figure_record",
+        {},
+        (
+            f"{paragraph} references figure {item['key']}, which is not stored. "
+            f"Store a figure with key {item['key']} and the excerpts it illustrates, or remove the reference."
+        ),
+        blocked=blocked_sections(root),
+    )
 
 
 def _pending_audit(root: Path) -> str | None:

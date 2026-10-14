@@ -94,6 +94,49 @@ def test_passing_rerun_checks_the_figure(tmp_path, monkeypatch):
     assert "urlopen(" not in source
 
 
+def test_tikz_wrapper_is_removed_before_checking(tmp_path, monkeypatch):
+    """Regression: a pasted full tikzpicture is accepted, its wrapper stripped.
+
+    The server adds the tikzpicture environment itself, so an author who pastes a
+    complete picture used to get a misleading "must not fetch a URL" error for the
+    ``\\end{tikzpicture}`` the server was going to add.
+    """
+
+    monkeypatch.setattr("urllib.request.urlopen", _explode)
+    session, root = _topic(tmp_path)
+    excerpt_id = _ready(session)
+    wrapped = "\\begin{tikzpicture}\n\\draw (0,0) -- (1,1);\n\\end{tikzpicture}"
+    recorded = dispatch(
+        "studium_figure_record",
+        {
+            "section": "tema-1",
+            "caption": "A drawn line.",
+            "kind": "tikz",
+            "source": wrapped,
+            "excerpts": [excerpt_id],
+        },
+        session=session,
+    )
+    assert recorded["status"] == "recorded", recorded
+    stored = json.loads((root / "figures" / "figures.jsonl").read_text(encoding="utf-8").splitlines()[-1])
+    assert "\\begin{tikzpicture}" not in stored["source"]
+    assert "\\end{tikzpicture}" not in stored["source"]
+    assert "\\draw (0,0) -- (1,1);" in stored["source"]
+
+    remote = dispatch(
+        "studium_figure_record",
+        {
+            "section": "tema-1",
+            "caption": "A remote image.",
+            "kind": "tikz",
+            "source": "\\begin{tikzpicture}\n\\node at (0,0) {\\includegraphics{https://x}};\n\\end{tikzpicture}",
+            "excerpts": [excerpt_id],
+        },
+        session=session,
+    )
+    assert remote["status"] == "figure.source_forbidden"
+
+
 def test_failing_program_stays_unchecked(tmp_path, monkeypatch):
     monkeypatch.setattr("urllib.request.urlopen", _explode)
     session, root = _topic(tmp_path)

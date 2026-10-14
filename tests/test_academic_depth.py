@@ -196,6 +196,8 @@ def test_depth_plan_uses_the_scope_and_stores_the_plan(tmp_path, monkeypatch):
     assert planned["source"] == "academic_blueprint"
     assert planned["academic_depth"]["profile"] == "ADVANCED_UNDERGRADUATE"
     assert planned["length"]["estimate"] > 0
+    assert planned["curriculum"]["figures"] > 0
+    assert all(chapter["figures"] >= 1 for chapter in planned["chapters"])
     assert planned["validation"]
 
     status = dispatch("studium_depth_plan_status", {}, session=session)
@@ -299,6 +301,85 @@ def test_derivation_checks_combine_into_independent_verification(tmp_path, monke
     assert listed["derivations"][0]["id"] == derivation_id
 
 
+def test_numeric_and_dimensional_agreement_is_not_independent_proof(tmp_path, monkeypatch):
+    """Numeric substitution plus dimensional consistency is corroboration.
+
+    Neither check proves the identity, so the combined status must stay at the
+    strongest single method rather than claiming INDEPENDENTLY_VERIFIED.
+    """
+    monkeypatch.setattr("urllib.request.urlopen", _explode)
+    session, _root = _project(tmp_path)
+    _blueprint(session, [{"id": "hidrostatica", "title": "Presión hidrostática"}])
+    derivation_id = _torricelli(session)
+
+    checked = dispatch(
+        "studium_derivation_check",
+        {
+            "id": derivation_id,
+            "numeric": {
+                "expression": "sqrt(2*g*h)",
+                "values": {"g": 9.81, "h": 4.905},
+                "claimed": 9.81,
+            },
+            "dimensions": {
+                "expression": "sqrt(g*h)",
+                "symbol_units": {"g": "m/s^2", "h": "m"},
+                "expected_unit": "m/s",
+            },
+        },
+        session=session,
+    )
+    assert checked["status"] == "checked", checked
+    assert checked["verification_status"] != "INDEPENDENTLY_VERIFIED"
+    assert checked["verification_status"] == "DIMENSIONALLY_VERIFIED"
+    methods = {check["method"] for check in checked["derivation"]["verification"]["checks"]}
+    assert methods == {"numeric_substitution", "dimensional"}
+
+
+def test_references_validation_messages_are_actionable(tmp_path, monkeypatch):
+    monkeypatch.setattr("urllib.request.urlopen", _explode)
+    session, _root = _project(tmp_path)
+    _blueprint(session, [{"id": "hidrostatica", "title": "Presión hidrostática"}])
+    base = {
+        "section": "hidrostatica",
+        "name": "Torricelli",
+        "equation": r"\(V = \sqrt{2gh}\)",
+    }
+
+    not_object = dispatch(
+        "studium_derivation_record", {**base, "references": ["EVD-0001"]}, session=session
+    )
+    assert not_object["status"] == "mcp.invalid_input"
+    assert '{"excerpts"' in not_object["message"]
+    assert "a list of 1 item" in not_object["message"]
+
+    unknown_key = dispatch(
+        "studium_derivation_record",
+        {**base, "references": {"excerpt_ids": ["EVD-0001"]}},
+        session=session,
+    )
+    assert unknown_key["status"] == "mcp.invalid_input"
+    assert "excerpt_ids" in unknown_key["message"]
+    assert "excerpts" in unknown_key["message"]
+
+    not_list = dispatch(
+        "studium_derivation_record",
+        {**base, "references": {"excerpts": "EVD-0001"}},
+        session=session,
+    )
+    assert not_list["status"] == "mcp.invalid_input"
+    assert "excerpts must be a list" in not_list["message"]
+    assert "a str" in not_list["message"]
+
+    unknown_excerpt = dispatch(
+        "studium_derivation_record",
+        {**base, "references": {"excerpts": ["EVD-9999"]}},
+        session=session,
+    )
+    assert unknown_excerpt["status"] == "derivation.excerpt_unknown"
+    assert "EVD-9999" in unknown_excerpt["message"]
+
+
 def test_a_failed_derivation_check_is_not_softened(tmp_path, monkeypatch):
     monkeypatch.setattr("urllib.request.urlopen", _explode)
     session, _root = _project(tmp_path)
@@ -359,6 +440,37 @@ def test_notation_and_terminology_reject_conflicts(tmp_path, monkeypatch):
     assert terminology["entries"][0]["term"] == "manómetro"
 
 
+def test_notation_empty_units_means_dimensionless(tmp_path, monkeypatch):
+    """An empty units string is dimensionless, not a contradictory error.
+
+    units is documented as optional; passing "" used to fail with "units is
+    required", forcing an author to know the magic word "adimensional".
+    """
+
+    monkeypatch.setattr("urllib.request.urlopen", _explode)
+    session, _root = _project(tmp_path)
+    _blueprint(session)
+
+    omitted = dispatch(
+        "studium_notation_record",
+        {"section": "hidrostatica", "symbol": "Re", "meaning": "número de Reynolds"},
+        session=session,
+    )
+    assert omitted["status"] == "recorded", omitted
+    assert not omitted["entry"].get("units")
+
+    blank = dispatch(
+        "studium_notation_record",
+        {"section": "hidrostatica", "symbol": "Fr", "meaning": "número de Froude", "units": ""},
+        session=session,
+    )
+    assert blank["status"] == "recorded", blank
+    assert not blank["entry"].get("units")
+
+    entries = {row["symbol"]: row for row in dispatch("studium_notation_list", {}, session=session)["entries"]}
+    assert set(entries) == {"Re", "Fr"}
+
+
 # --- completeness and consistency reports ------------------------------------
 
 
@@ -411,6 +523,66 @@ def test_expansion_completeness_and_consistency_reports(tmp_path, monkeypatch):
     assert unknown["status"] == "expansion.section_unknown"
 
 
+def test_depth_plan_declares_a_figure_target_for_every_chapter(tmp_path, monkeypatch):
+    monkeypatch.setattr("urllib.request.urlopen", _explode)
+    session, root = _project(tmp_path)
+    _blueprint(session)
+    _academic(session, concepts=("presion-estatica", "manometria"))
+
+    planned = dispatch("studium_depth_plan", {"academic_depth": "ADVANCED_UNDERGRADUATE"}, session=session)
+    assert planned["status"] == "planned", planned
+    assert planned["curriculum"]["figures"] > 0
+    assert planned["curriculum"]["figures"] == sum(chapter["figures"] for chapter in planned["chapters"])
+    assert all(chapter["figures"] >= 1 for chapter in planned["chapters"])
+    assert planned["length"]["breakdown"]["figures"] > 0
+
+    from studium.authoring.depth.planner import planned_figures_for_chapter
+
+    assert planned_figures_for_chapter(root, "hidrostatica") == planned["chapters"][0]["figures"]
+    assert planned_figures_for_chapter(root, "no-existe") == 0
+
+
+def test_a_stem_chapter_needs_a_checked_figure(tmp_path, monkeypatch):
+    monkeypatch.setattr("urllib.request.urlopen", _explode)
+    session, _root = _project(tmp_path)
+    _blueprint(session)
+    _academic(session, concepts=("presion-estatica", "manometria"))
+    excerpts = _excerpts(session)
+
+    def figures_check():
+        report = dispatch("studium_section_completeness", {"section": "hidrostatica"}, session=session)
+        checks = {check["id"]: check for check in report["sections"][0]["checks"]}
+        return checks["figures_checked"]
+
+    # A figure is an educational component: its absence is a real gap, not "not applicable".
+    assert figures_check()["applies"] is True
+    assert figures_check()["met"] is False
+
+    png = (
+        "89504e470d0a1a0a0000000d49484452000000010000000108000000003a7e9b55"
+        "0000000a49444154789c63f80f0001010100b138f6140000000049454e44ae426082"
+    )
+    plot = "import pathlib\n" f'pathlib.Path("figure.png").write_bytes(bytes.fromhex("{png}"))\n'
+    recorded = dispatch(
+        "studium_figure_record",
+        {
+            "section": "hidrostatica",
+            "caption": "A control volume drawn around a fluid element.",
+            "kind": "python",
+            "source": plot,
+            "excerpts": [excerpts[0]],
+        },
+        session=session,
+    )
+    assert recorded["status"] == "recorded", recorded
+    # Recorded but not yet re-run: the drawing still does not count.
+    assert figures_check()["met"] is False
+
+    checked = dispatch("studium_figure_check", {"id": recorded["figure"]["id"]}, session=session)
+    assert checked["status"] == "checked", checked
+    assert figures_check()["met"] is True
+
+
 def test_resume_packet_and_quality_report_are_honest(tmp_path, monkeypatch):
     monkeypatch.setattr("urllib.request.urlopen", _explode)
     session, _root = _project(tmp_path)
@@ -439,6 +611,9 @@ def test_resume_packet_and_quality_report_are_honest(tmp_path, monkeypatch):
     assert report["status"] == "ok"
     assert report["counts"]["derivations"] == 1
     assert report["derivation_statuses"] == {"UNVERIFIED": 1}
+    difficulties = report["exercise_difficulties"]
+    assert isinstance(difficulties, dict)
+    assert sum(difficulties.values()) == report["counts"]["problems"]
     assert any("ACADEMICALLY_REVIEWED" in item for item in report["limitations"])
 
 

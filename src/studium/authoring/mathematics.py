@@ -190,7 +190,8 @@ def substitution_latex(symbolic: str, values: dict[str, tuple[str, str]]) -> str
         if not symbol.isidentifier():
             raise MathError("substitution keys must be identifiers")
         tex_unit = unit_latex(unit)
-        replacement = str(number) if tex_unit == "1" else rf"{number}\,{tex_unit}"
+        atom = str(number) if tex_unit == "1" else rf"{number}\,{tex_unit}"
+        replacement = rf"\left({atom}\right)"
         names[symbol] = replacement
     symbol_names = {sympy.Symbol(key): value for key, value in names.items()}
     latex = sympy.latex(expression, symbol_names=symbol_names)
