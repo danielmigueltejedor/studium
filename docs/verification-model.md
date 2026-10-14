@@ -83,3 +83,9 @@ A stated result is read as rounded to its last written digit: `31.30` reproduces
 ### Replay limits
 
 Every intermediate and final value must be zero or have a magnitude between `1e-100` and `1e100`. Integer exponents up to `|1000|` are exact when the result stays in range; non-integer exponents and functions are floating point. A negative base with a non-integer exponent, `sqrt`/`log` of an out-of-domain argument, overflow and underflow are refused with a message naming the cause. `answer_check` values: `replayed`, `ambiguous_precision`, `mismatch`, `not_replayable`.
+
+## Equations in prose
+
+Grounding works on complete relations. Every `$…$`, `$$…$$`, `\(…\)` and `\[…\]` span is split at top-level separators (`\quad`, `, `, `;`, `\text{ … }`, `\\`) and relation operators, so `a = b = c` gives `a = b` and `b = c`; plain-text relations outside math spans are kept only when both sides are whole. A fragment such as `= -p` is never a statement, and a relation is never grounded because its text is a substring of a longer one.
+
+Each relation gets one status: `source` (a cited excerpt states the whole relation), `derivation` (the final equation or symbolic form of a derivation with a passing check), `example` (a replayed computation), `arithmetic` (a relation between plain numbers that holds at its written precision), `condition` (a value or condition such as `x = 0`), `derivation_step` (only an unchecked step of a derivation states it), `definition` (`\equiv`, `:=`), `approximation` (`\approx`), `not_checkable` (the relation parser cannot read it: bold vectors, integrals, operators), `ungrounded`, or `arithmetic_mismatch`. Only `ungrounded` (a relation the parser reads and nothing backs) and `arithmetic_mismatch` block an audit. The source-audit appendix prints the counts per paragraph and `studium_quality_report` reports them under `math_grounding.by_status`. A derivation step and a non-checkable relation are labelled, not counted as checked.

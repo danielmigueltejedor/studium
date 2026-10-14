@@ -26,6 +26,8 @@ from __future__ import annotations
 
 import json
 import re
+from fractions import Fraction
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, cast
 
@@ -186,6 +188,7 @@ def contains_formula(statement: str, body: str) -> bool:
     return bool(folded) and folded in _canon(body)
 
 
+@lru_cache(maxsize=8192)
 def equivalent_math(left: str, right: str) -> bool:
     """Compare algebraic relations on their common defined domain.
 
@@ -227,6 +230,7 @@ def equivalent_math(left: str, right: str) -> bool:
         return False
 
 
+@lru_cache(maxsize=4096)
 def _relation(equation: str):
     """Parse a restricted algebraic equality without evaluating Python code."""
     import ast
@@ -343,6 +347,9 @@ _GREEK = {
 }
 
 
+_GLYPHS = {0x00D7: "*", 0x00B7: "*", 0x22C5: "*", 0x2212: "-", 0x2013: "-", 0x00F7: "/"}
+
+
 def _latex_to_ascii(text: str) -> str:
     """A small ASCII spelling for a LaTeX relation, good enough for SymPy.
 
@@ -351,6 +358,7 @@ def _latex_to_ascii(text: str) -> str:
     """
 
     cleaned = text.replace(r"\left", "").replace(r"\right", "")
+    cleaned = cleaned.translate(_GLYPHS)
     cleaned = cleaned.replace(r"\,", "").replace(r"\!", "").replace(r"\;", "").replace(r"\:", "")
     cleaned = re.sub(r"\\frac\s*\{([^{}]*)\}\s*\{([^{}]*)\}", r"((\1)/(\2))", cleaned)
     # Accents become a suffix, so \dot{m} compares with a plain "mdot".
@@ -545,74 +553,359 @@ def validate_math(
     return None
 
 
-def classify(root: Path, record: dict[str, object], formula: str) -> frozenset[str]:
-    """How one formula in prose is grounded. An empty set means ungrounded."""
+#: Statuses a prose relation can have. Only the blocking ones stop an audit:
+#: a parseable claim nothing stores, and arithmetic that does not hold.
+GROUNDED_STATUSES = frozenset({"source", "derivation", "example"})
+BLOCKING_STATUSES = frozenset({"ungrounded", "arithmetic_mismatch"})
+FORMULA_STATUSES = (
+    "source",
+    "derivation",
+    "example",
+    "arithmetic",
+    "arithmetic_ambiguous",
+    "condition",
+    "derivation_step",
+    "definition",
+    "approximation",
+    "not_checkable",
+    "ungrounded",
+    "arithmetic_mismatch",
+)
 
-    kinds: set[str] = set()
-    stored = excerpts_by_id(root)
-    for body in record_excerpt_texts(record, stored):
-        if contains_formula(formula, body) or equivalent_math(formula, body):
-            kinds.add("source")
-    for computation in replayed_computations(root):
-        expression = computation.get("expression")
-        if isinstance(expression, str) and contains_formula(formula, expression):
-            kinds.add("example")
-    section = record.get("section")
-    for derivation in verified_derivations(root, section):
-        if any(contains_formula(formula, line) or equivalent_math(formula, line) for line in derivation_statements(derivation)):
-            kinds.add("derivation")
-    for entry in declared_math(record):
-        statement = entry.get("statement")
-        if not isinstance(statement, str):
+_SPAN = re.compile(r"\$\$(.+?)\$\$|\\\[(.+?)\\\]|\\\((.+?)\\\)|\$([^$]+)\$", re.S)
+_RELATION_OPS = re.compile(r"\\approx|\\simeq|\\equiv|:=|(?<![<>!\\])=")
+_OP_KINDS = {"=": "claim", "\\approx": "approximation", "\\simeq": "approximation", "\\equiv": "definition", ":=": "definition"}
+_TRAILING = " ,;.:"
+
+
+def math_statements(text: str) -> list[tuple[str, str]]:
+    """Every complete relation in a passage, as ``(kind, "lhs op rhs")``.
+
+    Math spans (``$..$``, ``$$..$$``, ``\\(..\\)``, ``\\[..\\]``) are split at their
+    top-level relation operators, so a chain ``a = b = c`` gives ``a = b`` and
+    ``b = c``. Outside math spans the plain-text detector is kept, but only for
+    relations with both sides present. ``kind`` is ``claim`` (``=``),
+    ``definition`` (``\\equiv``, ``:=``) or ``approximation`` (``\\approx``).
+    No fragment such as ``= -p`` is ever returned.
+    """
+
+    found: list[tuple[str, str]] = []
+    outside: list[str] = []
+    last = 0
+    for match in _SPAN.finditer(text):
+        outside.append(text[last : match.start()])
+        last = match.end()
+        body = next(group for group in match.groups() if group is not None)
+        for piece in _top_level_pieces(body):
+            parts, operators = _split_relations(piece)
+            for index, operator in enumerate(operators):
+                left = parts[index].strip().strip(_TRAILING).strip()
+                right = parts[index + 1].strip().strip(_TRAILING).strip()
+                if _complete_side(left, -1) and _complete_side(right, 1) and not _elided(left) and not _elided(right):
+                    found.append((_OP_KINDS[operator], f"{left} {operator} {right}"))
+    outside.append(text[last:])
+    for sentence in sentences(" ".join(outside)):
+        for formula in formulas(sentence):
+            left, _sign, right = formula.partition("=")
+            if _complete_side(left, -1) and _complete_side(right, 1):
+                found.append(("claim", formula))
+    return found
+
+
+_SEPARATORS = re.compile(r"\\q?quad\b|\\\\|&|;|,(?=\s|\\)|:(?=\s|\\)|\\(?:text|mbox|mathrm)\{[^{}]*\s[^{}]*\}")
+
+
+def _top_level_pieces(body: str) -> list[str]:
+    """Split a math span at top-level separators (``\\quad``, ``,\\ ``, ``;``, ``\\text{ y }``, ``\\\\``)."""
+
+    pieces: list[str] = []
+    depth = 0
+    last = 0
+    index = 0
+    while index < len(body):
+        character = body[index]
+        if character in "{(":
+            depth += 1
+        elif character in "})":
+            depth -= 1
+        elif depth == 0:
+            match = _SEPARATORS.match(body, index)
+            if match:
+                pieces.append(body[last:index])
+                last = index = match.end()
+                continue
+        index += 1
+    pieces.append(body[last:])
+    return [piece for piece in pieces if piece.strip()]
+
+
+def _split_relations(body: str) -> tuple[list[str], list[str]]:
+    parts: list[str] = []
+    operators: list[str] = []
+    depth = 0
+    last = 0
+    index = 0
+    while index < len(body):
+        character = body[index]
+        if character in "{(":
+            depth += 1
+        elif character in "})":
+            depth -= 1
+        elif depth == 0:
+            match = _RELATION_OPS.match(body, index)
+            if match:
+                parts.append(body[last:index])
+                operators.append(match.group(0))
+                last = index = match.end()
+                continue
+        index += 1
+    parts.append(body[last:])
+    return parts, operators
+
+
+def _complete_side(side: str, direction: int) -> bool:
+    """Both ends of a side are whole: no dangling operator on either end."""
+
+    compact = "".join(side.split())
+    if not compact:
+        return False
+    if compact[0] in "+*/^×·)=" or compact[-1] in "+-*/^×·(=":
+        return False
+    return not (direction < 0 and compact.endswith("\\"))
+
+
+def _elided(side: str) -> bool:
+    return any(mark in side for mark in ("\\ldots", "\\cdots", "\\dots", "..."))
+
+
+_ATOM = re.compile(r"[A-Za-z][A-Za-z0-9_]*'*|-?\d+(?:\.\d+)?")
+
+
+def _condition(statement: str) -> bool:
+    """A value or condition (``x = 0``, ``r = R``, ``U_0 = 50``), not a formula to ground.
+
+    Numbers in it are checked by the number rules of the audit, not here.
+    """
+
+    left, _sign, right = statement.partition("=")
+    sides = []
+    for side in (left, right):
+        number = _arithmetic_text(side)
+        text = number if number is not None else _latex_to_ascii(side).strip()
+        sides.append(text.strip("()"))
+    return all(_ATOM.fullmatch(side) for side in sides)
+
+
+class GroundingContext:
+    """What a relation may be grounded by, read once for many relations."""
+
+    def __init__(self, root: Path) -> None:
+        self.root = root
+        self.excerpts = excerpts_by_id(root)
+        self.computations = replayed_computations(root)
+        self._derivations: dict[str, list[dict[str, object]]] = {}
+
+    def derivations(self, section: object) -> list[dict[str, object]]:
+        key = section if isinstance(section, str) else ""
+        if key not in self._derivations:
+            self._derivations[key] = verified_derivations(self.root, section)
+        return self._derivations[key]
+
+
+def formula_statuses(
+    root: Path, record: dict[str, object], context: GroundingContext | None = None
+) -> list[tuple[str, str]]:
+    """Each complete relation the record states, with how it is grounded."""
+
+    loaded = context if context is not None else GroundingContext(root)
+    text_value = record.get("text")
+    text = text_value if isinstance(text_value, str) else ""
+    statuses: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for kind, statement in math_statements(text):
+        key = f"{kind}:{normalize_math(statement)}"
+        if key in seen:
             continue
-        if contains_formula(formula, statement) or equivalent_math(formula, statement):
-            kind = entry.get("kind")
-            if kind in MATH_KINDS:
-                kinds.add(str(kind))
-    return frozenset(kinds)
+        seen.add(key)
+        statuses.append((statement, _status(loaded, record, kind, statement)))
+    return statuses
+
+
+def _status(context: GroundingContext, record: dict[str, object], kind: str, statement: str) -> str:
+    if kind == "definition":
+        return "definition"
+    if kind == "approximation":
+        return "approximation"
+    arithmetic = _arithmetic_verdict(statement)
+    if arithmetic is not None:
+        return arithmetic
+    if _condition(statement):
+        return "condition"
+    for body in record_excerpt_texts(record, context.excerpts):
+        if _stated_in(statement, body):
+            return "source"
+    derivations = context.derivations(record.get("section"))
+    for derivation in derivations:
+        if any(_same_relation(statement, line) for line in _final_statements(derivation)):
+            return "derivation"
+    for computation in context.computations:
+        if _computation_states(computation, statement):
+            return "example"
+    for entry in declared_math(record):
+        declared = entry.get("statement")
+        if isinstance(declared, str) and _same_relation(statement, declared) and entry.get("kind") in MATH_KINDS:
+            return str(entry["kind"])
+    for derivation in derivations:
+        steps = derivation.get("steps_latex")
+        lines = [line for line in steps if isinstance(line, str)] if isinstance(steps, list) else []
+        if any(_same_relation(statement, line) for line in lines):
+            return "derivation_step"
+    return "ungrounded" if _relation(statement) is not None else "not_checkable"
+
+
+def _final_statements(derivation: dict[str, object]) -> list[str]:
+    """The equation a derivation check is about: the final equation and its symbolic form."""
+
+    lines: list[str] = []
+    equation = derivation.get("equation")
+    if isinstance(equation, str) and equation.strip():
+        lines.append(equation.strip())
+    symbolic = derivation.get("symbolic")
+    if isinstance(symbolic, str) and symbolic.strip():
+        lines.append(symbolic.strip() if "=" in symbolic else f"{symbolic.strip()} = 0")
+    return lines
+
+
+def _same_relation(statement: str, other: str) -> bool:
+    """The same complete relation: equal text up to notation, or symbolically equivalent."""
+
+    for _kind, candidate in math_statements(other if "$" in other or "\\(" in other else f"${other}$"):
+        if normalize_math(statement) == normalize_math(candidate) or _canon(statement) == _canon(candidate):
+            return True
+        if _relation(statement) is not None and _relation(candidate) is not None and equivalent_math(statement, candidate):
+            return True
+    return False
+
+
+def _stated_in(statement: str, body: str) -> bool:
+    """A cited excerpt states the whole relation, not a part of a longer one."""
+
+    if any(_same_relation(statement, candidate) for kind, candidate in math_statements(body) if kind == "claim"):
+        return True
+    needle = normalize_math(statement)
+    haystack = normalize_math(body)
+    start = haystack.find(needle)
+    while needle and start >= 0:
+        before = haystack[start - 1] if start > 0 else ""
+        after = haystack[start + len(needle)] if start + len(needle) < len(haystack) else ""
+        if not _operand(before) and not _operand(after):
+            return True
+        start = haystack.find(needle, start + 1)
+    return False
+
+
+def _operand(character: str) -> bool:
+    return bool(character) and (character.isalnum() or character in "_\\.+-*/^()=")
+
+
+def _computation_states(computation: dict[str, object], statement: str) -> bool:
+    expression = computation.get("expression")
+    result = computation.get("server_result")
+    if not isinstance(expression, str):
+        return False
+    if isinstance(result, str) and _same_relation(statement, f"{expression} = {result}"):
+        return True
+    left, _sign, right = statement.partition("=")
+    return normalize_math(_latex_to_ascii(left)) == normalize_math(expression) and _numbers_only(right)
+
+
+def _numbers_only(text: str) -> bool:
+    return _arithmetic_text(text) is not None and not re.search(r"[*/+^()]", _arithmetic_text(text) or "")
+
+
+def _arithmetic_text(side: str) -> str | None:
+    """A LaTeX side as plain arithmetic (decimal commas, thin-space groups), or None if it has symbols."""
+
+    text = side.replace("{,}", ".").replace("−", "-")
+    text = re.sub(r"(?<=\d)(?:\\,|\\;|\\:|\\!|~|\s)+(?=\d{3}(?!\d))", "", text)
+    text = text.replace(r"\left", "").replace(r"\right", "")
+    text = re.sub(r"\\[,;:!]", "", text)
+    text = text.replace(r"\cdot", "*").replace(r"\times", "*")
+    for _ in range(3):
+        text = re.sub(r"\\[dt]?frac\s*\{([^{}]*)\}\s*\{([^{}]*)\}", r"((\1)/(\2))", text)
+    text = text.replace("^", "**").replace("{", "(").replace("}", ")").strip()
+    if not text or re.search(r"[A-Za-z\\_]", text):
+        return None
+    # A typeset number in scientific notation is one value: 6.63×10^{-8}/1.0×10^{-5}
+    # divides two numbers, it does not multiply the quotient by 10^{-5}.
+    return re.sub(r"(\d+(?:\.\d+)?)\s*\*\s*10\s*\*\*\s*\(?\s*([+-]?\d+)\s*\)?", r"(\1e\2)", text)
+
+
+def _arithmetic_verdict(statement: str) -> str | None:
+    """``arithmetic`` / ``arithmetic_mismatch`` for a relation between plain numbers, else None."""
+
+    from studium.authoring.computation import ComputationError, evaluate, precision_verdict
+
+    left, sign, right = statement.partition("=")
+    if not sign:
+        return None
+    left_text, right_text = _arithmetic_text(left), _arithmetic_text(right)
+    if left_text is None or right_text is None:
+        return None
+    try:
+        if re.fullmatch(r"-?\d+(?:\.\d+)?", right_text.replace(" ", "")):
+            verdict = precision_verdict(right_text.replace(" ", ""), evaluate(left_text))
+        elif re.fullmatch(r"-?\d+(?:\.\d+)?", left_text.replace(" ", "")):
+            verdict = precision_verdict(left_text.replace(" ", ""), evaluate(right_text))
+        else:
+            first, second = evaluate(left_text), evaluate(right_text)
+            verdict = "agrees" if abs(first - second) <= abs(second) * Fraction(1, 10**12) else "disagrees"
+    except (ComputationError, ZeroDivisionError, OverflowError, ValueError):
+        return None
+    if verdict == "agrees":
+        return "arithmetic"
+    if verdict == "ambiguous":
+        return "arithmetic_ambiguous"
+    return "arithmetic_mismatch"
+
+
+def classify(root: Path, record: dict[str, object], formula: str) -> frozenset[str]:
+    """How one complete relation in prose is grounded. An empty set means not grounded.
+
+    Only a cited excerpt stating the whole relation, the final equation of a
+    checked derivation, a replayed computation, or a revalidated declaration
+    grounds it. A derivation step is not checked and does not ground.
+    """
+
+    status = _status(GroundingContext(root), record, "claim", formula)
+    return frozenset({status}) if status in GROUNDED_STATUSES else frozenset()
 
 
 def ungrounded_formulas(root: Path, record: dict[str, object]) -> list[str]:
-    """Formulas the record states that no source, derivation, or example grounds."""
+    """Relations that block an audit: a parseable claim nothing grounds, or arithmetic that does not hold."""
 
-    text_value = record.get("text")
-    text = text_value if isinstance(text_value, str) else ""
-    missing: list[str] = []
-    seen: set[str] = set()
-    for sentence in sentences(text):
-        for formula in formulas(sentence):
-            if classify(root, record, formula):
-                continue
-            key = normalize_math(formula)
-            if key in seen:
-                continue
-            seen.add(key)
-            missing.append(formula)
-    return missing
+    return [statement for statement, status in formula_statuses(root, record) if status in BLOCKING_STATUSES]
 
 
 def grounding_summary(root: Path) -> dict[str, object]:
-    """Count the prose formulas by grounding and the explicit declarations by kind."""
+    """Count the prose relations by status and the explicit declarations by kind."""
 
     from studium.authoring.paragraphs import supported_paragraphs
 
+    context = GroundingContext(root)
     by_kind: dict[str, int] = {"source": 0, "derivation": 0, "example": 0}
+    by_status: dict[str, int] = dict.fromkeys(FORMULA_STATUSES, 0)
     ungrounded = 0
     total = 0
     declared: dict[str, int] = {"source": 0, "derivation": 0, "example": 0}
     for record in supported_paragraphs(root):
-        text_value = record.get("text")
-        text = text_value if isinstance(text_value, str) else ""
-        for sentence in sentences(text):
-            for formula in formulas(sentence):
-                total += 1
-                kinds = classify(root, record, formula)
-                if not kinds:
-                    ungrounded += 1
-                    continue
-                for kind in kinds:
-                    if kind in by_kind:
-                        by_kind[kind] += 1
+        for _statement, status in formula_statuses(root, record, context):
+            total += 1
+            by_status[status] = by_status.get(status, 0) + 1
+            if status in by_kind:
+                by_kind[status] += 1
+            if status in BLOCKING_STATUSES:
+                ungrounded += 1
         for entry in declared_math(record):
             kind = entry.get("kind")
             if kind in declared:
@@ -626,6 +919,7 @@ def grounding_summary(root: Path) -> dict[str, object]:
         "formulas": total,
         "formulas_ungrounded": ungrounded,
         "by_kind": by_kind,
+        "by_status": by_status,
         "declared": declared,
         "checked_derivations": verified_derivations,
     }

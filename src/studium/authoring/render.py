@@ -15,6 +15,7 @@ from studium.authoring.blueprint import current_sections
 from studium.authoring.derivations import derivations_for_section
 from studium.authoring.excerpts import excerpts_by_id
 from studium.authoring.figures import FIGURE_REF, figures_in_section
+from studium.authoring.grounding import FORMULA_STATUSES, GroundingContext, formula_statuses
 from studium.authoring.languages import (
     INVALID_LANGUAGE,
     BookLanguage,
@@ -1595,7 +1596,7 @@ def _document(root: Path) -> str:
     lines.extend([r"\chapter{" + latex_escape(copy["solutions"]) + "}"])
     lines.extend(_solution_lines(root, copy, language))
     lines.extend([r"\chapter{" + latex_escape(copy["audit"]) + "}"])
-    lines.extend(_audit_lines(root, paragraphs, claims, titles, excerpts, sources, copy, kind, counts))
+    lines.extend(_audit_lines(root, paragraphs, claims, titles, excerpts, sources, copy, kind, counts, language))
     lines.extend(
         [
             r"\chapter{" + latex_escape(copy["study"]) + "}",
@@ -2812,6 +2813,60 @@ def _solution_lines(root: Path, copy: dict[str, str], language: BookLanguage) ->
     return lines
 
 
+_EQUATION_STATUS_LABELS: dict[str, dict[str, str]] = {
+    "spanish": {
+        "heading": "Ecuaciones",
+        "source": "citada en una fuente",
+        "derivation": "derivación comprobada",
+        "example": "ejemplo reproducido",
+        "arithmetic": "aritmética comprobada",
+        "arithmetic_ambiguous": "aritmética de precisión ambigua",
+        "condition": "valor o condición",
+        "derivation_step": "paso de derivación sin comprobar",
+        "definition": "definición",
+        "approximation": "aproximación",
+        "not_checkable": "no comprobable automáticamente",
+        "ungrounded": "sin respaldo",
+        "arithmetic_mismatch": "aritmética que no cuadra",
+    }
+}
+_EQUATION_STATUS_DEFAULTS = {
+    "heading": "Equations",
+    "source": "quoted by a source",
+    "derivation": "checked derivation",
+    "example": "replayed example",
+    "arithmetic": "arithmetic checked",
+    "arithmetic_ambiguous": "arithmetic of ambiguous precision",
+    "condition": "value or condition",
+    "derivation_step": "unchecked derivation step",
+    "definition": "definition",
+    "approximation": "approximation",
+    "not_checkable": "not machine-checkable",
+    "ungrounded": "no backing",
+    "arithmetic_mismatch": "arithmetic that does not hold",
+}
+
+
+def _equation_status_note(
+    root: Path, paragraph: dict[str, object], grounding: GroundingContext, language: BookLanguage | None
+) -> str:
+    """`` Ecuaciones: 2 derivación comprobada, 1 no comprobable automáticamente.`` or empty."""
+
+    counted: dict[str, int] = {}
+    for _statement, status in formula_statuses(root, paragraph, grounding):
+        counted[status] = counted.get(status, 0) + 1
+    if not counted:
+        return ""
+    labels = _EQUATION_STATUS_LABELS.get(language.babel, {}) if language is not None else {}
+    parts = [
+        f"{counted[status]} {labels.get(status, _EQUATION_STATUS_DEFAULTS[status])}"
+        for status in FORMULA_STATUSES
+        if counted.get(status)
+    ]
+    heading = labels.get("heading", _EQUATION_STATUS_DEFAULTS["heading"])
+    return f" {heading}: " + ", ".join(parts) + "."
+
+
 def _audit_lines(
     root: Path,
     paragraphs: list[dict[str, object]],
@@ -2822,16 +2877,19 @@ def _audit_lines(
     copy: dict[str, str],
     kind: str,
     counts: dict[str, int],
+    language: BookLanguage | None = None,
 ) -> list[str]:
     """Source audit grouped by source, with per-paragraph verification status."""
 
     lines = ["", r"\noindent " + latex_escape(_status_line(kind, counts, copy))]
 
     # --- per-paragraph verification status (compact) ---
+    grounding = GroundingContext(root)
     for idx, paragraph in enumerate(paragraphs, 1):
         label = _audit_label(root, paragraph)
         visible = _visible_label(copy, label)
-        lines.append(r"\noindent " + latex_escape(f"¶{idx}: {visible}."))
+        equations = _equation_status_note(root, paragraph, grounding, language)
+        lines.append(r"\noindent " + latex_escape(f"¶{idx}: {visible}.{equations}"))
 
     # --- evidence grouped by source ---
     source_paragraphs: dict[str, list[int]] = {}
