@@ -117,3 +117,14 @@ def test_a_pitot_worked_problem_can_be_recorded_and_its_steps_replay(tmp_path):
     assert recorded["status"] == "recorded", recorded
     checked = dispatch("studium_problem_check", {"id": recorded["problem"]["id"]}, session=session)
     assert checked["steps_reproduced"] is True, checked["step_checks"]
+
+
+def test_trailing_zero_integer_is_read_to_its_last_nonzero_digit():
+    from fractions import Fraction
+
+    from studium.authoring.computation import agrees
+
+    assert agrees("83300000", Fraction(250 * 6, 5) * 0 + Fraction(833333333, 10))
+    assert not agrees("83300000", Fraction(90000000))
+    assert not agrees("3924", Fraction(3930))
+    assert agrees("3924", Fraction(39241, 10))

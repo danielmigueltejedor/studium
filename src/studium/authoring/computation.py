@@ -97,6 +97,8 @@ def agrees(claimed: object, actual: Fraction) -> bool:
 
     A claim is read as rounded to its last written digit: ``31.30`` agrees with
     31.2998 and ``3924`` agrees only with values within half a unit of 3924.
+    An integer with three or more trailing zeros (``83300000``) is read to its last
+    non-zero digit, because those zeros are placeholders.
     """
 
     if isinstance(claimed, Fraction):
@@ -115,6 +117,13 @@ def agrees(claimed: object, actual: Fraction) -> bool:
     exponent = written.as_tuple().exponent
     if not isinstance(exponent, int):
         return False
+    if exponent == 0 and written != 0 and "e" not in str(claimed).lower():
+        # "83300000" cannot say how many of its zeros are significant. From three
+        # trailing zeros on they are read as placeholders and the last non-zero
+        # digit sets the precision. "3920" and "30" keep the strict reading.
+        trimmed = written.normalize().as_tuple().exponent
+        if isinstance(trimmed, int) and trimmed >= 3:
+            exponent = trimmed
     half_unit = Fraction(1, 2) * Fraction(10) ** exponent
     slack = abs(actual) * Fraction(1, 10**12)
     return abs(actual - Fraction(written)) <= half_unit + slack

@@ -297,8 +297,10 @@ def _check_numeric(root: Path, record: dict[str, object]) -> dict[str, object]:
     updated["status"] = "two_witnesses" if independent else "unchecked"
     updated["correct"] = False
     updated["classification"] = "PENDING"
+    answer_check = _answer_check(record.get("expected"), step_checks)
     if step_checks:
         updated["step_checks"] = step_checks
+    updated["answer_check"] = answer_check
     if independent:
         updated["corroboration"] = "two_witnesses"
     else:
@@ -313,6 +315,12 @@ def _check_numeric(root: Path, record: dict[str, object]) -> dict[str, object]:
     state = _read_state(root)
     body = _body(state, updated, status="two_witnesses" if independent else "unchecked")
     body["checked"] = False
+    body["answer_check"] = answer_check
+    if not independent:
+        body["unchecked_reason"] = (
+            "The two stored excerpts are missing or do not come from different public sources. "
+            f"The answer replay is {answer_check['result']}."
+        )
     if step_checks:
         body["step_checks"] = step_checks
         body["steps_reproduced"] = all(check.get("reproduced") is True for check in step_checks)
@@ -323,6 +331,28 @@ def _decimal(value: "Fraction") -> str:
     if value.denominator == 1:
         return str(value.numerator)
     return f"{float(value):.6g}"
+
+
+def _answer_check(expected: object, step_checks: list[dict[str, object]]) -> dict[str, object]:
+    """Compare the stated answer with the value of the last replayed step.
+
+    ``replayed`` means the arithmetic of the final step gives the stated answer at
+    the precision it is written with. It says nothing about the model behind it.
+    """
+
+    if not step_checks:
+        return {"result": "not_replayable", "reason": "the solution has no step with an expression"}
+    last = step_checks[-1]
+    value = _number(last.get("value"))
+    if value is None or last.get("error") is not None:
+        return {"result": "not_replayable", "reason": "the final step could not be evaluated"}
+    if _number(expected) is None:
+        return {"result": "not_replayable", "reason": "the stated answer is not a plain number"}
+    return {
+        "result": "replayed" if agrees(expected, value) else "mismatch",
+        "final_step": last.get("index"),
+        "value": last.get("value"),
+    }
 
 
 def _step_checks(record: dict[str, object]) -> list[dict[str, object]]:
