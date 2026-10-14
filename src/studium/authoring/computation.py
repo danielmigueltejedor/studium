@@ -7,7 +7,9 @@ Acceptance is ``replayed``, not verified, and it is not absolute truth.
 
 import ast
 import hashlib
+import math
 import re
+from decimal import Decimal, InvalidOperation
 from fractions import Fraction
 from pathlib import Path
 
@@ -22,16 +24,58 @@ from studium.storage.records import COMPUTATIONS, allocate_id, append_jsonl, fol
 
 _AUDIT = "audit/audit.jsonl"
 _MAX_EXPRESSION = 500
-_MAX_EXPONENT = 20
-_MAX_ABS = Fraction(10) ** 12
+#: Documented replay limits. Integer powers up to this exponent stay exact.
+_MAX_EXPONENT = 1000
+#: Every intermediate and final value must have a magnitude in [_MIN_ABS, _MAX_ABS] or be zero.
+_MAX_ABS = Fraction(10) ** 100
+_MIN_ABS = Fraction(1, 10**100)
+_RANGE = "the magnitude is outside the replay range (1e-100 to 1e100)"
 
 
 class ComputationError(Exception):
     """The expression is not a calculation the server can replay."""
 
 
+_SUPPORTED = (
+    "supported: numbers, + - * / **, parentheses, pi, e, and "
+    "sqrt, cbrt, exp, log (natural), ln, log10, sin, cos, tan, asin, acos, atan, sinh, cosh, tanh, abs"
+)
+
+_FUNCTIONS = {
+    "sqrt": math.sqrt,
+    "cbrt": math.cbrt,
+    "exp": math.exp,
+    "log": math.log,
+    "ln": math.log,
+    "log10": math.log10,
+    "sin": math.sin,
+    "cos": math.cos,
+    "tan": math.tan,
+    "asin": math.asin,
+    "acos": math.acos,
+    "atan": math.atan,
+    "sinh": math.sinh,
+    "cosh": math.cosh,
+    "tanh": math.tanh,
+}
+
+_CONSTANTS = {"pi": math.pi, "e": math.e}
+
+
 def evaluate(expression: str) -> Fraction:
-    """Evaluate a numeric expression. Names, calls, and attributes are rejected."""
+    """Evaluate a numeric expression; see :func:`evaluate_number`."""
+
+    return evaluate_number(expression)[0]
+
+
+def evaluate_number(expression: str) -> tuple[Fraction, bool]:
+    """Evaluate a numeric expression and say whether the result is exact.
+
+    Rational arithmetic with integer powers stays exact. Roots, non-integer
+    powers, the constants pi and e, and the allowlisted functions are evaluated
+    in floating point, and the result is marked inexact. Names other than those,
+    attributes, and any other call are rejected.
+    """
 
     if not isinstance(expression, str):
         raise ComputationError("expression is required")
@@ -50,6 +94,71 @@ def evaluate(expression: str) -> Fraction:
     if not isinstance(tree, ast.Expression):
         raise ComputationError("expression is not a calculation")
     return _eval(tree.body)
+
+
+def agrees(claimed: object, actual: Fraction) -> bool:
+    """Whether a claimed number is ``actual`` written to the claim's own precision."""
+
+    return precision_verdict(claimed, actual) == "agrees"
+
+
+def precision_verdict(claimed: object, actual: Fraction) -> str:
+    """Compare a claim with a replayed value at the precision the claim is written with.
+
+    Returns ``agrees``, ``disagrees`` or ``ambiguous``. A written claim is read as
+    rounded to its last written digit: ``31.30`` agrees with 31.298 but not with
+    31.26. Precision is read only from the written text: a ``Fraction`` (a stored
+    value without its original text) must equal ``actual`` exactly. An integer
+    written with trailing zeros (``3920``, ``83300000``) does not say whether the
+    zeros are significant; when it fails the strict reading but holds with the
+    zeros taken as placeholders, the verdict is ``ambiguous``. Writing the claim
+    in scientific notation (``8.33e7``) or with a decimal point removes the doubt.
+    """
+
+    if isinstance(claimed, Fraction):
+        return "agrees" if claimed == actual else "disagrees"
+    if isinstance(claimed, bool):
+        return "disagrees"
+    text = repr(claimed) if isinstance(claimed, float) else str(claimed).strip()
+    try:
+        written = Decimal(text)
+    except (InvalidOperation, ValueError):
+        return "disagrees"
+    if not written.is_finite():
+        return "disagrees"
+    if Fraction(written) == actual:
+        return "agrees"
+    exponent = written.as_tuple().exponent
+    if not isinstance(exponent, int):
+        return "disagrees"
+    if _within(written, exponent, actual):
+        return "agrees"
+    plain_integer = "." not in text and "e" not in text.lower()
+    if plain_integer and written != 0:
+        trimmed = written.normalize().as_tuple().exponent
+        if isinstance(trimmed, int) and trimmed > exponent and _within(written, trimmed, actual):
+            return "ambiguous"
+    return "disagrees"
+
+
+def _within(written: Decimal, exponent: int, actual: Fraction) -> bool:
+    half_unit = Fraction(1, 2) * Fraction(10) ** exponent
+    slack = abs(actual) * Fraction(1, 10**12)
+    return abs(actual - Fraction(written)) <= half_unit + slack
+
+
+def claimed_text_of(value: object) -> str | None:
+    """The claim exactly as the client wrote it (a JSON number keeps its shortest form)."""
+
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, float):
+        return repr(value) if math.isfinite(value) else None
+    if isinstance(value, str) and value.strip() and len(value.strip()) <= 80:
+        return value.strip()
+    return None
 
 
 def check_computation(
@@ -87,6 +196,7 @@ def check_computation(
         identifier=None,
         expression=parsed,
         claimed=claimed,
+        claimed_text=claimed_text_of(result),
         server_result=server_result,
         section_id=section_id,
         actor=actor,
@@ -128,11 +238,14 @@ def _replay(
     refusal = _small_integer_refusal(root, stored_expression, section)
     if refusal is not None:
         return refusal
+    written = current.get("claimed_text")
     return _store(
         root,
         identifier=identifier,
         expression=stored_expression,
         claimed=claimed,
+        # A record from before claimed_text existed keeps an exact comparison.
+        claimed_text=written if isinstance(written, str) else None,
         server_result=server_result,
         section_id=section,
         actor=actor,
@@ -145,11 +258,14 @@ def _store(
     identifier: str | None,
     expression: str,
     claimed: Fraction,
+    claimed_text: str | None,
     server_result: Fraction,
     section_id: str | None,
     actor: dict[str, object] | None,
 ) -> dict[str, object]:
-    matched = server_result == claimed
+    verdict = precision_verdict(claimed_text if claimed_text is not None else claimed, server_result)
+    matched = verdict == "agrees"
+    status = "replayed" if matched else ("ambiguous_precision" if verdict == "ambiguous" else "mismatch")
     try:
         with project_lock(root):
             record_id = identifier if identifier is not None else allocate_id(root, "PRB")
@@ -160,11 +276,13 @@ def _store(
                 "expression": expression,
                 "claimed_result": _canonical(claimed),
                 "server_result": _canonical(server_result),
-                "status": "replayed" if matched else "mismatch",
+                "status": status,
                 "correct": matched,
                 "classification": "PENDING",
                 "recorded_at": utc_now(),
             }
+            if claimed_text is not None:
+                record["claimed_text"] = claimed_text
             if matched:
                 record["corroboration"] = "replayed"
             if section_id is not None:
@@ -176,7 +294,12 @@ def _store(
     except ProjectLocked:
         return _error("storage.locked", "project is locked")
     body = _body(fresh, record, matched=matched)
-    if not matched:
+    if status == "ambiguous_precision":
+        body["message"] = (
+            "The reported number ends in zeros that may or may not be significant. It agrees with the server only "
+            "if they are placeholders. Report it in scientific notation (e.g. 8.33e7) or with a decimal point."
+        )
+    elif not matched:
         body["message"] = "The server evaluated a different result. The reported number was not accepted."
     return body
 
@@ -261,6 +384,8 @@ def _new_inputs(
     result: object,
     section: object,
 ) -> tuple[str | None, Fraction | None, str | None, dict[str, object] | None]:
+    """Expression, claimed value, and section. The written claim is read again by the caller."""
+
     if not isinstance(expression, str) or not expression.strip():
         return None, None, None, _error("mcp.invalid_input", "expression is required")
     parsed = expression.strip()
@@ -275,34 +400,104 @@ def _new_inputs(
     return parsed, claimed, section_id, None
 
 
-def _eval(node: ast.AST) -> Fraction:
+def _terminating_decimal(value: Fraction) -> str | None:
+    """The shortest decimal that is exactly ``value``, or None for a repeating one."""
+
+    denominator = value.denominator
+    places = 0
+    while denominator % 10 == 0 or denominator % 2 == 0 or denominator % 5 == 0:
+        if places > 40:
+            return None
+        places += 1
+        scaled = value * 10**places
+        if scaled.denominator == 1:
+            text = str(abs(scaled.numerator)).rjust(places + 1, "0")
+            sign = "-" if value < 0 else ""
+            return f"{sign}{text[:-places]}.{text[-places:]}"
+        denominator = scaled.denominator
+    return str(value.numerator) if value.denominator == 1 else None
+
+
+def _eval(node: ast.AST) -> tuple[Fraction, bool]:
     if isinstance(node, ast.Constant):
-        return _constant(node.value)
+        return _constant(node.value), True
+    if isinstance(node, ast.Name):
+        if node.id in _CONSTANTS:
+            return _bounded(Fraction(_CONSTANTS[node.id])), False
+        raise ComputationError(f"{node.id!r} is not a number; {_SUPPORTED}")
     if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub)):
-        value = _eval(node.operand)
-        return _bounded(value if isinstance(node.op, ast.UAdd) else -value)
+        value, exact = _eval(node.operand)
+        return _bounded(value if isinstance(node.op, ast.UAdd) else -value), exact
     if isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Add, ast.Sub, ast.Mult, ast.Div, ast.Pow)):
-        left = _eval(node.left)
-        right = _eval(node.right)
+        left, left_exact = _eval(node.left)
+        right, right_exact = _eval(node.right)
+        exact = left_exact and right_exact
         if isinstance(node.op, ast.Add):
-            return _bounded(left + right)
+            return _bounded(left + right), exact
         if isinstance(node.op, ast.Sub):
-            return _bounded(left - right)
+            return _bounded(left - right), exact
         if isinstance(node.op, ast.Mult):
-            return _bounded(left * right)
+            return _bounded(left * right), exact
         if isinstance(node.op, ast.Div):
             if right == 0:
                 raise ComputationError("expression divides by zero")
-            return _bounded(left / right)
-        if right.denominator != 1 or right < 0 or right > _MAX_EXPONENT:
-            raise ComputationError("exponent is outside the replay limit")
-        return _bounded(left ** int(right))
-    raise ComputationError("expression is not a calculation")
+            return _bounded(left / right), exact
+        return _power(left, right, exact)
+    if isinstance(node, ast.Call):
+        name = node.func.id if isinstance(node.func, ast.Name) else None
+        if name is None or node.keywords or len(node.args) != 1 or (name != "abs" and name not in _FUNCTIONS):
+            raise ComputationError(f"expression is not a calculation; {_SUPPORTED}")
+        argument, exact = _eval(node.args[0])
+        if name == "abs":
+            return abs(argument), exact
+        try:
+            result = _FUNCTIONS[name](float(argument))
+        except ValueError as exc:
+            raise ComputationError(f"the argument is outside the domain of {name}") from exc
+        except OverflowError as exc:
+            raise ComputationError(_RANGE) from exc
+        if result == 0.0 and name == "exp":
+            raise ComputationError("the result underflows the replay range (1e-100 to 1e100)")
+        return _float(result), False
+    raise ComputationError(f"expression is not a calculation; {_SUPPORTED}")
+
+
+def _power(base: Fraction, exponent: Fraction, exact: bool) -> tuple[Fraction, bool]:
+    """Integer exponents up to _MAX_EXPONENT stay exact; others are floating point."""
+
+    if abs(exponent) > _MAX_EXPONENT:
+        raise ComputationError(f"the exponent is outside the replay limit (|exponent| <= {_MAX_EXPONENT})")
+    if base == 0:
+        if exponent < 0:
+            raise ComputationError("expression divides by zero")
+        return (Fraction(1) if exponent == 0 else Fraction(0)), exact
+    # Estimate the magnitude before building a huge exact number.
+    if abs(float(exponent) * math.log10(abs(float(base)))) > 101:
+        raise ComputationError(_RANGE)
+    if exponent.denominator == 1:
+        return _bounded(base ** int(exponent)), exact
+    if base < 0:
+        raise ComputationError("a negative base with a non-integer exponent is outside the domain of real powers")
+    try:
+        result = float(base) ** float(exponent)
+    except OverflowError as exc:
+        raise ComputationError(_RANGE) from exc
+    if result == 0.0:
+        raise ComputationError("the result underflows the replay range (1e-100 to 1e100)")
+    return _float(result), False
+
+
+def _float(value: float) -> Fraction:
+    if not math.isfinite(value):
+        raise ComputationError(_RANGE)
+    return _bounded(Fraction(value))
 
 
 def _constant(value: object) -> Fraction:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ComputationError("expression is not a calculation")
+    if isinstance(value, float) and not math.isfinite(value):
+        raise ComputationError(_RANGE)
     try:
         parsed = Fraction(value) if isinstance(value, int) else Fraction(str(value))
     except (ValueError, OverflowError) as exc:
@@ -313,8 +508,8 @@ def _constant(value: object) -> Fraction:
 
 
 def _bounded(value: Fraction) -> Fraction:
-    if abs(value) > _MAX_ABS:
-        raise ComputationError("result is outside the replay limit")
+    if value != 0 and not _MIN_ABS <= abs(value) <= _MAX_ABS:
+        raise ComputationError(_RANGE)
     return value
 
 
@@ -360,6 +555,17 @@ def _canonical(value: Fraction) -> str:
     return str(value.numerator) if value.denominator == 1 else f"{value.numerator}/{value.denominator}"
 
 
+def _approximate(stored: object) -> str | None:
+    """Readable 12-digit value for a stored fraction whose decimal expansion is not short."""
+
+    if not isinstance(stored, str) or "/" not in stored or len(stored) <= 24:
+        return None
+    try:
+        return f"{float(Fraction(stored)):.12g}"
+    except (ValueError, ZeroDivisionError):
+        return None
+
+
 def _section(root: Path, value: object) -> tuple[str | None, dict[str, object] | None]:
     if value is None:
         return None, None
@@ -388,10 +594,15 @@ def _public(record: dict[str, object]) -> dict[str, object]:
         "expression": record.get("expression"),
         "claimed_result": record.get("claimed_result"),
         "server_result": record.get("server_result"),
-        "status": "replayed" if record.get("status") == "replayed" and record.get("correct") is True else "mismatch",
+        "status": _visible_status(record),
         "correct": record.get("correct") is True,
         "classification": "PENDING",
     }
+    if isinstance(record.get("claimed_text"), str):
+        visible["claimed_text"] = record["claimed_text"]
+    approximate = _approximate(record.get("server_result"))
+    if approximate is not None:
+        visible["server_value"] = approximate
     if record.get("corroboration") == "replayed" and visible["correct"] is True:
         visible["corroboration"] = "replayed"
     if isinstance(record.get("section"), str):
@@ -399,15 +610,24 @@ def _public(record: dict[str, object]) -> dict[str, object]:
     return visible
 
 
+def _visible_status(record: dict[str, object]) -> str:
+    if record.get("status") == "replayed" and record.get("correct") is True:
+        return "replayed"
+    if record.get("status") == "ambiguous_precision":
+        return "ambiguous_precision"
+    return "mismatch"
+
+
 def _body(state: dict[str, object], record: dict[str, object], *, matched: bool) -> dict[str, object]:
     visible = _public(record)
     return {
-        "status": "replayed" if matched else "mismatch",
+        "status": _visible_status(record),
         "accepted": matched,
         "correct": matched,
         "expression": visible.get("expression"),
         "claimed_result": visible.get("claimed_result"),
         "server_result": visible.get("server_result"),
+        **({"server_value": visible["server_value"]} if "server_value" in visible else {}),
         "computation": visible,
         "local_sources": _local(state),
         "project_state": state.get("state"),

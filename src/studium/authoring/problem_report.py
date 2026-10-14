@@ -19,6 +19,7 @@ def verify_problem_report(
     *,
     expected_value: float | None = None,
     expected_unit: str | None = None,
+    expected_text: str | None = None,
 ) -> VerificationResult:
     """Produce a non-destructive scientific review of one problem.
 
@@ -41,6 +42,7 @@ def verify_problem_report(
             solution,
             expected_value=expected_value,
             expected_unit=expected_unit,
+            expected_text=expected_text,
         )
     else:
         numeric = VerificationResult(

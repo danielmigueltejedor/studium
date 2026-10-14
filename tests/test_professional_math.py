@@ -360,3 +360,24 @@ def test_a_problem_without_a_solution_keeps_working(tmp_path, monkeypatch):
 
 def _explode(*_args, **_kwargs):
     raise AssertionError("must not fetch")
+
+
+def test_answer_is_bound_to_the_final_replayed_step(tmp_path, monkeypatch):
+    session, _root, excerpts = _setup(tmp_path, monkeypatch)
+    results = {}
+    for expected in ("97903.8", "5000"):
+        recorded = dispatch(
+            "studium_problem_record",
+            {
+                "section": "hidrostatica",
+                "prompt": "Calcula la presión a 10 m de profundidad con densidad 998 kg/m^3.",
+                "expected": expected,
+                "excerpts": excerpts,
+                "role": "worked",
+                "solution": _structured_solution(),
+            },
+            session=session,
+        )
+        checked = dispatch("studium_problem_check", {"id": recorded["problem"]["id"]}, session=session)
+        results[expected] = checked["answer_check"]["result"]
+    assert results == {"97903.8": "replayed", "5000": "mismatch"}
