@@ -468,6 +468,16 @@ _TOOLS: tuple[dict[str, object], ...] = (
         ),
     },
     {
+        "name": "studium_book_substitution_audit",
+        "class": "READ",
+        "description": (
+            "Audit stored numerical substitutions in a bounded page of problems. "
+            "Classifies presentation differences, ambiguous notation and cases "
+            "requiring review. Results are advisory and page-scoped. "
+            "Does not modify problems or authorize publication."
+        ),
+    },
+    {
         "name": "studium_problem_scientific_review",
         "class": "READ",
         "description": (
@@ -1420,6 +1430,25 @@ def _schema(tool: Mapping[str, object]) -> dict[str, object]:
             },
             "required": ["id"],
             "additionalProperties": True,
+        }
+    elif name == "studium_book_substitution_audit":
+        input_schema = {
+            "type": "object",
+            "properties": {
+                "project": _project_property(),
+                "offset": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "description": "Index of the first problem to examine.",
+                },
+                "limit": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 50,
+                    "description": "Maximum number of problems in this page.",
+                },
+            },
+            "additionalProperties": False,
         }
     elif name == "studium_problem_scientific_review":
         input_schema = {

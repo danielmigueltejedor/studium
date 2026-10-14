@@ -21,6 +21,7 @@ from studium.authoring.academic_blueprint import (
 from studium.authoring.audit import book_review, contradiction_scan, record_audit
 from studium.authoring.blueprint import get_blueprint, store_blueprint
 from studium.authoring.book_next import book_next
+from studium.authoring.book_substitution_audit import audit_book_substitutions
 from studium.authoring.claims import list_claims, record_claim
 from studium.authoring.completeness import chapter_completeness
 from studium.authoring.computation import check_computation
@@ -906,6 +907,12 @@ def _dispatch(session: McpSession, name: str, arguments: Mapping[str, object]) -
         )
     if name == "studium_verification_list":
         return {"status": "ok", "verifications": list_verifications(root)}
+    if name == "studium_book_substitution_audit":
+        return audit_book_substitutions(
+            root,
+            offset=arguments.get("offset", 0),
+            limit=arguments.get("limit", 30),
+        )
     if name == "studium_problem_scientific_review":
         return review_stored_problem(
             root,

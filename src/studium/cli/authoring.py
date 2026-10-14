@@ -8,6 +8,7 @@ from pathlib import Path
 from studium.authoring.audit import book_review, contradiction_scan, record_audit
 from studium.authoring.blueprint import get_blueprint, store_blueprint
 from studium.authoring.book_next import book_next
+from studium.authoring.book_substitution_audit import audit_book_substitutions
 from studium.authoring.claims import list_claims, record_claim
 from studium.authoring.computation import check_computation
 from studium.authoring.excerpts import get_excerpt, list_excerpts, record_excerpt
@@ -116,6 +117,11 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     _project(problem_check)
     problem_list = problem_commands.add_parser("list")
     _project(problem_list)
+    problem_audit = problem_commands.add_parser("audit-substitutions")
+    problem_audit.add_argument("--offset", type=int, default=0)
+    problem_audit.add_argument("--limit", type=int, default=30)
+    _project(problem_audit)
+
     problem_scientific_review = problem_commands.add_parser("scientific-review")
     problem_scientific_review.add_argument("problem_id")
     problem_scientific_review.add_argument("--expected-value", type=float)
@@ -297,6 +303,15 @@ def run(args: argparse.Namespace, root: Path) -> int:
             return _emit(check_problem(root, args.problem_id), args.json)
         if args.problem_command == "list":
             return _emit(list_problems(root), args.json)
+        if args.problem_command == "audit-substitutions":
+            return _emit(
+                audit_book_substitutions(
+                    root,
+                    offset=args.offset,
+                    limit=args.limit,
+                ),
+                args.json,
+            )
         if args.problem_command == "scientific-review":
             return _emit(
                 review_stored_problem(
