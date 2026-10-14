@@ -62,6 +62,17 @@ _FUNCTIONS = {
 _CONSTANTS = {"pi": math.pi, "e": math.e}
 
 
+_TYPOGRAPHIC = str.maketrans(
+    {"×": "*", "·": "*", "⋅": "*", "÷": "/", "−": "-", "–": "-", "^": "**"}
+)
+
+
+def normalize_operators(expression: str) -> str:
+    """Read typeset operators (× · ÷ − ^) as the ASCII operators they denote."""
+
+    return expression.translate(_TYPOGRAPHIC)
+
+
 def evaluate(expression: str) -> Fraction:
     """Evaluate a numeric expression; see :func:`evaluate_number`."""
 
@@ -79,7 +90,7 @@ def evaluate_number(expression: str) -> tuple[Fraction, bool]:
 
     if not isinstance(expression, str):
         raise ComputationError("expression is required")
-    cleaned = expression.strip()
+    cleaned = normalize_operators(expression.strip())
     if not cleaned or len(cleaned) > _MAX_EXPRESSION:
         raise ComputationError("expression is required")
     if any(character in cleaned for character in ";|&$`\n\r") or "\\" in cleaned:
@@ -325,7 +336,7 @@ def _small_integer_numbers(expression: str) -> set[str] | None:
     """Integers combined with + - * / . A decimal, name, power, or unit is not this class."""
 
     try:
-        tree = ast.parse(expression.strip(), mode="eval")
+        tree = ast.parse(normalize_operators(expression.strip()), mode="eval")
     except SyntaxError:
         return None
     if not isinstance(tree, ast.Expression):
