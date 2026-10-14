@@ -53,59 +53,55 @@ def contradiction_scan(root: Path) -> dict[str, object]:
     units, definitions, and terminology. ``CONFIRMED_CONTRADICTION`` and
     ``POSSIBLE_CONTRADICTION`` block review. Measurements taken under different
     stated conditions are ``CONTEXT_DEPENDENT``, not automatically contradictory.
+
+    Every scan re-evaluates every stored open record against the current text.
+    An open record is resolved only by a scan: when its quantity is no longer
+    detected (``no_longer_detected``) or is now a non-blocking finding
+    (``reclassified``). The resolution names the passages whose text changed
+    since the record was opened; the open record stays in the append-only
+    history. A scan of unchanged text appends nothing new for a finding.
     """
 
     findings = _academic_findings(root)
+    texts = _passage_hashes(root)
     try:
         with project_lock(root):
+            edition = writer_edition(root)
+            stored = _stored_by_key(root)
             open_items: list[dict[str, object]] = []
+            resolved_items: list[dict[str, object]] = []
+            detected: set[tuple[str, str]] = set()
             for finding in sorted(findings, key=lambda item: (item["quantity"], item["category"])):
-                existing = _contradiction_for(root, str(finding["quantity"]))
+                key = (str(finding["quantity"]), str(finding["category"]))
+                detected.add(key)
+                records = stored.get(key, [])
+                opened = [record for record in records if record.get("status") == "open"]
                 blocking = str(finding["verdict"]) in _BLOCKING_VERDICTS
                 if blocking:
-                    recorded = {
-                        "schema_version": "1.0.0",
-                        "id": existing["id"] if existing is not None else allocate_id(root, "CON"),
-                        "quantity": finding["quantity"],
-                        "values": finding["values"],
-                        "passages": _finding_strings(finding, "passages"),
-                        "status": "open",
-                        "verdict": finding["verdict"],
-                        "category": finding["category"],
-                        "detail": finding["detail"],
-                        "sources": _finding_strings(finding, "sources"),
-                        "cross_chapter": finding["cross_chapter"],
-                        "recorded_at": utc_now(),
-                    }
-                    append_jsonl(root / CONTRADICTIONS, recorded)
+                    keep = opened[0] if opened else (records[-1] if records else None)
+                    recorded = _finding_record(finding, keep, "open", texts, root)
+                    if keep is None or _changed(keep, recorded):
+                        append_jsonl(root / CONTRADICTIONS, recorded)
                     open_items.append(_public_contradiction(recorded))
-                else:
-                    if existing is not None and existing.get("status") == "open":
-                        resolved = dict(existing)
-                        resolved["status"] = "resolved"
-                        resolved["verdict"] = finding["verdict"]
-                        resolved["detail"] = finding["detail"]
-                        resolved["recorded_at"] = utc_now()
-                        append_jsonl(root / CONTRADICTIONS, resolved)
-                    recorded = {
-                        "schema_version": "1.0.0",
-                        "id": allocate_id(root, "CON"),
-                        "quantity": finding["quantity"],
-                        "values": finding["values"],
-                        "passages": _finding_strings(finding, "passages"),
-                        "status": "not_open",
-                        "verdict": finding["verdict"],
-                        "category": finding["category"],
-                        "detail": finding["detail"],
-                        "sources": _finding_strings(finding, "sources"),
-                        "cross_chapter": finding["cross_chapter"],
-                        "recorded_at": utc_now(),
-                    }
+                    for extra in opened[1:]:
+                        resolved_items.append(_resolve(root, extra, "duplicate", finding, texts, edition, keep))
+                    continue
+                for record in opened:
+                    resolved_items.append(_resolve(root, record, "reclassified", finding, texts, edition, None))
+                keep = next((record for record in reversed(records) if record.get("status") == "not_open"), None)
+                recorded = _finding_record(finding, keep, "not_open", texts, root)
+                if keep is None or _changed(keep, recorded):
                     append_jsonl(root / CONTRADICTIONS, recorded)
+            for key, records in sorted(stored.items()):
+                if key in detected:
+                    continue
+                for record in records:
+                    if record.get("status") == "open":
+                        resolved_items.append(_resolve(root, record, "no_longer_detected", None, texts, edition, None))
             marker: dict[str, object] = {
                 "schema_version": "1.0.0",
                 "id": "scan",
-                "edition": writer_edition(root),
+                "edition": edition,
                 "status": "scanned",
                 "recorded_at": utc_now(),
             }
@@ -117,10 +113,112 @@ def contradiction_scan(root: Path) -> dict[str, object]:
         "status": "ok",
         "contradictions": open_items,
         "open_count": len(open_items),
+        "resolved": resolved_items,
+        "resolved_count": len(resolved_items),
         "released": fresh.get("state") == "RELEASED",
         "project_state": fresh.get("state"),
         "local_sources": _local(fresh),
         "applied": False,
+    }
+
+
+_FINDING_FIELDS = ("quantity", "values", "passages", "status", "verdict", "category", "detail", "sources", "cross_chapter")
+
+
+def _finding_record(
+    finding: dict[str, object],
+    keep: dict[str, object] | None,
+    status: str,
+    texts: dict[str, str],
+    root: Path,
+) -> dict[str, object]:
+    passages = _finding_strings(finding, "passages")
+    return {
+        "schema_version": "1.0.0",
+        "id": keep["id"] if keep is not None else allocate_id(root, "CON"),
+        "quantity": finding["quantity"],
+        "values": finding["values"],
+        "passages": passages,
+        "passage_sha256": {passage: texts[passage] for passage in passages if passage in texts},
+        "status": status,
+        "verdict": finding["verdict"],
+        "category": finding["category"],
+        "detail": finding["detail"],
+        "sources": _finding_strings(finding, "sources"),
+        "cross_chapter": finding["cross_chapter"],
+        "recorded_at": utc_now(),
+    }
+
+
+def _changed(stored: dict[str, object], recorded: dict[str, object]) -> bool:
+    fields = (*_FINDING_FIELDS, "passage_sha256")
+    return any(stored.get(field) != recorded.get(field) for field in fields)
+
+
+def _resolve(
+    root: Path,
+    record: dict[str, object],
+    reason: str,
+    finding: dict[str, object] | None,
+    texts: dict[str, str],
+    edition: str,
+    kept: dict[str, object] | None,
+) -> dict[str, object]:
+    """Close an open record on the evidence of this scan. The open row stays in history."""
+
+    passages = _finding_strings(record, "passages")
+    hashes = record.get("passage_sha256")
+    known = hashes if isinstance(hashes, dict) else {}
+    removed = [passage for passage in passages if passage not in texts]
+    if known:
+        changed = [passage for passage in passages if passage not in texts or known.get(passage) != texts[passage]]
+        unknown: list[str] = []
+    else:
+        changed = removed
+        unknown = [passage for passage in passages if passage in texts]
+    resolution: dict[str, object] = {
+        "reason": reason,
+        "scan_edition": edition,
+        "previous_verdict": record.get("verdict"),
+        "previous_values": record.get("values"),
+        "passages_changed": changed,
+        "passages_removed": removed,
+        "passages_unknown": unknown,
+        "passage_evidence": "sha256" if known else "unrecorded: the open record predates passage hashes",
+    }
+    if finding is not None:
+        resolution["verdict"] = finding["verdict"]
+        resolution["values"] = finding["values"]
+        resolution["detail"] = finding["detail"]
+    if kept is not None:
+        resolution["kept"] = kept.get("id")
+    resolved = dict(record)
+    resolved["status"] = "resolved"
+    resolved["resolution"] = resolution
+    resolved["recorded_at"] = utc_now()
+    append_jsonl(root / CONTRADICTIONS, resolved)
+    visible = _public_contradiction(resolved)
+    visible["resolution"] = resolution
+    return visible
+
+
+def _stored_by_key(root: Path) -> dict[tuple[str, str], list[dict[str, object]]]:
+    """Current stored records per (quantity, category), oldest first. Legacy rows default to numeric."""
+
+    grouped: dict[tuple[str, str], list[dict[str, object]]] = {}
+    for record in fold_by_id(root / CONTRADICTIONS):
+        quantity = record.get("quantity")
+        if record.get("id") == "scan" or not isinstance(quantity, str):
+            continue
+        category = record.get("category") if isinstance(record.get("category"), str) else "numeric"
+        grouped.setdefault((quantity, str(category)), []).append(record)
+    return grouped
+
+
+def _passage_hashes(root: Path) -> dict[str, str]:
+    return {
+        identifier: hashlib.sha256(text.encode("utf-8")).hexdigest()
+        for identifier, text in _accepted_passages(root)
     }
 
 
@@ -559,12 +657,6 @@ def _passage_sources(root: Path) -> dict[str, list[str]]:
         mapping[identifier] = source_ids
     return mapping
 
-
-def _contradiction_for(root: Path, quantity: str) -> dict[str, object] | None:
-    found = [record for record in fold_by_id(root / CONTRADICTIONS) if record.get("quantity") == quantity]
-    if not found:
-        return None
-    return found[-1]
 
 
 def _source_fingerprint(root: Path, source_id: str) -> str | None:

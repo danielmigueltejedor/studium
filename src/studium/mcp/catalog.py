@@ -406,6 +406,9 @@ _TOOLS: tuple[dict[str, object], ...] = (
             "Compare stored numeric results and claims in one book. "
             "If two accepted passages assign different values to the same named quantity, record a contradiction. "
             "An open contradiction blocks review. "
+            "Each scan re-evaluates every open contradiction against the current text and resolves one that is "
+            "no longer detected or is now context-dependent; the result lists them under resolved with the "
+            "passages that changed. There is no manual dismissal. "
             "Does not add prose and does not move the book to RELEASED."
         ),
     },
