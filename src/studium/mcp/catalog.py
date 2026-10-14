@@ -468,6 +468,16 @@ _TOOLS: tuple[dict[str, object], ...] = (
         ),
     },
     {
+        "name": "studium_problem_scientific_review",
+        "class": "READ",
+        "description": (
+            "Produce a read-only scientific review of one stored numeric problem. "
+            "Checks dimensional consistency, numerical reproduction when an expected "
+            "value and unit are supplied, and stored substitution differences. "
+            "Physical assumptions remain unverified. Does not modify or release content."
+        ),
+    },
+    {
         "name": "studium_problem_list",
         "class": "READ",
         "description": (
@@ -1410,6 +1420,27 @@ def _schema(tool: Mapping[str, object]) -> dict[str, object]:
             },
             "required": ["id"],
             "additionalProperties": True,
+        }
+    elif name == "studium_problem_scientific_review":
+        input_schema = {
+            "type": "object",
+            "properties": {
+                "project": _project_property(),
+                "id": {
+                    "type": "string",
+                    "description": "Identifier of a stored numeric problem.",
+                },
+                "expected_value": {
+                    "type": "number",
+                    "description": "Expected numerical result, supplied by the caller.",
+                },
+                "expected_unit": {
+                    "type": "string",
+                    "description": "Physical unit of the expected result.",
+                },
+            },
+            "required": ["id"],
+            "additionalProperties": False,
         }
     elif name == "studium_problem_list":
         input_schema = {

@@ -13,6 +13,7 @@ from studium.authoring.computation import check_computation
 from studium.authoring.excerpts import get_excerpt, list_excerpts, record_excerpt
 from studium.authoring.figures import check_figure, record_figure, remove_figure
 from studium.authoring.paragraphs import draft_completeness, list_paragraphs, record_paragraph, replace_paragraph
+from studium.authoring.problem_review import review_stored_problem
 from studium.authoring.problems import check_problem, list_problems, record_problem, remove_problem
 from studium.authoring.render import render_draft
 from studium.authoring.verify import verify_book
@@ -115,6 +116,11 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     _project(problem_check)
     problem_list = problem_commands.add_parser("list")
     _project(problem_list)
+    problem_scientific_review = problem_commands.add_parser("scientific-review")
+    problem_scientific_review.add_argument("problem_id")
+    problem_scientific_review.add_argument("--expected-value", type=float)
+    problem_scientific_review.add_argument("--expected-unit")
+    _project(problem_scientific_review)
     problem_remove = problem_commands.add_parser("remove")
     problem_remove.add_argument("problem_id")
     _project(problem_remove)
@@ -291,6 +297,16 @@ def run(args: argparse.Namespace, root: Path) -> int:
             return _emit(check_problem(root, args.problem_id), args.json)
         if args.problem_command == "list":
             return _emit(list_problems(root), args.json)
+        if args.problem_command == "scientific-review":
+            return _emit(
+                review_stored_problem(
+                    root,
+                    problem_id=args.problem_id,
+                    expected_value=args.expected_value,
+                    expected_unit=args.expected_unit,
+                ),
+                args.json,
+            )
         if args.problem_command == "remove":
             return _emit(remove_problem(root, args.problem_id, actor={"kind": "cli"}), args.json)
         print("unknown command: problem", file=sys.stderr)

@@ -41,6 +41,7 @@ from studium.authoring.paragraphs import (
     record_paragraph,
     replace_paragraph,
 )
+from studium.authoring.problem_review import review_stored_problem
 from studium.authoring.problems import check_problem, list_problems, record_problem, remove_problem
 from studium.authoring.quality import assess_book, chapter_quality
 from studium.authoring.quality_report import quality_report
@@ -905,6 +906,13 @@ def _dispatch(session: McpSession, name: str, arguments: Mapping[str, object]) -
         )
     if name == "studium_verification_list":
         return {"status": "ok", "verifications": list_verifications(root)}
+    if name == "studium_problem_scientific_review":
+        return review_stored_problem(
+            root,
+            problem_id=arguments.get("id"),
+            expected_value=arguments.get("expected_value"),
+            expected_unit=arguments.get("expected_unit"),
+        )
     if name == "studium_problem_list":
         return list_problems(root)
     if name == "studium_paragraph_record":
