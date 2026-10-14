@@ -260,11 +260,12 @@ def _writer_material(root: Path) -> list[str]:
     for record in supported_drafts(root):
         lines.append(f"claim:{record.get('id')}:{record.get('text')}")
     seen_sources: set[str] = set()
+    fingerprints = source_fingerprints(root)
     for record in excerpts_by_id(root).values():
         source_id = record.get("source_id")
         if isinstance(source_id, str) and source_id not in seen_sources:
             seen_sources.add(source_id)
-            lines.append(f"source:{source_id}:{_source_fingerprint(root, source_id)}")
+            lines.append(f"source:{source_id}:{fingerprints.get(source_id)}")
     for record in fold_by_id(root / PROBLEMS):
         lines.append(
             f"problem:{record.get('id')}:{record.get('status')}:{record.get('correct')}:"
@@ -657,6 +658,23 @@ def _passage_sources(root: Path) -> dict[str, list[str]]:
         mapping[identifier] = source_ids
     return mapping
 
+
+
+def source_fingerprints(root: Path) -> dict[str, str]:
+    """``_source_fingerprint`` for every source, reading each registry once."""
+
+    found: dict[str, str] = {}
+    for record in fold_by_id(root / "sources" / "registry.jsonl"):
+        identifier = record.get("id")
+        if isinstance(identifier, str):
+            payload = f"local:{identifier}:{record.get('sha256')}"
+            found[identifier] = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+    for record in fold_by_id(root / PUBLIC_BIBLIOGRAPHY):
+        identifier = record.get("id")
+        if isinstance(identifier, str):
+            payload = f"public:{identifier}:{record.get('text_sha256')}:{record.get('url')}"
+            found[identifier] = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+    return found
 
 
 def _source_fingerprint(root: Path, source_id: str) -> str | None:

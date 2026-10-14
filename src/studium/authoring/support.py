@@ -49,7 +49,30 @@ def support_blockers(root: Path, source_ids: list[str]) -> list[dict[str, object
     return blockers
 
 
-def paragraph_citation_blockers(root: Path, excerpt_ids: list[str]) -> list[dict[str, object]]:
+class CitationContext:
+    """The stored excerpts, public sources and book kind, read once for many checks.
+
+    Build one per operation (``citation_context``) when checking many
+    paragraphs; reading every file again for each paragraph made status and
+    review calls quadratic in book size (F30). It is a snapshot: build a new
+    one after writing excerpts or sources.
+    """
+
+    __slots__ = ("course_book", "excerpts", "records")
+
+    def __init__(self, root: Path) -> None:
+        self.excerpts = excerpts_by_id(root)
+        self.records = _public_by_id(root)
+        self.course_book = book_kind(root) != BOOK_TOPIC
+
+
+def citation_context(root: Path) -> CitationContext:
+    return CitationContext(root)
+
+
+def paragraph_citation_blockers(
+    root: Path, excerpt_ids: list[str], context: CitationContext | None = None
+) -> list[dict[str, object]]:
     """Support check for a paragraph that cites stored excerpts.
 
     A course book may cite a source the guide does not cite when that source is
@@ -65,9 +88,10 @@ def paragraph_citation_blockers(root: Path, excerpt_ids: list[str]) -> list[dict
             }
         ]
     blockers: list[dict[str, object]] = []
-    excerpts = excerpts_by_id(root)
-    records = _public_by_id(root)
-    course_book = book_kind(root) != BOOK_TOPIC
+    loaded = context if context is not None else CitationContext(root)
+    excerpts = loaded.excerpts
+    records = loaded.records
+    course_book = loaded.course_book
     for excerpt_id in excerpt_ids:
         excerpt = excerpts.get(excerpt_id)
         if excerpt is None:
