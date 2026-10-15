@@ -344,3 +344,19 @@ def test_alternative_convention_keeps_values_and_flips_only_the_plot():
     assert course.M.right(sympy.Integer(2)) == other.M.right(sympy.Integer(2))
     assert course.model.convention.plot_sign("M") == -1
     assert other.model.convention.plot_sign("M") == 1
+
+
+def test_book_symbols_name_the_laws_and_panels():
+    spec = {
+        "length": 6,
+        "convention": ULE,
+        "symbols": {"V": "C_y", "M": "M_z"},
+        "supports": [{"at": 0, "type": "pin", "name": "A"}, {"at": 6, "type": "roller", "name": "B"}],
+        "loads": [{"type": "point", "at": 2, "value": 12, "direction": "down"}],
+    }
+    solution = solve_beam(parse_beam(spec))
+    assert laws_latex(solution)[0].startswith("C_y(x)")
+    tikz, _, _ = beam_draw.internal_forces_figure(solution)
+    assert "$C_y$ (kN)" in tikz and "$M_z$" in tikz
+    with pytest.raises(DataError):
+        parse_beam({**spec, "symbols": {"V": "\\input{x}"}})

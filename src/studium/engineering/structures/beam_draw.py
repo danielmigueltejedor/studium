@@ -429,7 +429,8 @@ def _panel(
     frame = Frame(sx, sy, 0.0, y0, sign)
     lines = [f"\\draw[gray!70] (0,{fmt(y0)}) -- ({fmt(style.width + 0.3)},{fmt(y0)});"]
     lines += series(name, curve, frame, style=f"thick,{_STROKE[name]}", fill=_FILL[name])
-    lines.append(f"\\node[font=\\small,anchor=east] at (-0.15,{fmt(y0)}) {{${name}$ ({unit})}};")
+    shown = model.symbols.get(name, name) if name in ("N", "V", "M") else name
+    lines.append(f"\\node[font=\\small,anchor=east] at (-0.15,{fmt(y0)}) {{${shown}$ ({unit})}};")
     lines.append(f"\\node[font=\\small,anchor=west] at ({fmt(style.width + 0.3)},{fmt(y0)}) {{$x$}};")
     lines += _value_labels(name, curve, frame, model, style)
     lines += _sign_marks(curve, frame)

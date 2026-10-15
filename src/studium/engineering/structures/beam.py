@@ -100,6 +100,8 @@ class BeamModel:
     ei: list[tuple[sympy.Expr, sympy.Expr, sympy.Expr]] | None
     ea: sympy.Expr | None
     parameters: dict[str, sympy.Symbol]
+    #: How the book writes N, V, M (for example ``C_y`` and ``M_z``); presentation only.
+    symbols: dict[str, str] = field(default_factory=lambda: {"N": "N", "V": "V", "M": "M"})
 
     def breakpoints(self) -> list[sympy.Expr]:
         values = {sympy.Integer(0), self.length}
@@ -241,7 +243,24 @@ def parse_beam(spec: object) -> BeamModel:
     ea_value = spec.get("EA")
     ea = exact(ea_value, "EA", parameters) if ea_value is not None else None
     convention = parse_convention(spec.get("convention"))
-    return BeamModel(length, supports, hinges, forces, couples, distributed, points, units, convention, ei, ea, parameters)
+    return BeamModel(
+        length, supports, hinges, forces, couples, distributed, points, units, convention, ei, ea, parameters, _symbols(spec.get("symbols"))
+    )
+
+
+def _symbols(value: object) -> dict[str, str]:
+    symbols = {"N": "N", "V": "V", "M": "M"}
+    if value is None:
+        return symbols
+    if not isinstance(value, dict):
+        raise DataError("symbols must map N, V, M to how the book writes them")
+    for key, text in value.items():
+        if key not in symbols or not isinstance(text, str) or not text.strip() or len(text) > 12:
+            raise DataError("symbols maps N, V or M to a short LaTeX name such as C_y")
+        if not all(character.isalnum() or character in "_{}" for character in text):
+            raise DataError("a symbol may use letters, digits, _ and braces only")
+        symbols[key] = text.strip()
+    return symbols
 
 
 def _parameters(value: object) -> dict[str, sympy.Symbol]:
@@ -1003,7 +1022,7 @@ def laws_latex(solution: BeamSolution, *, comma: bool = True) -> list[str]:
         for start, end, expr in merged:
             interval = f"{_tex_number(start, comma)} < x < {_tex_number(end, comma)}"
             rows.append(f"{_tex_poly(expr, comma)} & {interval}")
-        blocks.append(f"{name}(x) = \\begin{{cases}} " + " \\\\ ".join(rows) + " \\end{cases}")
+        blocks.append(f"{solution.model.symbols[name]}(x) = \\begin{{cases}} " + " \\\\ ".join(rows) + " \\end{cases}")
     return blocks
 
 
