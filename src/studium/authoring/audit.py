@@ -292,8 +292,12 @@ def _target(root: Path, value: object) -> tuple[str, str] | None:
     return None
 
 
+# The lead, the Tip, a definition and the self-check are short boxes, not body prose.
+_SHORT_BY_DESIGN = frozenset({"purpose", "consejo", "definition", "self_check"})
+
+
 def _teaching_paragraphs(root: Path, section_id: str) -> list[dict[str, object]]:
-    return [record for record in _section_paragraphs(root, section_id) if record.get("role") != "self_check"]
+    return [record for record in _section_paragraphs(root, section_id) if record.get("role") not in _SHORT_BY_DESIGN]
 
 
 def _chapter_passages(root: Path, target_id: str, target_kind: str) -> list[tuple[str, str]]:
