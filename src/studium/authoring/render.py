@@ -2460,7 +2460,7 @@ def _derivation_box(root: Path, section_id: str, language: BookLanguage) -> list
             body.extend(_variables_lines(variables, language))
         verification = record.get("verification")
         status = str(verification.get("status")) if isinstance(verification, dict) else "UNVERIFIED"
-        body.extend(["", r"\noindent\footnotesize " + latex_escape(_status_phrase(status, language)) + "."])
+        body.extend(["", r"{\noindent\footnotesize " + latex_escape(_status_phrase(status, language)) + r".\par}"])
     return _box(label, body, "derivation")
 
 

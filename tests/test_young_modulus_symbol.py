@@ -32,3 +32,16 @@ def test_a_wrong_relation_with_e_is_not_vacuously_verified(tmp_path):
         session=session,
     )
     assert checked["verification_status"] == "FAILED", checked
+
+
+def test_pi_needs_no_declared_dimension(tmp_path):
+    session, identifier = _derivation(tmp_path, r"I_{z} = \frac{\pi\,d^{4}}{64}", "I_z - pi*d**4/64")
+    checked = dispatch(
+        "studium_derivation_check",
+        {
+            "id": identifier,
+            "dimensions": {"expression": "pi*d**4/64", "symbol_units": {"d": "m"}, "expected_unit": "m^4"},
+        },
+        session=session,
+    )
+    assert checked["verification_status"] == "DIMENSIONALLY_VERIFIED", checked
