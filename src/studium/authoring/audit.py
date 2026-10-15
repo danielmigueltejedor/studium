@@ -10,7 +10,7 @@ import hashlib
 import re
 from pathlib import Path
 
-from studium.authoring.blueprint import current_sections
+from studium.authoring.blueprint import current_sections, is_support_section
 from studium.authoring.computation import computation_fingerprint
 from studium.authoring.contradictions import (
     _canon_number,
@@ -183,7 +183,7 @@ def review_blockers(root: Path) -> list[str]:
     for section in current_sections(root):
         if section["id"] in gaps:
             continue
-        if section_needs_more_prose(root, section["id"]):
+        if not is_support_section(section["id"]) and section_needs_more_prose(root, section["id"]):
             reasons.append(f"{section['id']} is too short to teach")
         for paragraph in _section_paragraphs(root, section["id"]):
             identifier = paragraph.get("id")
@@ -304,8 +304,12 @@ def _target(root: Path, value: object) -> tuple[str, str] | None:
     return None
 
 
+# The lead, the Tip, a definition and the self-check are short boxes, not body prose.
+_SHORT_BY_DESIGN = frozenset({"purpose", "consejo", "definition", "self_check"})
+
+
 def _teaching_paragraphs(root: Path, section_id: str) -> list[dict[str, object]]:
-    return [record for record in _section_paragraphs(root, section_id) if record.get("role") != "self_check"]
+    return [record for record in _section_paragraphs(root, section_id) if record.get("role") not in _SHORT_BY_DESIGN]
 
 
 def _chapter_passages(root: Path, target_id: str, target_kind: str) -> list[tuple[str, str]]:
@@ -349,9 +353,11 @@ def _chapter_conflict(root: Path, target_id: str, target_kind: str, evidence: di
         return "an empty section is a gap, not a written chapter"
     missing: list[str] = []
     for record in _grounded_records(root, target_id, target_kind):
+        where = f" [{record['id']}]" if target_kind != "paragraph" and isinstance(record.get("id"), str) else ""
         for formula in _ungrounded_formulas(root, record):
-            if formula not in missing:
-                missing.append(formula)
+            labelled = formula + where
+            if labelled not in missing and not any(item.startswith(formula + " [") for item in missing):
+                missing.append(labelled)
     if missing:
         return (
             "the formula is not grounded by a cited excerpt, a replayed example, or a checked derivation: "

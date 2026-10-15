@@ -43,7 +43,14 @@ from studium.authoring.languages import (
 from studium.authoring.math_verify import section_has_strong_verification
 from studium.authoring.paragraphs import supported_paragraphs, supported_section_ids
 from studium.authoring.problems import REPRODUCIBILITY_TEXT, RUST_NOT_WORKED_PROBLEM, problem_result_current
-from studium.authoring.section_blocks import blocked_ids, blocked_sections, mark_blocked, offers_for, remember_offer
+from studium.authoring.section_blocks import (
+    blocked_ids,
+    blocked_sections,
+    mark_blocked,
+    offers_for,
+    release_block,
+    remember_offer,
+)
 from studium.authoring.support import draft_source_usable
 from studium.domain.enums import ProjectState
 from studium.domain.profiles import BOOK_TOPIC, DepthThresholds, depth_thresholds
@@ -614,12 +621,25 @@ def _render_step(
     )
 
 
+def _replay_exists(root: Path, profile: str) -> bool:
+    """True when a stored check already answers the 'no replayed check' block."""
+
+    if profile == "COMPUTER_SCIENCE":
+        return any(
+            record.get("kind") == "rust" and record.get("status") == "checked" and record.get("correct") is True
+            for record in fold_by_id(root / PROBLEMS)
+        )
+    return any(item.get("status") == "replayed" and item.get("correct") is True for item in list_computations(root))
+
+
 def _pending_problem(root: Path, sections: list[dict[str, str]]) -> dict[str, object] | None:
     profile = _profile(root)
     if profile not in _CODE_OR_CALCULATION or not sections:
         return None
     section = next((item for item in sections if not is_support_section(item["id"])), sections[0])
     section_id = section["id"]
+    if section_id in blocked_ids(root) and _replay_exists(root, profile):
+        release_block(root, section_id=section_id)
     if section_id in blocked_ids(root):
         return None
     if profile == "COMPUTER_SCIENCE":

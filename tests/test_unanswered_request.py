@@ -49,3 +49,15 @@ def test_second_request_sentence_is_counted():
 def test_combined_quantity_is_one_request():
     assert unanswered_request("Find the sum of the mass and the volume.", _ONE) is None
     assert unanswered_request("Calculate the ratio of the pressure and the volume.", _ONE) is None
+
+
+def test_bare_second_noun_is_a_second_request():
+    flagged = unanswered_request("Find the pressure and temperature of the gas.", _ONE)
+    assert flagged is not None
+    assert flagged["requested"] == 2
+    assert unanswered_request("Find the pressure and temperature of the gas.", _TWO) is None
+
+
+def test_bare_second_noun_does_not_split_substances_or_values():
+    assert unanswered_request("Find the mass of oxygen and nitrogen.", _ONE) is None
+    assert unanswered_request("Find the work for 300 K and 400 K.", _ONE) is None
