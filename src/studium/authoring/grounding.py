@@ -1271,6 +1271,7 @@ def _plain_math(text: str) -> str:
 
     text = re.sub(r"\\\\(?:\[\d*(?:\.\d+)?(?:ex|em|pt|mm|cm)?\]?)?", " ; ", text).replace("&", "")
     text = re.sub(r"\\(?:begin|end)\{(?:aligned|align\*?|gathered|gather\*?|split|eqnarray\*?)\}", " ; ", text)
+    text = re.sub(r"\\[cdt]frac(?![A-Za-z])", r"\\frac", text)
     out = []
     for index, character in enumerate(text):
         command = _GREEK_LETTERS.get(character)
