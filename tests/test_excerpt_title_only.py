@@ -25,3 +25,21 @@ def test_passage_that_mentions_the_title_is_accepted(tmp_path):
     text = "OpenStax 3.3 First Law: the change in internal energy equals Q minus W."
     result = dispatch("studium_excerpt_record", {"source_id": source_id, "url": url, "text": text}, session=session)
     assert result["status"] == "recorded", result
+
+
+def test_excerpt_on_another_host_is_flagged_not_rejected(tmp_path):
+    session, source_id, url = _source(tmp_path)
+    same = dispatch(
+        "studium_excerpt_record",
+        {"source_id": source_id, "url": url, "text": "The first law states that energy is conserved in a closed system."},
+        session=session,
+    )
+    assert same["status"] == "recorded"
+    assert "host_differs_from_source" not in same["excerpt"]
+    other = dispatch(
+        "studium_excerpt_record",
+        {"source_id": source_id, "url": "https://mirror.example/page", "text": "Energy of an isolated system stays constant over time."},
+        session=session,
+    )
+    assert other["status"] == "recorded"
+    assert other["excerpt"]["host_differs_from_source"] is True
