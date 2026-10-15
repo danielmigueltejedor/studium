@@ -265,3 +265,19 @@ def test_numeric_matrix_relations_are_checked(tmp_path, monkeypatch):
         session, r"La matriz de rigidez del muelle es $\mathbf{K} = \begin{bmatrix} k & -k \\ -k & k \end{bmatrix}$ en general.", [excerpt]
     )
     assert _statuses(root, symbolic) == ["not_machine_checkable"]
+
+
+def test_equivalence_check_is_bounded_on_large_numeric_and_transcendental_relations():
+    """Found on book-01: simplify() on a relation with large powers and logs ran for minutes."""
+
+    import time
+
+    from studium.authoring.grounding import equivalent_math
+
+    started = time.perf_counter()
+    assert equivalent_math(r"\Delta v = 3000\ln 5", r"\Delta v = 3000\ln(25)/2") is False
+    assert equivalent_math(r"v = \sqrt{2\cdot 9{,}81\cdot 1000^{7}}", r"v = \sqrt{2 g h}") is False
+    assert equivalent_math(r"y = e^{x}\ln(x)^{9}(x+1)^{8}", r"y = e^{x}\ln(x)^{9}(x+1)^{8}") is True
+    # Different symbols are never the same relation.
+    assert equivalent_math("p = F/A", "q = F/A") is False
+    assert time.perf_counter() - started < 5
