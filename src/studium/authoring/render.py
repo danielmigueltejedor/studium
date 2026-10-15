@@ -2371,12 +2371,38 @@ def _answer_check_lines(answer_check: object, language: BookLanguage) -> list[st
     ]
 
 
+def prose_equation_labels(root: Path) -> set[str]:
+    """Every ``\\label{eq:...}`` written in the stored prose of the book, as rendered label commands."""
+
+    found: set[str] = set()
+    for paragraph in supported_paragraphs(root):
+        text = paragraph.get("text")
+        if isinstance(text, str):
+            for match in _PROSE_EQ_LABEL.finditer(text):
+                found.add(_label("eq", match.group(1)))
+    return found
+
+
+_PROSE_EQ_LABEL = re.compile(r"\\label\{eq:([^{}]+)\}")
+
+
+def _numbered_math(tex: str, label: str) -> list[str]:
+    """A numbered display equation that carries ``label`` inside the environment."""
+
+    display = _display_math(tex)
+    inner = "\n".join(line for line in display if line)
+    if inner.startswith(r"\[") and inner.endswith(r"\]"):
+        inner = inner[2:-2].strip()
+    return ["", r"\begin{equation}", inner, label, r"\end{equation}"]
+
+
 def _derivation_box(root: Path, section_id: str, language: BookLanguage) -> list[str]:
     """The recorded derivations of this chapter with their stored check status."""
 
     records = derivations_for_section(root, section_id)
     if not records:
         return []
+    prose_labels = prose_equation_labels(root)
     label = _extra_label(language, "derivations")
     body: list[str] = []
     for record in records:
@@ -2385,9 +2411,15 @@ def _derivation_box(root: Path, section_id: str, language: BookLanguage) -> list
         equation_id = _str_field(record, "equation_id")
         body.extend(["", r"\noindent\textbf{" + latex_escape(name.strip() or label) + "}"])
         if equation.strip():
-            body.extend(_display_math(equation))
-            if equation_id.strip():
-                body.append(_label("eq", equation_id))
+            target = _label("eq", equation_id) if equation_id.strip() else ""
+            if target and target not in prose_labels:
+                # The derivation is the only place this equation is stated: number it, so that an
+                # \eqref from the prose resolves to an equation number and not to the section counter.
+                body.extend(_numbered_math(equation, target))
+            else:
+                # The prose already numbers and labels this equation; a second label would be a
+                # LaTeX "multiply defined" warning and a hyperlink that may land on the wrong copy.
+                body.extend(_display_math(equation))
         for key, label_key in (
             ("assumptions", "assumptions"),
             ("governing_principles", "principles"),

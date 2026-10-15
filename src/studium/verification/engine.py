@@ -389,8 +389,16 @@ def verify_limit(
     return _failed(method, f"the limit is {computed}, not {claimed}")
 
 
+_INFINITE_POINTS = {"oo": sympy.oo, "+oo": sympy.oo, "inf": sympy.oo, "infinity": sympy.oo, "-oo": -sympy.oo, "-inf": -sympy.oo, "-infinity": -sympy.oo}
+
+
 def _limit_point(point: str, declared: set[str]) -> tuple[sympy.Expr, str]:
     text = point.strip()
+    infinite = _INFINITE_POINTS.get(text.lower())
+    if infinite is not None:
+        # A limit at infinity is common in physics (a wall moved to infinity, a ratio of speeds
+        # growing without bound); the expression parser has no symbol for it.
+        return infinite, "+"
     direction = "+"
     if text.endswith("+"):
         text, direction = text[:-1], "+"
