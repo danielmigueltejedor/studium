@@ -134,7 +134,8 @@ def family_laws(family_name: object, spec: object, options: Options) -> list[str
         return []
     try:
         return found.laws(spec, options)
-    except (DataError, ValueError, ZeroDivisionError, TypeError):
+    except (DataError, ArithmeticError, LookupError, TypeError, ValueError):
+        # Typesetting must never stop a render; the laws are an aid, the checks live elsewhere.
         return []
 
 

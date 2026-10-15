@@ -996,6 +996,8 @@ def _tex_poly(expr: sympy.Expr, comma: bool) -> str:
             body = variable if number == "1" else f"{number}\\,{variable}"
         sign = "-" if negative else "+"
         pieces.append((sign, body))
+    if not pieces:
+        return "0"
     first_sign, first_body = pieces[0]
     text = ("-" if first_sign == "-" else "") + first_body
     for sign, body in pieces[1:]:

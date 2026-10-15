@@ -360,3 +360,15 @@ def test_book_symbols_name_the_laws_and_panels():
     assert "$C_y$ (kN)" in tikz and "$M_z$" in tikz
     with pytest.raises(DataError):
         parse_beam({**spec, "symbols": {"V": "\\input{x}"}})
+
+
+def test_laws_typeset_a_zero_piece():
+    """Regression: a law that is zero on one interval (N beyond the last axial load) crashed the renderer."""
+
+    solution = _beam(
+        length=5,
+        supports=[{"at": 0, "type": "pin", "name": "A"}, {"at": 5, "type": "roller", "name": "B"}],
+        loads=[{"type": "point", "at": 2, "value": 10, "direction": "right"}],
+    )
+    blocks = laws_latex(solution)
+    assert blocks[0].startswith("N(x)") and "0 & 2 < x < 5" in blocks[0]
