@@ -339,6 +339,20 @@ def _book_next(root: Path) -> dict[str, object]:
     if unfinished is not None:
         return unfinished
     if not _review_passed(root):
+        unaudited = _pending_audit(root, repeat=True)
+        if unaudited is not None:
+            return _step(
+                state,
+                "studium_audit_record",
+                {"target": unaudited},
+                (
+                    f"Review is blocked: {unaudited} still has paragraphs without an accepted audit. "
+                    "Record the audit citing a passed tool result. If it was rejected because a formula is "
+                    "not grounded, rewrite the paragraph citing an excerpt that states the formula, or drop "
+                    "the formula, then audit again."
+                ),
+                blocked=blocked_sections(root),
+            )
         return _step(
             state,
             "studium_book_review",
@@ -1502,7 +1516,14 @@ def _pending_figure_reference(
     )
 
 
-def _pending_audit(root: Path) -> str | None:
+def _pending_audit(root: Path, *, repeat: bool = False) -> str | None:
+    """First section with unaudited paragraphs.
+
+    Each section is offered once so a client is not nagged; ``repeat`` ignores
+    that memory for the blocked-review fallthrough, where a rejected or skipped
+    audit would otherwise leave only a generic "review again" step.
+    """
+
     covered = audited_paragraph_ids(root)
     gaps = explicit_gap_ids(root)
     for section in current_sections(root):
@@ -1512,9 +1533,10 @@ def _pending_audit(root: Path) -> str | None:
         identifiers = [record.get("id") for record in paragraphs if isinstance(record.get("id"), str)]
         if not identifiers or all(identifier in covered for identifier in identifiers):
             continue
-        if offers_for(root, section["id"], "audit"):
-            continue
-        remember_offer(root, section_id=section["id"], kind="audit")
+        if not repeat:
+            if offers_for(root, section["id"], "audit"):
+                continue
+            remember_offer(root, section_id=section["id"], kind="audit")
         return section["id"]
     return None
 
