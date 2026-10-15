@@ -219,6 +219,36 @@ def test_one_sentence_chapter_is_too_short(tmp_path, monkeypatch):
     assert (root / ".studium" / "state.json").read_bytes() == state_before
 
 
+def test_short_lead_and_tip_do_not_make_a_chapter_too_short(tmp_path, monkeypatch):
+    monkeypatch.setattr("urllib.request.urlopen", _explode)
+    session, root = _topic(tmp_path, "historia", "Historia medieval")
+    _section(session)
+    source_id = _source(session, "https://open.example/one")
+    excerpt_id = _excerpt(session, source_id, "https://open.example/one")
+    _paragraph(session, "tema-1", "Why mass is conserved.", [excerpt_id], role="purpose")
+    _paragraph(session, "tema-1", f"The density is 2. {_TEACH}", [excerpt_id], role="explanation")
+    _paragraph(session, "tema-1", f"The density equals 2. {_TEACH}", [excerpt_id], role="explanation")
+    _paragraph(session, "tema-1", "Check the unit first.", [excerpt_id], role="consejo")
+    from studium.authoring.audit import review_blockers, section_needs_more_prose, short_paragraph_id
+
+    assert short_paragraph_id(root, "tema-1") is None
+    assert section_needs_more_prose(root, "tema-1") is False
+    assert not any("too short" in reason for reason in review_blockers(root))
+
+
+def test_lead_and_tip_alone_are_still_too_short(tmp_path, monkeypatch):
+    monkeypatch.setattr("urllib.request.urlopen", _explode)
+    session, root = _topic(tmp_path, "historia", "Historia medieval")
+    _section(session)
+    source_id = _source(session, "https://open.example/one")
+    excerpt_id = _excerpt(session, source_id, "https://open.example/one")
+    _paragraph(session, "tema-1", "Why mass is conserved.", [excerpt_id], role="purpose")
+    _paragraph(session, "tema-1", "Check the unit first.", [excerpt_id], role="consejo")
+    from studium.authoring.audit import section_needs_more_prose
+
+    assert section_needs_more_prose(root, "tema-1") is True
+
+
 def test_multiparagraph_chapter_renders_in_book_shape(tmp_path, monkeypatch):
     monkeypatch.setattr("urllib.request.urlopen", _explode)
     session, root = _topic(tmp_path, "historia", "Historia medieval")
@@ -230,7 +260,8 @@ def test_multiparagraph_chapter_renders_in_book_shape(tmp_path, monkeypatch):
     left, right = _two_excerpts(session)
     first = f"The density is 2. {_TEACH}"
     second = f"The density equals 2. {_TEACH}"
-    _paragraph(session, "tema-1", first, [left, right], role="purpose")
+    _paragraph(session, "tema-1", "This section states the stored density.", [left, right], role="purpose")
+    _paragraph(session, "tema-1", first, [left, right], role="explanation")
     _paragraph(session, "tema-1", second, [left, right], role="explanation")
     _paragraph(session, "tema-1", "Restate the stored density in your own words.", [left], role="self_check")
     claim = dispatch(
@@ -277,7 +308,7 @@ def test_multiparagraph_chapter_renders_in_book_shape(tmp_path, monkeypatch):
     how_to = tex.index("How to use this book")
     contents = tex.index(r"\tableofcontents")
     chapter = tex.index(r"\chapter{Conservation of mass}")
-    purpose = tex.index(r"\textit{" + first.split(".", 1)[0])
+    purpose = tex.index(r"\textit{This section states the stored density")
     explanation = tex.index(second)
     worked = tex.index(r"\begin{tcolorbox}[title={Worked problem}")
     self_check = tex.index(r"\begin{tcolorbox}[title={Self-check}")
