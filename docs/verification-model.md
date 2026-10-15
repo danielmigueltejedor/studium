@@ -86,6 +86,23 @@ Every intermediate and final value must be zero or have a magnitude between `1e-
 
 ## Equations in prose
 
-Grounding works on complete relations. Every `$…$`, `$$…$$`, `\(…\)` and `\[…\]` span is split at top-level separators (`\quad`, `, `, `;`, `\text{ … }`, `\\`) and relation operators, so `a = b = c` gives `a = b` and `b = c`; plain-text relations outside math spans are kept only when both sides are whole. A fragment such as `= -p` is never a statement, and a relation is never grounded because its text is a substring of a longer one.
+Grounding works on complete relations. Every `$…$`, `$$…$$`, `\(…\)` and `\[…\]` span is split at top-level separators (`\quad`, `, `, `;`, `\text{ … }`, `\\`) and relation operators, so `a = b = c` gives `a = b` and `b = c`; plain-text relations outside math spans are kept only when both sides are whole. A fragment such as `= -p` is never a statement, and a relation is never grounded because its text is a substring of a longer one. The statement is kept exactly as written.
 
-Each relation gets one status: `source` (a cited excerpt states the whole relation), `derivation` (the final equation or symbolic form of a derivation with a passing check), `example` (a replayed computation), `arithmetic` (a relation between plain numbers that holds at its written precision), `condition` (a value or condition such as `x = 0`), `derivation_step` (only an unchecked step of a derivation states it), `definition` (`\equiv`, `:=`), `approximation` (`\approx`), `not_checkable` (the relation parser cannot read it: bold vectors, integrals, operators), `ungrounded`, or `arithmetic_mismatch`. Only `ungrounded` (a relation the parser reads and nothing backs) and `arithmetic_mismatch` block an audit. The source-audit appendix prints the counts per paragraph and `studium_quality_report` reports them under `math_grounding.by_status`. A derivation step and a non-checkable relation are labelled, not counted as checked.
+Each equation claim gets the strongest status its stored evidence gives that exact statement:
+
+| Status | Evidence | Blocks the evidence audit |
+|---|---|---|
+| `symbolically_verified` | final equation of a derivation whose check is symbolic or independent, or a passing `studium_math_verify` equation/equivalence | no |
+| `dimensionally_verified` | final equation of a derivation with only a dimensional check | no |
+| `numerically_reproduced` | a replayed computation, a derivation with only a numeric check, or numbers that hold at their written precision | no |
+| `source_supported` | a cited excerpt states the whole relation (not a proof) | no |
+| `derived_steps_unchecked` | only an intermediate step of a checked derivation states it | no |
+| `numerically_ambiguous` | numbers that hold only if trailing zeros are placeholders | no |
+| `not_machine_checkable` | nothing backs it and the relation parser cannot read it | no — needs human review |
+| `unsupported` | nothing backs it although the parser can read it | yes |
+| `contradicted` | its own numbers do not hold | yes |
+| `verification_failed` | a stored check of the same equation failed and nothing passing backs it | yes |
+
+Definitions (`\equiv`, `:=`), approximations (`\approx`) and values or conditions (`x = 0`, `r = R`) are not claims. An unparseable equation can only be `source_supported` or `not_machine_checkable`; it is never verified by the parser. `studium_equation_report` lists every equation with its status, evidence ids, whether it is a display equation and whether a person must still review it. The source-audit appendix prints only per-paragraph counts, never a label after each equation.
+
+Draft, evidence audit, scientific verification, human approval and publication readiness are separate stages (`stages` in `studium_quality_report` and `studium_book_review`). A draft renders with unverified mathematics; `audit_passed` is the evidence audit only; scientific verification is complete only when every equation claim is verified; no human approval is recorded by Studium yet.
