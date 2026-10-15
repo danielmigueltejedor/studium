@@ -452,6 +452,18 @@ def test_topic_book_without_a_guide_builds_a_study_outline(tmp_path, monkeypatch
     assert "ask the user" not in json.dumps(nxt).lower().replace("do not ask the user how to format the page.", "")
 
 
+def test_short_support_section_is_not_too_short_for_review(tmp_path, monkeypatch):
+    monkeypatch.setattr("urllib.request.urlopen", _explode)
+    session, root = _topic(tmp_path, "historia", "Historia medieval")
+    _section(session, "self-check", "Self-check")
+    source_id = _source(session, "https://open.example/one")
+    excerpt_id = _excerpt(session, source_id, "https://open.example/one")
+    _paragraph(session, "self-check", "Which unit does density use?", [excerpt_id])
+    from studium.authoring.audit import review_blockers
+
+    assert not any("too short" in reason for reason in review_blockers(root))
+
+
 def _topic(tmp_path, slug: str, topic: str):
     session = open_workspace(str(tmp_path))
     assert (
