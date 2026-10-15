@@ -2115,7 +2115,7 @@ def _symbol_tex(name: str) -> str:
     if not cleaned:
         return ""
     try:
-        return symbolic_latex(cleaned, symbols=(cleaned,))
+        return symbolic_latex(cleaned)
     except MathError:
         pass
     named = _named_subscript(cleaned)

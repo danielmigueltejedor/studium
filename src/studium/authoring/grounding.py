@@ -1252,10 +1252,63 @@ def _same_relation(statement: str, other: str) -> bool:
     return False
 
 
+_GREEK_LETTERS = {
+    "α": r"\alpha", "β": r"\beta", "γ": r"\gamma", "δ": r"\delta", "ε": r"\varepsilon", "ζ": r"\zeta", "η": r"\eta",
+    "θ": r"\theta", "κ": r"\kappa", "λ": r"\lambda", "μ": r"\mu", "ν": r"\nu", "ξ": r"\xi", "π": r"\pi", "ρ": r"\rho",
+    "σ": r"\sigma", "τ": r"\tau", "φ": r"\phi", "χ": r"\chi", "ψ": r"\psi", "ω": r"\omega",
+    "Γ": r"\Gamma", "Δ": r"\Delta", "Θ": r"\Theta", "Λ": r"\Lambda", "Ξ": r"\Xi", "Π": r"\Pi", "Σ": r"\Sigma",
+    "Φ": r"\Phi", "Ψ": r"\Psi", "Ω": r"\Omega",
+}  # fmt: skip
+
+
+def _plain_math(text: str) -> str:
+    """An excerpt typed with Unicode Greek letters and square brackets, as LaTeX: ``τ / γ`` becomes ``\\tau / \\gamma``."""
+
+    out = []
+    for index, character in enumerate(text):
+        command = _GREEK_LETTERS.get(character)
+        if command is None:
+            out.append("(" if character == "[" else ")" if character == "]" else character)
+            continue
+        following = text[index + 1] if index + 1 < len(text) else ""
+        out.append(command + (" " if following.isalnum() else ""))
+    return "".join(out)
+
+
+_WORD = re.compile(r"(?!(?:dx|dy|dz|dt|ds|dA|dV)[,;:.]?$)[A-Za-z]{2,}[,;:.]?")
+
+
+def _chain_relations(body: str) -> list[str]:
+    """Every pair of sides of a plain-text equality chain: ``a = b = c`` also states ``a = c``.
+
+    A chain is a run of tokens around ``=`` that contains no English word (two or more bare letters).
+    """
+
+    tokens = _plain_math(body).split()
+    pairs: list[str] = []
+    index = 0
+    while index < len(tokens):
+        if _WORD.fullmatch(tokens[index]):
+            index += 1
+            continue
+        end = index
+        while end < len(tokens) and not _WORD.fullmatch(tokens[end]):
+            end += 1
+        run = " ".join(tokens[index:end]).strip(" .,;:")
+        run = re.sub(r"^\.+\s*", "", run)
+        sides = [side.strip() for side in re.split(r"(?<![<>!:=])=(?!=)", run)]
+        if len(sides) >= 2:
+            pairs.extend(f"{sides[a]} = {sides[b]}" for a in range(len(sides)) for b in range(a + 1, len(sides)) if sides[a] and sides[b])
+        index = end + 1
+    return pairs
+
+
 def _stated_in(statement: str, body: str) -> bool:
     """A cited excerpt states the whole relation, not a part of a longer one."""
 
     if any(_same_relation(statement, candidate) for kind, candidate in math_statements(body) if kind == "claim"):
+        return True
+    if any(character in body for character in _GREEK_LETTERS) and any(_same_relation(statement, pair) for pair in _chain_relations(body)):
         return True
     needle = normalize_math(statement)
     haystack = normalize_math(body)

@@ -27,5 +27,6 @@ def test_greek_words_with_subscripts_are_typeset(name, tex):
     assert _symbol_tex(name) == tex
 
 
-def test_euler_constant_still_reads_as_a_constant_without_the_flag():
-    assert symbolic_latex("E**2") == "e^{2}"
+def test_euler_number_is_lowercase_e_and_capital_e_is_a_symbol():
+    assert symbolic_latex("e**2") == "e^{2}"
+    assert symbolic_latex("E**2") == "E^{2}"

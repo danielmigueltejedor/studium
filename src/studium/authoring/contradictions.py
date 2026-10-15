@@ -33,8 +33,12 @@ from studium.storage.records import (
     fold_by_id,
 )
 
+#: A number as a book writes it: ``9.81``, the typeset decimal comma ``9{,}81`` and, in Spanish prose, ``9,81``
+#: (a comma followed by one or two digits, or four or more, is a decimal; ``1,000`` stays a thousands group).
+_NUMBER = r"-?\d+(?:(?:\{,\}|\.)\d+|,\d{1,2}(?!\d)|,\d{4,})?"
+
 _QUANTITY = re.compile(
-    r"\b([A-Za-z][A-Za-z0-9_-]{1,40})\s*(?:=|is|equals)\s*(-?\d+(?:\.\d+)?)",
+    rf"\b([A-Za-z][A-Za-z0-9_-]{{1,40}})\s*(?:=|is|equals)\s*({_NUMBER})",
     re.IGNORECASE,
 )
 
@@ -332,7 +336,7 @@ def _canon_number(raw: str) -> str:
         if number.denominator == 1:
             return str(number.numerator)
         return f"{number.numerator}/{number.denominator}"
-    number = float(raw)
+    number = float(raw.replace("{,}", ".").replace(",", "."))
     if number == int(number):
         return str(int(number))
     return str(number)

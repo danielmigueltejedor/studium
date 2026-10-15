@@ -26,9 +26,10 @@ _MAX_POW_EXPONENT = 10_000
 _MAX_POW_BITS = 1_000_000
 
 #: Names that always resolve to a mathematical constant, never a symbol.
+#: Euler's number is ``e``. Capital ``E`` is an ordinary symbol: in a structures book it is Young's modulus,
+#: and reading it as 2.718... made every check on a formula with E vacuous.
 CONSTANTS: dict[str, sympy.Expr] = {
     "pi": sympy.pi,
-    "E": sympy.E,
     "e": sympy.E,
 }
 
