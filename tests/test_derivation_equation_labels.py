@@ -18,7 +18,9 @@ from studium.mcp.server import dispatch
 def _book(tmp_path, monkeypatch, prose_label: bool):
     monkeypatch.setattr("urllib.request.urlopen", lambda *a, **k: (_ for _ in ()).throw(AssertionError("network")))
     session, root = _project(tmp_path)
-    dispatch("studium_blueprint_store", {"sections": [{"id": "presion", "title": "Presión hidrostática"}]}, session=session)
+    dispatch(
+        "studium_blueprint_store", {"sections": [{"id": "presion", "title": "Presión hidrostática"}]}, session=session
+    )
     excerpts = _excerpts(session)
     labelled = (
         "La presión de un fluido en reposo crece con la profundidad. Integrando la hidrostática,\n"
