@@ -12,10 +12,12 @@ def _paragraph(session, text, excerpts):
     return recorded["paragraph"]
 
 
-def _derivation_with_steps(session, equation, steps):
+def _derivation_with_steps(session, equation, steps, symbolic=None):
+    # Checks bind to the stored symbolic final equation: for these plain-text equations it is the first relation.
+    bound = symbolic if symbolic is not None else equation.split(",")[0].strip()
     recorded = dispatch(
         "studium_derivation_record",
-        {"section": "presion", "name": "Presión", "equation": equation, "steps_latex": steps},
+        {"section": "presion", "name": "Presión", "equation": equation, "symbolic": bound, "steps_latex": steps},
         session=session,
     )
     assert recorded["status"] == "recorded", recorded
@@ -213,18 +215,19 @@ def test_equation_of_an_independently_verified_derivation_is_symbolically_verifi
     monkeypatch.setattr("urllib.request.urlopen", _explode)
     session, root = _book(tmp_path)
     excerpt = _excerpt(session, "La presión es fuerza por unidad de área.")
-    derivation = _derivation_with_steps(session, "V^2 = 2 g h", [])
+    derivation = _derivation_with_steps(session, r"V = \sqrt{2 g h}", [], symbolic="V = sqrt(2*g*h)")
     checked = dispatch(
         "studium_derivation_check",
         {
             "id": derivation,
+            # A premise that differs from the stored equation and that the stored equation solves.
             "symbolic": {"equation_left": "V^2", "equation_right": "2*g*h", "solution": {"V": "sqrt(2*g*h)"}},
             "numeric": {"expression": "sqrt(2*g*h)", "values": {"g": 9.81, "h": 4.905}, "claimed": 9.81},
         },
         session=session,
     )
     assert checked["verification_status"] == "INDEPENDENTLY_VERIFIED", checked
-    paragraph = _paragraph(session, r"Torricelli da $V^{2} = 2gh$ para la descarga libre.", [excerpt])
+    paragraph = _paragraph(session, r"Torricelli da $V = \sqrt{2 g h}$ para la descarga libre.", [excerpt])
     items = equation_evidence(root, paragraph)
     assert [(item["status"], item["evidence"]) for item in items] == [("symbolically_verified", [derivation])]
 
@@ -372,8 +375,9 @@ def test_a_relation_chained_in_a_derivation_equation_is_not_individually_verifie
     _check_numeric(session, derivation, "F / A", {"F": 100, "A": 2}, 50)
     paragraph = _paragraph(session, r"Se tiene $q = F / (2 A)$ en la sección y $p = F / A$ en general.", [excerpt])
     statuses = dict(formula_statuses(root, paragraph))
-    # The check ran on one expression; neither relation of the two-relation equation is individually covered.
-    assert set(statuses.values()) == {"derived_steps_unchecked"}
+    # The check is bound to the stored symbolic form (the first relation); the second relation of the
+    # two-relation equation is not individually covered.
+    assert statuses == {"q = F / (2 A)": "derived_steps_unchecked", "p = F / A": "numerically_reproduced"}
 
 
 def test_unresolved_important_count_is_not_capped_by_the_listing(tmp_path, monkeypatch):
@@ -387,3 +391,30 @@ def test_unresolved_important_count_is_not_capped_by_the_listing(tmp_path, monke
     assert len(summary["unresolved_important"]) == 50
     review = dispatch("studium_book_review", {}, session=session)
     assert review["scientific_verification"]["unresolved_important_equations"] == 53
+
+
+def test_a_check_recorded_before_binding_does_not_verify_the_typeset_equation(tmp_path, monkeypatch):
+    """Projects recorded before checks were tied to the stored equation keep their status, not a stronger claim."""
+
+    import json
+
+    monkeypatch.setattr("urllib.request.urlopen", _explode)
+    session, root = _book(tmp_path)
+    excerpt = _excerpt(session, "La presión es fuerza por unidad de área.")
+    derivation = _derivation_with_steps(session, "p = F / A", [])
+    _check_numeric(session, derivation, "F / A", {"F": 100, "A": 2}, 50)
+    paragraph = _paragraph(session, r"La presión media es $p = \frac{F}{A}$ en pascales.", [excerpt])
+    assert _statuses(root, paragraph) == ["numerically_reproduced"]
+    path = root / "problems" / "derivations.jsonl"
+    rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    legacy = dict(rows[-1])
+    legacy["verification"] = {key: value for key, value in legacy["verification"].items() if key != "bound_to"}
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(legacy) + "\n")
+    assert _statuses(root, paragraph) == ["derived_steps_unchecked"]
+    # Changing the stored symbolic form after the check also drops the claim.
+    changed = dict(rows[-1])
+    changed["symbolic"] = "p = F / (A * 1)"
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(changed) + "\n")
+    assert _statuses(root, paragraph) == ["derived_steps_unchecked"]

@@ -281,7 +281,11 @@ def check_derivation(
             failed = failed or item.get("status") == "FAILED"
     overall = _overall(results)
     updated = dict(current)
-    updated["verification"] = {"status": overall, "checks": results, "checked_at": utc_now()}
+    verification: dict[str, object] = {"status": overall, "checks": results, "checked_at": utc_now()}
+    if stored is not None:
+        # The checks above were bound to this exact stored form; a later change of ``symbolic`` makes them stale.
+        verification["bound_to"] = current.get("symbolic")
+    updated["verification"] = verification
     try:
         with project_lock(root):
             append_jsonl(root / DERIVATIONS, updated)
