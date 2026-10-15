@@ -201,32 +201,44 @@ def equivalent_math(left: str, right: str) -> bool:
     if _canon(left) == _canon(right) and "=" in _canon(left):
         return True
 
-    import sympy
-
     first = _relation(left)
     second = _relation(right)
 
     if first is None or second is None:
         return False
 
+    return _same_up_to_constant(cast(Any, first), cast(Any, second))
+
+
+#: An expression with more operations than this is not compared symbolically.
+_MAX_OPS = 120
+
+
+def _same_up_to_constant(first: Any, second: Any) -> bool:
+    """Whether two residuals (``lhs - rhs``) are equal or differ by a nonzero constant factor.
+
+    Exact and bounded: the same free symbols, ``expand`` and ``cancel`` only
+    (no ``simplify``, whose cost is unbounded). Transcendental functions are
+    treated as atoms, so an identity that needs a trigonometric or logarithmic
+    rewrite is not recognised; that is a missed match, never a false one.
+    """
+
+    import sympy
+
+    if first.free_symbols != second.free_symbols:
+        return False
+    if sympy.count_ops(first) > _MAX_OPS or sympy.count_ops(second) > _MAX_OPS:
+        return False
     try:
         first_num, _ = sympy.fraction(sympy.together(first))
         second_num, _ = sympy.fraction(sympy.together(second))
-
-        if sympy.simplify(first_num - second_num) == 0:
+        if sympy.expand(first_num - second_num) == 0 or sympy.expand(first_num + second_num) == 0:
             return True
-
-        if sympy.simplify(first_num + second_num) == 0:
-            return True
-
-        if second_num == 0:
+        if second_num == 0 or first_num == 0:
             return False
-
         ratio = sympy.cancel(first_num / second_num)
-
         return bool(ratio.is_number and ratio.is_nonzero is True)
-
-    except (TypeError, ValueError, ZeroDivisionError, AttributeError):
+    except (TypeError, ValueError, ZeroDivisionError, AttributeError, RecursionError):
         return False
 
 
@@ -787,6 +799,13 @@ _TRAILING = " ,;.:"
 
 
 def math_statements(text: str) -> list[tuple[str, str]]:
+    """See :func:`_math_statements`; the result is memoized per text and returned as a new list."""
+
+    return list(_math_statements(text))
+
+
+@lru_cache(maxsize=4096)
+def _math_statements(text: str) -> tuple[tuple[str, str], ...]:
     """Every complete relation in a passage, as ``(kind, "lhs op rhs")``.
 
     Math spans (``$..$``, ``$$..$$``, ``\\(..\\)``, ``\\[..\\]``) are split at their
@@ -818,7 +837,7 @@ def math_statements(text: str) -> list[tuple[str, str]]:
             # Plain-text relations only: LaTeX outside a math span is not read in pieces.
             if "\\" not in formula and _complete_side(left, -1) and _complete_side(right, 1):
                 found.append(("claim", formula))
-    return found
+    return tuple(found)
 
 
 def _span_body(match: re.Match[str]) -> str:
