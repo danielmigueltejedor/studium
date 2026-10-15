@@ -160,6 +160,14 @@ def test_draft_waits_for_a_passed_review(tmp_path, monkeypatch):
     assert "open contradiction: density" in blocked["reason"]
     assert blocked["released"] is False
 
+    # Unaudited paragraphs behind a failed review point at the audit step again,
+    # even though the one-time audit offer was already made.
+    with monkeypatch.context() as patch:
+        patch.setattr("studium.authoring.book_next.audited_paragraph_ids", lambda _root: set())
+        audit_again = dispatch("studium_book_next", {}, session=session)
+    assert audit_again["tool"] == "studium_audit_record"
+    assert audit_again["arguments"]["target"]
+
     # Only a passed review unlocks the draft.
     reviewed = _perform_next(session, nxt, excerpts)
     assert reviewed["audit_passed"] is True, reviewed.get("reasons")

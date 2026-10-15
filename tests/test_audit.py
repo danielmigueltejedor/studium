@@ -219,6 +219,36 @@ def test_one_sentence_chapter_is_too_short(tmp_path, monkeypatch):
     assert (root / ".studium" / "state.json").read_bytes() == state_before
 
 
+def test_short_lead_and_tip_do_not_make_a_chapter_too_short(tmp_path, monkeypatch):
+    monkeypatch.setattr("urllib.request.urlopen", _explode)
+    session, root = _topic(tmp_path, "historia", "Historia medieval")
+    _section(session)
+    source_id = _source(session, "https://open.example/one")
+    excerpt_id = _excerpt(session, source_id, "https://open.example/one")
+    _paragraph(session, "tema-1", "Why mass is conserved.", [excerpt_id], role="purpose")
+    _paragraph(session, "tema-1", f"The density is 2. {_TEACH}", [excerpt_id], role="explanation")
+    _paragraph(session, "tema-1", f"The density equals 2. {_TEACH}", [excerpt_id], role="explanation")
+    _paragraph(session, "tema-1", "Check the unit first.", [excerpt_id], role="consejo")
+    from studium.authoring.audit import review_blockers, section_needs_more_prose, short_paragraph_id
+
+    assert short_paragraph_id(root, "tema-1") is None
+    assert section_needs_more_prose(root, "tema-1") is False
+    assert not any("too short" in reason for reason in review_blockers(root))
+
+
+def test_lead_and_tip_alone_are_still_too_short(tmp_path, monkeypatch):
+    monkeypatch.setattr("urllib.request.urlopen", _explode)
+    session, root = _topic(tmp_path, "historia", "Historia medieval")
+    _section(session)
+    source_id = _source(session, "https://open.example/one")
+    excerpt_id = _excerpt(session, source_id, "https://open.example/one")
+    _paragraph(session, "tema-1", "Why mass is conserved.", [excerpt_id], role="purpose")
+    _paragraph(session, "tema-1", "Check the unit first.", [excerpt_id], role="consejo")
+    from studium.authoring.audit import section_needs_more_prose
+
+    assert section_needs_more_prose(root, "tema-1") is True
+
+
 def test_multiparagraph_chapter_renders_in_book_shape(tmp_path, monkeypatch):
     monkeypatch.setattr("urllib.request.urlopen", _explode)
     session, root = _topic(tmp_path, "historia", "Historia medieval")
@@ -230,7 +260,8 @@ def test_multiparagraph_chapter_renders_in_book_shape(tmp_path, monkeypatch):
     left, right = _two_excerpts(session)
     first = f"The density is 2. {_TEACH}"
     second = f"The density equals 2. {_TEACH}"
-    _paragraph(session, "tema-1", first, [left, right], role="purpose")
+    _paragraph(session, "tema-1", "This section states the stored density.", [left, right], role="purpose")
+    _paragraph(session, "tema-1", first, [left, right], role="explanation")
     _paragraph(session, "tema-1", second, [left, right], role="explanation")
     _paragraph(session, "tema-1", "Restate the stored density in your own words.", [left], role="self_check")
     claim = dispatch(
@@ -277,7 +308,7 @@ def test_multiparagraph_chapter_renders_in_book_shape(tmp_path, monkeypatch):
     how_to = tex.index("How to use this book")
     contents = tex.index(r"\tableofcontents")
     chapter = tex.index(r"\chapter{Conservation of mass}")
-    purpose = tex.index(r"\textit{" + first.split(".", 1)[0])
+    purpose = tex.index(r"\textit{This section states the stored density")
     explanation = tex.index(second)
     worked = tex.index(r"\begin{tcolorbox}[title={Worked problem}")
     self_check = tex.index(r"\begin{tcolorbox}[title={Self-check}")
@@ -426,6 +457,18 @@ def test_topic_book_without_a_guide_builds_a_study_outline(tmp_path, monkeypatch
     assert "ask the user" not in json.dumps(nxt).lower().replace("do not ask the user how to format the page.", "")
 
 
+def test_short_support_section_is_not_too_short_for_review(tmp_path, monkeypatch):
+    monkeypatch.setattr("urllib.request.urlopen", _explode)
+    session, root = _topic(tmp_path, "historia", "Historia medieval")
+    _section(session, "self-check", "Self-check")
+    source_id = _source(session, "https://open.example/one")
+    excerpt_id = _excerpt(session, source_id, "https://open.example/one")
+    _paragraph(session, "self-check", "Which unit does density use?", [excerpt_id])
+    from studium.authoring.audit import review_blockers
+
+    assert not any("too short" in reason for reason in review_blockers(root))
+
+
 def _topic(tmp_path, slug: str, topic: str):
     session = open_workspace(str(tmp_path))
     assert (
@@ -486,3 +529,24 @@ def _outside_boxes(tex: str) -> str:
 
 def _explode(*_args, **_kwargs):
     raise AssertionError("must not fetch")
+
+
+def test_ungrounded_formula_in_a_section_names_its_paragraph(tmp_path, monkeypatch):
+    monkeypatch.setattr("urllib.request.urlopen", _explode)
+    session, _root = _topic(tmp_path, "fluidos2", "Mecánica de fluidos")
+    _section(session, section_id="tema-1", title="Temperatura")
+    source_id = _source(session, "https://open.example/density")
+    excerpt_id = _excerpt(session, source_id, "https://open.example/density", text="The density is 2.")
+    paragraph = _paragraph(session, "tema-1", "The conversion is F = C × 9/5 + 32.", [excerpt_id])
+    computed = dispatch(
+        "studium_computation_check",
+        {"expression": "2 + 2", "result": 4, "section": "tema-1"},
+        session=session,
+    )
+    refused = dispatch(
+        "studium_audit_record",
+        {"target": "tema-1", "kind": "formula", "computation": computed["computation"]["id"]},
+        session=session,
+    )
+    assert refused["status"] == "audit.rejected"
+    assert f"F = C × 9/5 + 32 [{paragraph}]" in refused["message"]
