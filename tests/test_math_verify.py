@@ -356,3 +356,20 @@ def test_verification_timeout_is_a_typed_error():
 def test_statuses_never_reported_as_absolute():
     assert VerificationStatus.COMPUTATION_REPRODUCED.value != "INDEPENDENTLY_VERIFIED"
     assert VerificationStatus.SYMBOLICALLY_VERIFIED.value != "DIMENSIONALLY_VERIFIED"
+
+
+def test_limit_at_infinity():
+    """Found in the ULE Fluid Mechanics second edition: the ratio between the constant-force and the
+    constant-power drag constants, 2(r^2 + r + 1)/(r + 1)^2 with r = V2/V1, tends to 3/2 as r -> 1 and to 2
+    as r -> oo. The second limit could not be checked because 'oo' was an undeclared symbol."""
+
+    ratio = "2*(r**2 + r + 1)/(r + 1)**2"
+    assert verify_limit(ratio, variable="r", point="1", claimed="3/2").status == VerificationStatus.SYMBOLICALLY_VERIFIED
+    assert verify_limit(ratio, variable="r", point="1", claimed="1").status == VerificationStatus.FAILED
+    for point in ("oo", "inf", "infinity", "+oo"):
+        assert verify_limit(ratio, variable="r", point=point, claimed="2").status == VerificationStatus.SYMBOLICALLY_VERIFIED
+    assert verify_limit("exp(x)", variable="x", point="-oo", claimed="0").status == VerificationStatus.SYMBOLICALLY_VERIFIED
+    # A wall moved to infinity: the coaxial-cylinder torque tends to the isolated-cylinder torque.
+    torque = "4*pi*mu*W*R**2*R2**2/(R2**2 - R**2)"
+    result = verify_limit(torque, variable="R2", point="oo", claimed="4*pi*mu*W*R**2", symbols={"mu", "W", "R"})
+    assert result.status == VerificationStatus.SYMBOLICALLY_VERIFIED
