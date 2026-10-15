@@ -379,6 +379,9 @@ _SECOND_PART = re.compile(r"^(?:the|its|their|his|her)\b", re.IGNORECASE)
 _COMBINED = re.compile(
     r"\b(?:sum|difference|ratio|product|average|mean|total|between|combined)\b", re.IGNORECASE
 )
+# A bare second noun ("the pressure and temperature of the gas") names its own quantity.
+_BARE_SECOND = re.compile(r"^[A-Za-z]+(?:\s+[A-Za-z]+)?(?:\s+(?:of|in|at|for)\b.*)?$")
+_PREPOSITION = re.compile(r"\b(?:of|in|at|for|from|between|during|with|to|by|on)\b", re.IGNORECASE)
 _ENUMERATOR = re.compile(r"\((?:[a-h]|i{1,3}|iv|v)\)", re.IGNORECASE)
 _RESULT_MARK = re.compile(r"=|\\approx|\\to\b|\\simeq")
 
@@ -395,7 +398,17 @@ def _requested_quantities(prompt: str) -> int:
             total += 1
             continue
         parts = [part.strip() for part in re.split(r",\s*and\s+|\s+and\s+", clause) if part.strip()]
-        total += 1 + sum(1 for part in parts[1:] if _SECOND_PART.match(part))
+        extra = sum(1 for part in parts[1:] if _SECOND_PART.match(part))
+        if (
+            extra == 0
+            and len(parts) == 2
+            and not _PREPOSITION.search(parts[0])
+            and not _SECOND_PART.match(parts[1])
+            and _BARE_SECOND.match(parts[1])
+            and not re.search(r"\d", clause)
+        ):
+            extra = 1
+        total += 1 + extra
     return total
 
 
