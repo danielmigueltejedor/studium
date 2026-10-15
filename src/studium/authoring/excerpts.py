@@ -6,6 +6,7 @@ verified, accepted, or a source of authority.
 
 import hashlib
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from studium.policy.trust import contains_directive, directive_changes_policy
 from studium.research.local_text import extract_pages, find_quote
@@ -89,6 +90,8 @@ def record_excerpt(
                 "content_directives_ignored": contains_directive(body.encode("utf-8")),
                 "recorded_at": utc_now(),
             }
+            if source is not None and not _same_host(source.get("url"), opened):
+                record["host_differs_from_source"] = True
             append_jsonl(root / EXCERPTS, record)
             _audit(root, record=record, actor=actor)
             fresh = load_state_holding_lock(root)
@@ -228,6 +231,8 @@ def _listed(record: dict[str, object]) -> dict[str, object]:
         visible["quote_check"] = record.get("quote_check")
     if record.get("content_directives_ignored") is True:
         visible["content_directives_ignored"] = True
+    if record.get("host_differs_from_source") is True:
+        visible["host_differs_from_source"] = True
     return visible
 
 
@@ -243,6 +248,20 @@ def _body(state: dict[str, object], record: dict[str, object], *, status: str) -
 
 def _public(root: Path, source_id: str) -> dict[str, object] | None:
     return next((item for item in fold_by_id(root / PUBLIC_BIBLIOGRAPHY) if item.get("id") == source_id), None)
+
+
+def _host(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    host = (urlsplit(value.strip()).hostname or "").lower()
+    return host.removeprefix("www.") or None
+
+
+def _same_host(registered: object, opened: str) -> bool:
+    """True unless both hosts are known and differ. Advisory: a checked source may live elsewhere."""
+
+    first, second = _host(registered), _host(opened)
+    return first is None or second is None or first == second
 
 
 def _is_title_only(text: str, title: object) -> bool:
