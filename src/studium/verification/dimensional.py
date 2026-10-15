@@ -182,6 +182,10 @@ def check_dimensions(
     return DimensionCheck(dims=dims, expected=expected, consistent=consistent, detail=detail)
 
 
+#: Mathematical constants carry no dimension, so a formula with pi needs no entry for it.
+_DIMENSIONLESS_CONSTANTS = frozenset({"pi", "e"})
+
+
 def _walk(node: ast.AST, declared: dict[str, BaseDims], *, depth: int) -> BaseDims:
     if depth > 24:
         raise DimensionError("formula nests too deeply")
@@ -192,6 +196,8 @@ def _walk(node: ast.AST, declared: dict[str, BaseDims], *, depth: int) -> BaseDi
         return _zero()
 
     if isinstance(node, ast.Name):
+        if node.id in _DIMENSIONLESS_CONSTANTS and node.id not in declared:
+            return _zero()
         if node.id not in declared:
             raise DimensionError(f"no dimension given for {node.id!r}")
         return dict(declared[node.id])

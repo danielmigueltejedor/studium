@@ -81,7 +81,7 @@ DEFAULT_SYMBOL_NAMES: dict[str, str] = {
 
 _ALLOWED_EXPRESSION = re.compile(r"^[A-Za-z0-9_+\-*/().,\s^]*$")
 _IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
-_RESERVED = frozenset(CONSTANTS) | frozenset(FUNCTIONS) | {"pi", "E", "I", "oo", "sqrt"}
+_RESERVED = frozenset(CONSTANTS) | frozenset(FUNCTIONS) | {"pi", "oo", "sqrt"}
 
 #: Units used by the book, converted to upright math with negative exponents.
 _UNIT_SYMBOLS = frozenset(
@@ -121,7 +121,11 @@ def _names(expression: str) -> list[str]:
 
 def _sympy_parse(symbolic: str):
     """Parse a restricted symbolic expression. The character set and the names
-    are checked first, so SymPy never sees arbitrary code."""
+    are checked first, so SymPy never sees arbitrary code.
+
+    ``E`` and ``I`` are plain symbols, as in a structures book (Young's modulus, second moment of area);
+    Euler's number is written ``exp(1)`` and the imaginary unit is not supported.
+    """
 
     import sympy
 
@@ -132,7 +136,6 @@ def _sympy_parse(symbolic: str):
         local.setdefault(function, getattr(sympy, function, None))
     local.setdefault("sqrt", sympy.sqrt)
     local.setdefault("pi", sympy.pi)
-    local.setdefault("E", sympy.E)
     for name in names:
         if local.get(name) is None:
             local[name] = sympy.Symbol(name)

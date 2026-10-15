@@ -1067,9 +1067,11 @@ def equation_evidence(
         notes: dict[str, object] = {}
         status, evidence = _evidence(loaded, record, kind, statement, premises, notes)
         # A value or a condition ("x = 0", "r = R") holds at one place: it is never a premise for other relations.
-        if kind == "claim" and status not in {"contradicted", "verification_failed", "value_or_condition"}:
+        # An explicit definition (":=" or "\\equiv") is a premise as well: the author named what follows from it.
+        if (kind == "claim" and status not in {"contradicted", "verification_failed", "value_or_condition"}) or kind == "definition":
             known = {item.name: item for item in premises}
-            definition = as_definition(statement, known)
+            written = statement.replace(":=", "=").replace("\\equiv", "=") if kind == "definition" else statement
+            definition = as_definition(written, known)
             # The first statement about a name defines it; a later one is a claim to check against it.
             if definition is not None and definition.name not in known:
                 premises.append(definition)
@@ -1252,10 +1254,82 @@ def _same_relation(statement: str, other: str) -> bool:
     return False
 
 
+_GREEK_LETTERS = {
+    "α": r"\alpha", "β": r"\beta", "γ": r"\gamma", "δ": r"\delta", "ε": r"\varepsilon", "ζ": r"\zeta", "η": r"\eta",
+    "θ": r"\theta", "κ": r"\kappa", "λ": r"\lambda", "μ": r"\mu", "ν": r"\nu", "ξ": r"\xi", "π": r"\pi", "ρ": r"\rho",
+    "σ": r"\sigma", "τ": r"\tau", "φ": r"\phi", "χ": r"\chi", "ψ": r"\psi", "ω": r"\omega",
+    "Γ": r"\Gamma", "Δ": r"\Delta", "Θ": r"\Theta", "Λ": r"\Lambda", "Ξ": r"\Xi", "Π": r"\Pi", "Σ": r"\Sigma",
+    "Φ": r"\Phi", "Ψ": r"\Psi", "Ω": r"\Omega",
+}  # fmt: skip
+
+
+def _plain_math(text: str) -> str:
+    """An excerpt typed with Unicode Greek letters and square brackets, as LaTeX: ``τ / γ`` becomes ``\\tau / \\gamma``.
+
+    Alignment marks are dropped and row breaks (``\\\\``) become separators, so ``a&=b\\\\ c&=d`` reads as two relations.
+    """
+
+    text = re.sub(r"\\\\(?:\[\d*(?:\.\d+)?(?:ex|em|pt|mm|cm)?\]?)?", " ; ", text).replace("&", "")
+    text = re.sub(r"\\(?:begin|end)\{(?:aligned|align\*?|gathered|gather\*?|split|eqnarray\*?)\}", " ; ", text)
+    text = re.sub(r"\\[cdt]frac(?![A-Za-z])", r"\\frac", text)
+    out = []
+    for index, character in enumerate(text):
+        command = _GREEK_LETTERS.get(character)
+        if command is None:
+            out.append("(" if character == "[" else ")" if character == "]" else character)
+            continue
+        following = text[index + 1] if index + 1 < len(text) else ""
+        out.append(command + (" " if following.isalnum() else ""))
+    return "".join(out)
+
+
+_TEX_OR_GREEK = re.compile("\\\\|[" + "".join(_GREEK_LETTERS) + "]")
+_WORD = re.compile(r"(?!(?:dx|dy|dz|dt|ds|dA|dV)[,;:.]?$)(?:[A-Za-z]{2,}[,;:.]?|;)")
+
+
+def _balanced(side: str) -> str:
+    """Drop the unmatched outer braces a clipped LaTeX run leaves at its ends."""
+
+    side = side.strip()
+    while side.startswith("{") and side.count("{") > side.count("}"):
+        side = side[1:].lstrip()
+    while side.endswith("}") and side.count("}") > side.count("{"):
+        side = side[:-1].rstrip()
+    return side
+
+
+def _chain_relations(body: str) -> list[str]:
+    """Every pair of sides of a plain-text equality chain: ``a = b = c`` also states ``a = c``.
+
+    A chain is a run of tokens around ``=`` that contains no English word (two or more bare letters).
+    """
+
+    tokens = _plain_math(body).split()
+    pairs: list[str] = []
+    index = 0
+    while index < len(tokens):
+        if _WORD.fullmatch(tokens[index]):
+            index += 1
+            continue
+        end = index
+        while end < len(tokens) and not _WORD.fullmatch(tokens[end]):
+            end += 1
+        run = " ".join(tokens[index:end]).strip(" .,;:")
+        run = re.sub(r"^\.+\s*", "", run)
+        sides = [side.strip() for side in re.split(r"(?<![<>!:=])=(?!=)", run)]
+        if len(sides) >= 2:
+            sides = [_balanced(side) for side in sides]
+            pairs.extend(f"{sides[a]} = {sides[b]}" for a in range(len(sides)) for b in range(a + 1, len(sides)) if sides[a] and sides[b])
+        index = end + 1
+    return pairs
+
+
 def _stated_in(statement: str, body: str) -> bool:
     """A cited excerpt states the whole relation, not a part of a longer one."""
 
     if any(_same_relation(statement, candidate) for kind, candidate in math_statements(body) if kind == "claim"):
+        return True
+    if (_TEX_OR_GREEK.search(body) is not None) and any(_same_relation(statement, pair) for pair in _chain_relations(body)):
         return True
     needle = normalize_math(statement)
     haystack = normalize_math(body)
@@ -1415,6 +1489,19 @@ def _arithmetic_side(side: str) -> str | None:
     return text
 
 
+def _written_number(text: str) -> str | None:
+    """One typeset number (``2.55``, or ``2.55e7`` once scientific notation is joined), else None.
+
+    A claim written to a given precision is rounded to its last digit, so ``2.55×10^7`` agrees with 2.5516e7;
+    it is read at that precision, never compared as an exact quotient.
+    """
+
+    plain = text.replace(" ", "")
+    if plain.startswith("(") and plain.endswith(")"):
+        plain = plain[1:-1]
+    return plain if re.fullmatch(r"-?\d+(?:\.\d+)?(?:e[+-]?\d+)?", plain) else None
+
+
 def _arithmetic_verdict(statement: str) -> str | None:
     """``numerically_reproduced`` / ``contradicted`` for a relation between plain numbers, else None."""
 
@@ -1427,10 +1514,11 @@ def _arithmetic_verdict(statement: str) -> str | None:
     if left_text is None or right_text is None:
         return None
     try:
-        if re.fullmatch(r"-?\d+(?:\.\d+)?", right_text.replace(" ", "")):
-            verdict = precision_verdict(right_text.replace(" ", ""), evaluate(left_text))
-        elif re.fullmatch(r"-?\d+(?:\.\d+)?", left_text.replace(" ", "")):
-            verdict = precision_verdict(left_text.replace(" ", ""), evaluate(right_text))
+        written_right, written_left = _written_number(right_text), _written_number(left_text)
+        if written_right is not None:
+            verdict = precision_verdict(written_right, evaluate(left_text))
+        elif written_left is not None:
+            verdict = precision_verdict(written_left, evaluate(right_text))
         else:
             first, second = evaluate(left_text), evaluate(right_text)
             verdict = "agrees" if abs(first - second) <= abs(second) * Fraction(1, 10**12) else "disagrees"

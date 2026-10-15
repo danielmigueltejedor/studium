@@ -23,7 +23,7 @@ from studium.authoring.languages import (
     generic_section_titles,
     messages,
 )
-from studium.authoring.mathematics import MathError, symbolic_latex, unit_latex
+from studium.authoring.mathematics import DEFAULT_SYMBOL_NAMES, MathError, symbolic_latex, unit_latex
 from studium.authoring.notation import notation_registry
 from studium.authoring.paragraphs import supported_paragraphs
 from studium.authoring.problems import problem_result_current
@@ -2097,6 +2097,19 @@ def _symbolic_display(symbolic: str) -> list[str]:
         return []
 
 
+def _named_subscript(name: str) -> str | None:
+    """``delta_{11}`` or ``lambda_1``: a Greek word with a subscript, which the symbolic parser cannot read."""
+
+    match = re.fullmatch(r"([A-Za-z]+)_\{?([A-Za-z0-9]+)\}?", name)
+    if match is None:
+        return None
+    base, sub = match.groups()
+    tex = DEFAULT_SYMBOL_NAMES.get(base)
+    if tex is None:
+        return None
+    return f"{tex}_{{{DEFAULT_SYMBOL_NAMES.get(sub, sub)}}}"
+
+
 def _symbol_tex(name: str) -> str:
     cleaned = name.strip()
     if not cleaned:
@@ -2105,6 +2118,9 @@ def _symbol_tex(name: str) -> str:
         return symbolic_latex(cleaned)
     except MathError:
         pass
+    named = _named_subscript(cleaned)
+    if named is not None:
+        return named
     mapped: list[str] = []
     for ch in cleaned:
         token = _MATH.get(ch)
@@ -2444,7 +2460,7 @@ def _derivation_box(root: Path, section_id: str, language: BookLanguage) -> list
             body.extend(_variables_lines(variables, language))
         verification = record.get("verification")
         status = str(verification.get("status")) if isinstance(verification, dict) else "UNVERIFIED"
-        body.extend(["", r"\noindent\footnotesize " + latex_escape(_status_phrase(status, language)) + "."])
+        body.extend(["", r"{\noindent\footnotesize " + latex_escape(_status_phrase(status, language)) + r".\par}"])
     return _box(label, body, "derivation")
 
 

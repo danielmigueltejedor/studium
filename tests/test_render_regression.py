@@ -368,6 +368,11 @@ class TestFormulaRendering:
     def test_derivation_box_present(self):
         assert r"\begin{tcolorbox}" in self.tex
 
+    def test_status_line_does_not_shrink_the_rest_of_the_box(self):
+        """The footnote-size status line of a derivation is grouped, so the next derivation keeps its size."""
+
+        assert r"\noindent\footnotesize" not in self.tex.replace(r"{\noindent\footnotesize", "")
+
     def test_formula_sheet_typesets_bare_latex(self):
         """Regression: a bare-LaTeX equation is display math, not escaped prose.
 
