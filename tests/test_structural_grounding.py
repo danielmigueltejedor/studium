@@ -2,7 +2,7 @@
 
 from test_grounding import _book, _check_numeric, _excerpt, _explode, _two
 
-from studium.authoring.grounding import equation_evidence, formula_statuses, math_statements
+from studium.authoring.grounding import GroundingContext, equation_evidence, formula_statuses, math_statements
 from studium.mcp.server import dispatch
 
 
@@ -283,3 +283,67 @@ def test_equivalence_check_is_bounded_on_large_numeric_and_transcendental_relati
     # Different symbols are never the same relation.
     assert equivalent_math("p = F/A", "q = F/A") is False
     assert time.perf_counter() - started < 5
+
+
+def test_tensor_double_dot_is_not_a_separator_and_inequalities_end_a_chain():
+    statements = math_statements(r"$\Phi_v = 2\mu\,\mathbf{E}:\mathbf{E} = 2\mu\,E_{ij}E_{ij} \ge 0$")
+    assert statements == [
+        ("claim", r"\Phi_v = 2\mu\,\mathbf{E}:\mathbf{E}"),
+        ("claim", r"2\mu\,\mathbf{E}:\mathbf{E} = 2\mu\,E_{ij}E_{ij}"),
+        ("condition", r"2\mu\,E_{ij}E_{ij} \ge 0"),
+    ]
+    assert math_statements(r"$G = 0:\quad u = Uy/h$ con $x<L$") == [
+        ("claim", "G = 0"),
+        ("claim", "u = Uy/h"),
+        ("condition", "x < L"),
+    ]
+
+
+def test_differentials_are_never_read_as_products():
+    from studium.authoring.grounding import _relation, equivalent_math
+
+    # Read as a product, du/dy and u/y would be the same relation.
+    assert _relation(r"\tau = \mu\,du/dy") is None
+    assert _relation(r"\mathbf{F} = \frac{d\mathbf{p}}{dt}") is None
+    assert _relation(r"dx/dt = kx") is None
+    assert equivalent_math(r"\tau = \mu\,du/dy", r"\tau = \mu\,u/y") is False
+    # A diameter d is still a symbol.
+    assert _relation(r"V_t = (\rho_p - \rho_f)\,g\,d^{2}/(18\mu)") is not None
+    # The same differential text still matches itself (text path, no parsing).
+    assert equivalent_math(r"\tau = \mu\,du/dy", r"\tau = \mu\, du/dy") is True
+
+
+def test_dimension_probe_uses_the_notation_units_and_flags_symbol_reuse(tmp_path, monkeypatch):
+    monkeypatch.setattr("urllib.request.urlopen", _explode)
+    session, root = _book(tmp_path)
+    excerpt = _excerpt(session, "La presión es fuerza por unidad de área.")
+    for symbol, meaning, units in (
+        ("p", "presión", "Pa"),
+        ("\\rho", "densidad", "kg/m^3"),
+        ("V", "velocidad", "m/s"),
+        ("D", "diámetro", "m"),
+        ("C_D", "coeficiente de resistencia", ""),
+        ("S", "superficie", "m^2"),
+        ("g", "gravedad", "m/s^2"),
+        ("h", "altura", "m"),
+    ):
+        recorded = dispatch(
+            "studium_notation_record",
+            {"section": "presion", "symbol": symbol, "meaning": meaning, **({"units": units} if units else {})},
+            session=session,
+        )
+        assert recorded["status"] == "recorded", recorded
+    good = _paragraph(session, r"La presión es $p = \rho g h$ y la dinámica $q = \tfrac12\rho V^{2}$ en pascales.", [excerpt])
+    clash = _paragraph(session, r"Con la resistencia $D = C_D\,\tfrac12\rho V^{2} S$ en newtons.", [excerpt])
+    context = GroundingContext(root)
+    by_statement = {item["statement"]: item for rec in (good, clash) for item in equation_evidence(root, rec, context)}
+    assert by_statement[r"p = \rho g h"]["dimensions"]["status"] == "consistent"
+    # q has no registered unit: the probe says so instead of guessing.
+    assert by_statement[r"q = \tfrac12\rho V^{2}"]["dimensions"]["status"] == "unavailable"
+    # D was registered as a diameter, so the drag equation looks inconsistent: a notation clash to review.
+    assert by_statement[r"D = C_D\,\tfrac12\rho V^{2} S"]["dimensions"]["status"] == "inconsistent"
+    # The probe never changes the evidence status.
+    assert by_statement[r"p = \rho g h"]["status"] == "unsupported"
+    summary = dispatch("studium_quality_report", {}, session=session)["math_grounding"]
+    assert summary["dimension_probe"]["inconsistent"] == 1
+    assert summary["dimension_conflicts"][0]["statement"] == r"D = C_D\,\tfrac12\rho V^{2} S"

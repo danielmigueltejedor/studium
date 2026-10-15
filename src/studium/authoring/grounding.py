@@ -357,10 +357,15 @@ _FUNCTION_NAMES = frozenset({"sin", "cos", "tan", "exp", "ln", "log", "sqrt", "s
 #: Notation the scalar relation parser must not read: vector and tensor operators,
 #: calculus, sums and norms. Such a relation stays not machine-checkable.
 _UNREADABLE = re.compile(
-    r"\\(?:nabla|int|iint|iiint|oint|oiint|sum|prod|lim|partial|mathcal|operatorname\{div|otimes|wedge)\b|\|"
+    r"\\(?:nabla|int|iint|iiint|oint|oiint|sum|prod|lim|partial|mathcal|operatorname\{div|otimes|wedge)(?![A-Za-z])|\|"
+)
+#: A differential or derivative (``dx``, ``du/dy``, ``d\\mathbf{p}``, ``d^{2}u``, ``\\mathrm{d}x``) is not a
+#: product ``d*x``; reading it as one makes ``du/dy`` equal ``u/y``. Such relations stay not machine-checkable.
+_DIFFERENTIAL = re.compile(
+    r"\\mathrm\{d\}|(?<![A-Za-z0-9_\\])d(?:\^\{?\d\}?)?\s*(?=\\[A-Za-z]|[A-Za-z](?![A-Za-z]{2}))(?!_)"
 )
 _VECTOR = re.compile(r"\\(?:mathbf|boldsymbol|vec|bm)\s*\{")
-_VECTOR_PRODUCT = re.compile(r"\\(?:times|cdot|wedge|otimes)\b")
+_VECTOR_PRODUCT = re.compile(r"\\(?:times|cdot|wedge|otimes)(?![A-Za-z])")
 
 
 def _sympy_text(equation: str) -> str | None:
@@ -371,13 +376,16 @@ def _sympy_text(equation: str) -> str | None:
     machine-checkable instead of silently wrong.
     """
 
-    if _UNREADABLE.search(equation):
+    if _UNREADABLE.search(equation) or _DIFFERENTIAL.search(equation):
         return None
     if _VECTOR.search(equation) and _VECTOR_PRODUCT.search(equation):
         return None
     if r"\begin" in equation:
         return None
     text = re.sub(r"\\[,;:!]|~", " ", equation)
+    # An accent or a Delta applies to the next symbol: \dot m, \dot\gamma, \Delta p are one quantity each.
+    text = re.sub(r"\\(dot|ddot|bar|hat|tilde)\s*(\\[A-Za-z]+|[A-Za-z])(?![A-Za-z])", r"\\\1{\2}", text)
+    text = re.sub(r"\\Delta\s*(\\[A-Za-z]+|[A-Za-z])((?:_\{[^{}]*\}|_\\?[A-Za-z0-9])?)", r"\\Deltaof{\1\2}", text)
     text = re.sub(r"\\[td]frac(?![A-Za-z])", r"\\frac", text)
     text = re.sub(r"\\frac\s*(\d)\s*(\d)", r"((\1)/(\2))", text)
     text = _replace_command(text, "frac", 2, "(({0})/({1}))")
@@ -386,6 +394,8 @@ def _sympy_text(equation: str) -> str | None:
         text = _replace_command(text, command, 1, " {0}_vec ")
     for command in ("mathrm", "text", "operatorname", "mathit"):
         text = _replace_command(text, command, 1, " {0} ")
+    text = _replace_command(text, "Deltaof", 1, " Delta_{0} ")
+    text = re.sub(r"\\(dot|ddot)\{\s*(\\?[A-Za-z]+)\s*\}", r"\2_\1", text)
     # Every command starts a new token: \\omega t, A\\cos\\omega t.
     text = re.sub(r"\\(?=[A-Za-z])", " \\\\", text)
     text = _latex_to_ascii(text)
@@ -394,6 +404,8 @@ def _sympy_text(equation: str) -> str | None:
         return None
     text = text.replace("[", "(").replace("]", ")")
     text = re.sub(r"\s+_", "_", text)
+    text = re.sub(r"_\s+", "_", text)
+    text = re.sub(r"\^\s+", "^", text)
     text = re.sub(r"_\(([A-Za-z0-9]+)\)", r"_\1", text)
     # Function-value notation u(0), x(t), p(z): one symbol, not a product or an unknown function.
     text = re.sub(
@@ -793,8 +805,20 @@ _SPAN = re.compile(
 )
 #: Math spans shown as display equations: environments, ``$$`` and ``\\[``.
 _DISPLAY = re.compile(r"\\begin\{(" + _ENVIRONMENTS + r")\}(.+?)\\end\{\1\}|\$\$(.+?)\$\$|\\\[(.+?)\\\]", re.S)
-_RELATION_OPS = re.compile(r"\\approx|\\simeq|\\equiv|:=|(?<![<>!\\])=")
-_OP_KINDS = {"=": "claim", "\\approx": "approximation", "\\simeq": "approximation", "\\equiv": "definition", ":=": "definition"}
+_RELATION_OPS = re.compile(
+    r"\\approx|\\simeq|\\equiv|\\geq?|\\leq?|\\neq?|\\gg|\\ll|\\propto|\\sim\b|:=|(?<![<>!\\])[<>]=?|(?<![<>!\\:])="
+)
+_OP_KINDS = {
+    "=": "claim",
+    "\\approx": "approximation",
+    "\\simeq": "approximation",
+    "\\equiv": "definition",
+    ":=": "definition",
+}
+
+
+def _kind_of(operator: str) -> str:
+    return _OP_KINDS.get(operator, "condition")
 _TRAILING = " ,;.:"
 
 
@@ -829,7 +853,7 @@ def _math_statements(text: str) -> tuple[tuple[str, str], ...]:
                 left = parts[index].strip().strip(_TRAILING).strip()
                 right = parts[index + 1].strip().strip(_TRAILING).strip()
                 if _complete_side(left, -1) and _complete_side(right, 1) and not _elided(left) and not _elided(right):
-                    found.append((_OP_KINDS[operator], f"{left} {operator} {right}"))
+                    found.append((_kind_of(operator), f"{left} {operator} {right}"))
     outside.append(text[last:])
     for sentence in sentences(" ".join(outside)):
         for formula in formulas(sentence):
@@ -852,7 +876,7 @@ def _span_body(match: re.Match[str]) -> str:
 
 #: ``\\,`` and ``\\;`` are thin spaces, not separators: a comma or colon preceded by a backslash never splits.
 _SEPARATORS = re.compile(
-    r"\\q?quad\b|\\\\|(?<!\\);|(?<!\\),(?=\s|\\)|(?<!\\):(?=\s|\\)|\\(?:text|mbox|mathrm)\{[^{}]*\s[^{}]*\}"
+    r"\\q?quad\b|\\\\|(?<!\\);|(?<!\\),(?=\s|\\)|(?<!\\):(?=\s|\\q?quad\b)|\\(?:text|mbox|mathrm)\{[^{}]*\s[^{}]*\}"
 )
 
 
@@ -960,6 +984,8 @@ def _condition(statement: str) -> bool:
     """
 
     left, _sign, right = statement.partition("=")
+    if _DIFFERENTIAL.search(statement):
+        return False
     sides = []
     for side in (left, right):
         number = _arithmetic_text(side)
@@ -977,6 +1003,7 @@ class GroundingContext:
         self.root = root
         self.excerpts = excerpts_by_id(root)
         self.computations = replayed_computations(root)
+        self._units: Any = None
         self.derivation_records = [record for record in fold_by_id(root / DERIVATIONS) if record.get("deleted") is not True]
         self.verifications = [
             record
@@ -986,6 +1013,16 @@ class GroundingContext:
 
     def derivations(self, section: object) -> list[dict[str, object]]:
         return [record for record in self.derivation_records if record.get("section") == section]
+
+    def dimension_probe(self, statement: str) -> dict[str, object]:
+        """Dimensional plausibility of a relation under the registered notation units (not a status)."""
+
+        from studium.authoring.equation_dimensions import EquationUnits
+
+        if self._units is None:
+            self._units = EquationUnits(self.root)
+        probe: dict[str, object] = self._units.probe(statement)
+        return probe
 
 
 def formula_statuses(
@@ -1028,6 +1065,7 @@ def equation_evidence(
                 "evidence": evidence,
                 "important": normalize_math(statement) in display,
                 "machine_parseable": _relation(statement) is not None,
+                "dimensions": loaded.dimension_probe(statement) if kind == "claim" and _relation(statement) is not None else None,
                 "human_review": "required" if status in HUMAN_REVIEW_STATUSES - {"source_supported"}
                 else ("recommended" if status == "source_supported" else "none"),
                 "blocks_audit": status in BLOCKING_STATUSES,
@@ -1065,6 +1103,8 @@ def _evidence(context: GroundingContext, record: dict[str, object], kind: str, s
         return "definition", []
     if kind == "approximation":
         return "approximation", []
+    if kind == "condition":
+        return "value_or_condition", []
     matrices = _matrix_verdict(statement)
     if matrices is not None:
         return matrices, []
@@ -1370,6 +1410,8 @@ def grounding_summary(root: Path) -> dict[str, object]:
     claims = 0
     verified = 0
     unresolved_important: list[dict[str, object]] = []
+    dimensions: dict[str, int] = {"consistent": 0, "inconsistent": 0, "unavailable": 0}
+    dimension_conflicts: list[dict[str, object]] = []
     declared: dict[str, int] = {"source": 0, "derivation": 0, "example": 0}
     for record in supported_paragraphs(root):
         for item in equation_evidence(root, record, context):
@@ -1378,6 +1420,14 @@ def grounding_summary(root: Path) -> dict[str, object]:
             by_status[status] = by_status.get(status, 0) + 1
             if status in BLOCKING_STATUSES:
                 blocking += 1
+            probe = item.get("dimensions")
+            if isinstance(probe, dict):
+                outcome = str(probe.get("status"))
+                dimensions[outcome] = dimensions.get(outcome, 0) + 1
+                if outcome == "inconsistent" and status not in VERIFIED_STATUSES and len(dimension_conflicts) < 50:
+                    dimension_conflicts.append(
+                        {"paragraph": item["paragraph"], "statement": item["statement"], "detail": probe.get("detail")}
+                    )
             if status in EQUATION_STATUSES:
                 claims += 1
                 if status in VERIFIED_STATUSES:
@@ -1406,6 +1456,8 @@ def grounding_summary(root: Path) -> dict[str, object]:
         },
         "scientific_verification_complete": claims == verified,
         "unresolved_important": unresolved_important,
+        "dimension_probe": dimensions,
+        "dimension_conflicts": dimension_conflicts,
         "declared": declared,
         "checked_derivations": checked,
         "note": (

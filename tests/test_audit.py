@@ -331,7 +331,12 @@ def test_formula_missing_from_the_excerpt_and_not_replayed_is_rejected(tmp_path,
         "the formula is not grounded by a cited excerpt, a replayed example, or a checked derivation: "
     )
     assert "F = C × 9/5 + 32" in refused["message"]
-    assert "du/dx + dv/dy + dw/dz = 0" in refused["message"]
+    # A differential equation is not machine-checkable: it never grounds a paragraph, and it does not
+    # block the evidence audit; the equation report lists it for human review instead.
+    assert "du/dx + dv/dy + dw/dz = 0" not in refused["message"]
+    report = dispatch("studium_equation_report", {"status": "not_machine_checkable"}, session=session)
+    assert [item["statement"] for item in report["equations"]] == ["du/dx + dv/dy + dw/dz = 0"]
+    assert report["equations"][0]["human_review"] == "required"
     assert refused["prose_added"] is False
     assert refused["released"] is False
     assert "verified" not in json.dumps(refused)
