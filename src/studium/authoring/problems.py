@@ -375,24 +375,43 @@ _REQUEST = re.compile(
     r"\b(?:find|determine|calculate|compute|estimate|obtain|what (?:is|are))\b([^.?]*)", re.IGNORECASE
 )
 _SECOND_PART = re.compile(r"^(?:the|its|their|his|her)\b", re.IGNORECASE)
+# One quantity built from two operands ("the sum of the mass and the volume").
+_COMBINED = re.compile(
+    r"\b(?:sum|difference|ratio|product|average|mean|total|between|combined)\b", re.IGNORECASE
+)
+_ENUMERATOR = re.compile(r"\((?:[a-h]|i{1,3}|iv|v)\)", re.IGNORECASE)
 _RESULT_MARK = re.compile(r"=|\\approx|\\to\b|\\simeq")
+
+
+def _requested_quantities(prompt: str) -> int:
+    """Count the quantities a prompt asks for. Conservative: an unclear clause counts as one."""
+
+    labelled = len(_ENUMERATOR.findall(prompt))
+    if labelled >= 2:
+        return labelled
+    total = 0
+    for clause in _REQUEST.findall(prompt):
+        if _COMBINED.search(clause):
+            total += 1
+            continue
+        parts = [part.strip() for part in re.split(r",\s*and\s+|\s+and\s+", clause) if part.strip()]
+        total += 1 + sum(1 for part in parts[1:] if _SECOND_PART.match(part))
+    return total
 
 
 def unanswered_request(prompt: object, solution: object) -> dict[str, object] | None:
     """Flag a prompt that asks for several quantities when the solution states fewer.
 
-    Conservative: only a clause such as "the specific volume of the gas and its
-    density" counts as two requests, because the second part opens with a
-    determiner. The check is advisory and never marks a problem correct.
+    Conservative: a clause such as "the specific volume of the gas and its
+    density" counts as two requests because the second part opens with a
+    determiner; "(a) ... (b) ..." parts and a second request sentence count too.
+    A combined quantity ("the sum of x and y") counts as one. The check is
+    advisory and never marks a problem correct.
     """
 
     if not isinstance(prompt, str) or not isinstance(solution, dict):
         return None
-    clauses = _REQUEST.findall(prompt)
-    if not clauses:
-        return None
-    parts = [part.strip() for part in re.split(r",\s*and\s+|\s+and\s+", clauses[-1]) if part.strip()]
-    requested = 1 + sum(1 for part in parts[1:] if _SECOND_PART.match(part))
+    requested = _requested_quantities(prompt)
     if requested < 2:
         return None
     result = solution.get("result")
