@@ -1126,7 +1126,11 @@ def _evidence(context: GroundingContext, record: dict[str, object], kind: str, s
         derivation_status = str(verification.get("status")) if isinstance(verification, dict) else "UNVERIFIED"
         covered, chained = _final_relations(derivation)
         if any(_same_relation(statement, line) for line in covered):
-            if derivation_status in _DERIVATION_EVIDENCE:
+            if derivation_status in _DERIVATION_EVIDENCE and not _check_is_bound(derivation):
+                # Checked before checks were tied to the stored equation: a passing check exists on this
+                # derivation, but nothing says it is about this equation.
+                found.append(("derived_steps_unchecked", identifier))
+            elif derivation_status in _DERIVATION_EVIDENCE:
                 found.append((_DERIVATION_EVIDENCE[derivation_status], identifier))
             elif derivation_status == "FAILED":
                 failed.append(identifier)
@@ -1173,6 +1177,19 @@ def _evidence(context: GroundingContext, record: dict[str, object], kind: str, s
 
 def _string_list(value: object) -> list[str]:
     return [item for item in value if isinstance(item, str)] if isinstance(value, list) else []
+
+
+def _check_is_bound(derivation: dict[str, object]) -> bool:
+    """Whether the stored verification was made against the derivation's current symbolic final equation."""
+
+    verification = derivation.get("verification")
+    symbolic = derivation.get("symbolic")
+    return (
+        isinstance(verification, dict)
+        and isinstance(symbolic, str)
+        and bool(symbolic.strip())
+        and verification.get("bound_to") == symbolic
+    )
 
 
 def _final_relations(derivation: dict[str, object]) -> tuple[list[str], list[str]]:

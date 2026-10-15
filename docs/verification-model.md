@@ -49,6 +49,15 @@ Verification checks that the stored mathematics is internally consistent using d
 
 At least one must be provided. Each produces its own status. The overall status is computed by the combination rules above.
 
+Every check is tied to the derivation's stored `symbolic` final equation, written `lhs = rhs` (without `=` it is read as an expression equal to zero). A check that is not about that equation stays `UNVERIFIED` and cannot raise the derivation's status:
+
+- **symbolic** `left`/`right` must rewrite one side of the stored equation.
+- **symbolic** `equation_left`/`equation_right`/`solution` is a premise other than the stored equation. The solution must satisfy the premise and the stored equation. A premise that is the stored equation itself (or a constant multiple of it) is circular. A solution that satisfies the premise but not the stored equation is `FAILED`.
+- **numeric** `expression` must be one side of the stored equation.
+- **dimensional** checks both sides and every term of the stored equation. Units come from `symbol_units`, then from the stored variables. A symbol without units leaves the check `UNVERIFIED`.
+
+A derivation recorded without `symbolic` cannot be verified. Statuses already stored by earlier versions are not recomputed.
+
 ## Problem checks
 
 `studium_problem_check` replays a computation or compares with stored excerpts:

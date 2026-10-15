@@ -253,7 +253,12 @@ def _two(session):
 
 
 def _derivation(session, equation):
-    recorded = dispatch("studium_derivation_record", {"section": "presion", "name": "Presión", "equation": equation}, session=session)
+    # The equations used here are plain text, so the symbolic form that checks bind to is the same line.
+    recorded = dispatch(
+        "studium_derivation_record",
+        {"section": "presion", "name": "Presión", "equation": equation, "symbolic": equation},
+        session=session,
+    )
     assert recorded["status"] == "recorded"
     return str(recorded["derivation"]["id"])
 

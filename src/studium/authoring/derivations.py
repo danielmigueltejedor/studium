@@ -25,6 +25,7 @@ from studium.storage.locking import ProjectLocked, project_lock
 from studium.storage.migrate import utc_now
 from studium.storage.records import DERIVATIONS, allocate_id, append_jsonl, fold_by_id
 from studium.verification.engine import (
+    proportional,
     verify_algebraic_equivalence,
     verify_dimensions,
     verify_equation,
@@ -266,34 +267,13 @@ def check_derivation(
     if dimensional_error is not None:
         return dimensional_error
 
+    stored = _stored_relation(current)
     if symbolic_identity is not None:
-        left = symbolic_identity.left.replace("^", "**")
-        right = symbolic_identity.right.replace("^", "**")
-        if symbolic_identity.solution is not None:
-            solution = {name: value.replace("^", "**") for name, value in symbolic_identity.solution.items()}
-            result = verify_equation(
-                left,
-                right,
-                solution=solution,
-                symbols=_free_symbols(left, right, *solution.values()),
-            )
-        else:
-            result = verify_algebraic_equivalence(left, right)
-        results.append(_result_payload("symbolic", result))
+        results.append(_result_payload("symbolic", _symbolic_result(stored, symbolic_identity)))
     if numeric_check is not None:
-        result = verify_substitution(
-            numeric_check.expression,
-            values=numeric_check.values,
-            claimed=numeric_check.claimed,
-        )
-        results.append(_result_payload("numeric_substitution", result))
+        results.append(_result_payload("numeric_substitution", _numeric_result(stored, numeric_check)))
     if dimensional_check is not None:
-        result = verify_dimensions(
-            dimensional_check.expression,
-            dimensional_check.symbol_units,
-            expected_unit=dimensional_check.expected_unit,
-        )
-        results.append(_result_payload("dimensional", result))
+        results.append(_result_payload("dimensional", _dimensional_result(stored, dimensional_check, current)))
     if not results:
         return _error("mcp.invalid_input", "at least one of symbolic, numeric, or dimensions is required")
     for item in results:
@@ -301,7 +281,11 @@ def check_derivation(
             failed = failed or item.get("status") == "FAILED"
     overall = _overall(results)
     updated = dict(current)
-    updated["verification"] = {"status": overall, "checks": results, "checked_at": utc_now()}
+    verification: dict[str, object] = {"status": overall, "checks": results, "checked_at": utc_now()}
+    if stored is not None:
+        # The checks above were bound to this exact stored form; a later change of ``symbolic`` makes them stale.
+        verification["bound_to"] = current.get("symbolic")
+    updated["verification"] = verification
     try:
         with project_lock(root):
             append_jsonl(root / DERIVATIONS, updated)
@@ -361,6 +345,196 @@ def _free_symbols(*texts: str) -> set[str]:
     reserved = frozenset(CONSTANTS) | frozenset(FUNCTIONS)
     names = set(re.findall(r"[A-Za-z_][A-Za-z0-9_]*", " ".join(texts)))
     return {name for name in names if name not in reserved and not name.startswith("_")}
+
+
+_NO_STORED_EQUATION = (
+    "the derivation stores no symbolic final equation, so this check cannot be tied to it; "
+    "record the derivation again with symbolic written as 'lhs = rhs'"
+)
+
+
+class _Relation(NamedTuple):
+    """The stored final equation, both sides as plain expressions."""
+
+    left: str
+    right: str
+
+    @property
+    def residual(self) -> str:
+        return f"({self.left}) - ({self.right})"
+
+    def sides(self) -> list[str]:
+        return [side for side in (self.left, self.right) if side.strip() != "0"]
+
+
+def _stored_relation(record: dict[str, object]) -> _Relation | None:
+    """The stored ``symbolic`` final equation. Without ``=`` it is a residual equal to zero."""
+
+    symbolic = record.get("symbolic")
+    if not isinstance(symbolic, str) or not symbolic.strip():
+        return None
+    sides = [side.strip().replace("^", "**") for side in symbolic.split("=")]
+    if len(sides) == 1:
+        return _Relation(sides[0], "0")
+    if len(sides) == 2 and all(sides):
+        return _Relation(sides[0], sides[1])
+    return None
+
+
+def _unbound(method: str, detail: str, inputs: dict[str, object]) -> VerificationResult:
+    return VerificationResult(status=VerificationStatus.UNVERIFIED, method=method, detail=detail, inputs=inputs)
+
+
+def _is_side(expression: str, stored: _Relation, *, up_to_factor: bool = False) -> bool:
+    """Whether ``expression`` is one side of the stored equation (or a constant multiple of one)."""
+
+    candidate = expression.replace("^", "**")
+    for side in stored.sides():
+        if up_to_factor:
+            if proportional(candidate, side):
+                return True
+        elif proportional(f"({candidate}) - ({side})", "0"):
+            return True
+    return False
+
+
+def _symbolic_result(stored: _Relation | None, check: _SymbolicIdentity) -> VerificationResult:
+    left = check.left.replace("^", "**")
+    right = check.right.replace("^", "**")
+    inputs: dict[str, object] = {"left": left, "right": right}
+    if stored is None:
+        return _unbound("symbolic", _NO_STORED_EQUATION, inputs)
+    if check.solution is None:
+        # An identity says something about the derivation only if it rewrites one of its sides.
+        if not (_is_side(left, stored) or _is_side(right, stored)):
+            return _unbound(
+                "symbolic",
+                "neither side of this identity is a side of the stored final equation; it says nothing about it",
+                inputs,
+            )
+        return verify_algebraic_equivalence(left, right)
+    solution = {name: value.replace("^", "**") for name, value in check.solution.items()}
+    inputs["solution"] = solution
+    stored_names = _free_symbols(stored.left, stored.right)
+    if not stored_names & set(solution):
+        return _unbound(
+            "symbolic",
+            "the solution substitutes no symbol of the stored final equation; it says nothing about it",
+            inputs,
+        )
+    if proportional(f"({left}) - ({right})", stored.residual):
+        return _unbound(
+            "symbolic",
+            "circular: the premise is the stored final equation itself; give the relation it was derived from",
+            inputs,
+        )
+    premise = verify_equation(left, right, solution=solution, symbols=_free_symbols(left, right, *solution.values()))
+    if premise.status is not VerificationStatus.SYMBOLICALLY_VERIFIED:
+        return premise
+    mentioned = _free_symbols(left, right, *solution.values()) | set(solution)
+    unmentioned = sorted(stored_names - mentioned)
+    if unmentioned:
+        # A stored symbol the premise and the solution never mention is not constrained by them: the
+        # substituted equation then cannot be falsified, only left undecided.
+        return _unbound(
+            "symbolic",
+            "the stored final equation uses symbols the premise and solution never mention ("
+            + ", ".join(unmentioned)
+            + "); the check cannot decide it",
+            inputs,
+        )
+    consequence = verify_equation(
+        stored.left,
+        stored.right,
+        solution=solution,
+        symbols=_free_symbols(stored.left, stored.right, *solution.values()),
+    )
+    if consequence.status is VerificationStatus.FAILED:
+        return VerificationResult(
+            status=VerificationStatus.FAILED,
+            method="symbolic_equation",
+            detail="the solution satisfies the premise but not the stored final equation: " + consequence.detail,
+            inputs=inputs,
+        )
+    if consequence.status is not VerificationStatus.SYMBOLICALLY_VERIFIED:
+        return consequence
+    return VerificationResult(
+        status=VerificationStatus.SYMBOLICALLY_VERIFIED,
+        method="symbolic_equation",
+        detail="the solution satisfies the premise and the stored final equation",
+        inputs=inputs,
+        limitations=(
+            "the premise is the client's; the check shows the stored equation follows from it, not that it is physical",
+        ),
+    )
+
+
+def _numeric_result(stored: _Relation | None, check: _NumericCheck) -> VerificationResult:
+    inputs: dict[str, object] = {"expression": check.expression, "values": dict(check.values), "claimed": check.claimed}
+    if stored is None:
+        return _unbound("numeric_substitution", _NO_STORED_EQUATION, inputs)
+    if not _is_side(check.expression, stored):
+        return _unbound(
+            "numeric_substitution",
+            "the expression is not a side of the stored final equation; replaying it says nothing about it",
+            inputs,
+        )
+    return verify_substitution(check.expression.replace("^", "**"), values=check.values, claimed=check.claimed)
+
+
+def _variable_units(record: dict[str, object]) -> dict[str, str]:
+    variables = record.get("variables")
+    found: dict[str, str] = {}
+    if isinstance(variables, dict):
+        for name, entry in variables.items():
+            if isinstance(name, str) and isinstance(entry, dict) and isinstance(entry.get("units"), str):
+                found[name] = str(entry["units"])
+    return found
+
+
+def _dimensional_result(
+    stored: _Relation | None,
+    check: _DimensionalCheck,
+    record: dict[str, object],
+) -> VerificationResult:
+    """Dimensional homogeneity of the stored final equation, every side and every term."""
+
+    units = {**_variable_units(record), **check.symbol_units}
+    inputs: dict[str, object] = {"expression": check.expression, "symbol_units": units, "expected_unit": check.expected_unit}
+    if stored is None:
+        return _unbound("dimensional", _NO_STORED_EQUATION, inputs)
+    if check.expression.strip() and not _is_side(check.expression, stored, up_to_factor=True):
+        return _unbound(
+            "dimensional",
+            "the expression is not a side of the stored final equation; its units say nothing about it",
+            inputs,
+        )
+    missing = sorted(_free_symbols(stored.left, stored.right) - set(units))
+    if missing:
+        return _unbound("dimensional", "no units for " + ", ".join(missing) + " in symbol_units or the stored variables", inputs)
+    sides = stored.sides()
+    results = [verify_dimensions(side, units, expected_unit=check.expected_unit) for side in sides]
+    failed = next((result for result in results if result.status is not VerificationStatus.DIMENSIONALLY_VERIFIED), None)
+    if failed is not None:
+        return failed
+    reduced = {
+        tuple(sorted(dict(result.outputs.get("dimensionality") or {}).items()))  # type: ignore[arg-type]
+        for result in results
+    }
+    if len(reduced) > 1:
+        return VerificationResult(
+            status=VerificationStatus.FAILED,
+            method="dimensional",
+            detail="the two sides of the stored final equation have different dimensions",
+            inputs=inputs,
+        )
+    return VerificationResult(
+        status=VerificationStatus.DIMENSIONALLY_VERIFIED,
+        method="dimensional",
+        detail="every term of the stored final equation has the same dimensions: " + results[0].detail,
+        inputs=inputs,
+        limitations=("dimensionally consistent does not mean physically correct",),
+    )
 
 
 def _result_payload(method: str, result: object) -> dict[str, object]:
@@ -425,10 +599,10 @@ def _dimensions(value: object) -> tuple[_DimensionalCheck | None, dict[str, obje
         return None, None
     if not isinstance(value, dict):
         return None, _error("mcp.invalid_input", "dimensions must be an object with expression and symbol_units")
-    expression = value.get("expression")
-    symbol_units = value.get("symbol_units")
-    if not isinstance(expression, str) or not expression.strip() or not isinstance(symbol_units, dict):
-        return None, _error("mcp.invalid_input", "dimensions needs an expression and symbol_units")
+    expression = value.get("expression", "")
+    symbol_units = value.get("symbol_units", {})
+    if not isinstance(expression, str) or not isinstance(symbol_units, dict):
+        return None, _error("mcp.invalid_input", "dimensions needs symbol_units and an optional expression")
     cleaned: dict[str, str] = {}
     for name, item in symbol_units.items():
         if not isinstance(name, str) or not isinstance(item, str) or not item.strip():
@@ -506,11 +680,15 @@ def _symbolic_line(value: object, field: str) -> tuple[str | None, dict[str, obj
     if not isinstance(value, str) or not value.strip() or len(value) > _MAX_LINE:
         return None, _error("mcp.invalid_input", f"{field} must be one symbolic line")
     cleaned = value.strip()
+    sides = cleaned.split("=")
+    if len(sides) > 2:
+        return None, _error("mcp.invalid_input", f"{field} may hold at most one '=': write the final equation as lhs = rhs")
     try:
-        symbol_names_of(cleaned)
+        for side in sides:
+            symbol_names_of(side)
     except MathError as exc:
         return None, _error("mcp.invalid_input", f"{field} is not a valid symbolic expression: {exc}")
-    return cleaned, None
+    return " = ".join(side.strip() for side in sides), None
 
 
 def _variables(value: object) -> tuple[dict[str, object] | None, dict[str, object] | None]:

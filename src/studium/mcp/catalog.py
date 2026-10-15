@@ -678,9 +678,14 @@ _TOOLS: tuple[dict[str, object], ...] = (
         "class": "WRITE",
         "description": (
             "Run the deterministic checks requested for one derivation and store their results. "
-            "symbolic is an algebraic identity or an equation with a proposed solution; "
-            "numeric is an expression with substitutions and a claimed value; "
-            "dimensions is an expression with symbol units and an optional expected unit. "
+            "Every check is tied to the stored symbolic final equation (record it as 'lhs = rhs'); "
+            "a check that is not about that equation stays UNVERIFIED. "
+            "symbolic is an identity that rewrites one side of the stored equation, or a premise "
+            "(equation_left = equation_right) with a solution that satisfies both the premise and the stored "
+            "equation; a premise that is the stored equation itself is circular and stays UNVERIFIED. "
+            "numeric replays one side of the stored equation with substitutions and a claimed value; "
+            "dimensions checks every term of the stored equation with symbol units (falling back to the "
+            "stored variables' units) and an optional expected unit. "
             "Each check keeps its own status: SYMBOLICALLY_VERIFIED, DIMENSIONALLY_VERIFIED, "
             "COMPUTATION_REPRODUCED, INDEPENDENTLY_VERIFIED, UNVERIFIED, or FAILED. "
             "INDEPENDENTLY_VERIFIED needs a proof check (symbolic identity or solved equation) "
@@ -1803,7 +1808,13 @@ def _schema(tool: Mapping[str, object]) -> dict[str, object]:
                     "items": {"type": "string"},
                     "description": "Typeset LaTeX for the derivation steps. Balanced delimiters; no raw computational operators.",
                 },
-                "symbolic": {"type": "string", "description": "Symbolic form of the final equation, for substitution and checking."},
+                "symbolic": {
+                    "type": "string",
+                    "description": (
+                        "The final equation as plain symbolic 'lhs = rhs' (e.g. 'p = p0 + rho*g*h'); without '=' it is "
+                        "read as an expression equal to zero. studium_derivation_check ties every check to it."
+                    ),
+                },
                 "variables": {"type": "object", "description": "Symbol -> meaning with optional units."},
                 "boundary_conditions": {"type": "array", "items": {"type": "string"}},
                 "applicability": {"type": "array", "items": {"type": "string"}},
@@ -1831,9 +1842,19 @@ def _schema(tool: Mapping[str, object]) -> dict[str, object]:
             "properties": {
                 "project": _project_property(),
                 "id": {"type": "string", "description": "Derivation id from studium_derivation_record."},
-                "symbolic": {"type": "object", "description": "left/right or equation_left/equation_right/solution."},
-                "numeric": {"type": "object", "description": "expression, values, claimed."},
-                "dimensions": {"type": "object", "description": "expression, symbol_units, optional expected_unit."},
+                "symbolic": {
+                    "type": "object",
+                    "description": (
+                        "left/right (an identity rewriting one side of the stored equation) or "
+                        "equation_left/equation_right/solution (a premise other than the stored equation, and a "
+                        "solution that satisfies it and the stored equation)."
+                    ),
+                },
+                "numeric": {"type": "object", "description": "expression (one side of the stored equation), values, claimed."},
+                "dimensions": {
+                    "type": "object",
+                    "description": "symbol_units, optional expected_unit; checks the whole stored equation. expression is optional.",
+                },
             },
             "required": ["id"],
             "additionalProperties": True,
