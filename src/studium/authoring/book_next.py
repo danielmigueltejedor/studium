@@ -25,6 +25,7 @@ from studium.authoring.audit import (
     writer_edition,
 )
 from studium.authoring.blueprint import current_sections, is_support_section
+from studium.authoring.completeness import chapter_completeness
 from studium.authoring.computation import list_computations
 from studium.authoring.derivations import derivations_for_section
 from studium.authoring.excerpts import excerpts_by_id
@@ -362,13 +363,28 @@ def _book_next(root: Path) -> dict[str, object]:
         )
     if not _draft_is_current(root):
         return _render_step(state, root, sections)
-    return _step(
+    done = _step(
         state,
         None,
         {},
         "The DRAFT was rendered once. Do not request release.",
         blocked=blocked_sections(root),
     )
+    done["remaining_gaps"] = _remaining_gaps(root)
+    return done
+
+
+def _remaining_gaps(root: Path) -> list[dict[str, object]]:
+    """Completeness checks still unmet per section, so a finished contract is not read as a finished book."""
+
+    report = chapter_completeness(root)
+    gaps: list[dict[str, object]] = []
+    sections = report.get("sections")
+    for item in sections if isinstance(sections, list) else []:
+        missing = item.get("missing") if isinstance(item, dict) else None
+        if isinstance(missing, list) and missing:
+            gaps.append({"section": item.get("section"), "missing": [str(entry) for entry in missing]})
+    return gaps
 
 
 def unfinished_chapter(root: Path) -> tuple[dict[str, str], list[str]] | None:
