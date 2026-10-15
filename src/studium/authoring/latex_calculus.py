@@ -111,6 +111,7 @@ class _Context:
     vectors: set[str] = field(default_factory=set)
     ops: int = 0
     decimals: bool = False
+    calculus: bool = False
 
 
 def tokenize(text: str) -> list[Token]:
@@ -694,6 +695,7 @@ class _Parser:
     def derivative_value(self, operand: Any, variables: list[tuple[str, int]]) -> Any:
         if isinstance(operand, sympy.MatrixBase):
             raise Unsupported("a derivative of a matrix")
+        self.context.calculus = True
         result = operand
         for name, order in variables:
             variable = sympy.Symbol(name)
@@ -734,6 +736,7 @@ class _Parser:
         if isinstance(value, sympy.MatrixBase):
             raise Unsupported("an integral of a matrix")
         self.count(8)
+        self.context.calculus = True
         if sympy.count_ops(value) > 60:
             raise Unsupported("the integrand is too large")
         try:
@@ -933,7 +936,36 @@ def check_relation(statement: str, defs: dict[str, Definition] | None = None) ->
                 return Outcome("contradiction", premises, f"the sides differ by {constant}")
     except Exception:
         return None
+    if context.calculus and not context.decimals and not isinstance(difference, sympy.MatrixBase):
+        detail = _differs_numerically(difference)
+        if detail is not None:
+            return Outcome("contradiction", premises, detail)
     return Outcome("unknown", premises, "")
+
+
+_SAMPLES = (sympy.Rational(3, 2), sympy.Rational(5, 3), sympy.Rational(7, 4), sympy.Rational(9, 5))
+
+
+def _differs_numerically(difference: Any) -> str | None:
+    """Evidence that two explicit sides of a computed relation are not equal: they differ at every sample point.
+
+    Only for relations with a derivative or an integral on explicit sides: a stated computation whose
+    result does not match the closed form. The samples are fixed positive rationals, and every
+    evaluation must be a finite real number, so an unevaluable or accidental zero gives no verdict.
+    """
+
+    symbols = sorted(difference.free_symbols, key=str)
+    if not symbols or len(symbols) > 8 or sympy.count_ops(difference) > MAX_OPS or difference.has(sympy.core.function.AppliedUndef):
+        return None
+    for offset in range(len(_SAMPLES)):
+        point = {symbol: _SAMPLES[(index + offset) % len(_SAMPLES)] + index for index, symbol in enumerate(symbols)}
+        try:
+            value = _run_bounded(lambda point=point: sympy.N(difference.subs(point), 30), _TIMEOUT)  # type: ignore[misc]
+        except Exception:
+            return None
+        if not value.is_real or not value.is_finite or abs(value) < sympy.Float("1e-12"):
+            return None
+    return "the computed side differs from the stated side at every sample point"
 
 
 def as_definition(statement: str, defs: dict[str, Definition]) -> Definition | None:

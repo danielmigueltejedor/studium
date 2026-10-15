@@ -36,8 +36,6 @@ def test_explicit_identities_are_verified(statement):
 @pytest.mark.parametrize(
     "statement",
     [
-        r"\frac{d}{dx}\left(\frac{q x^{4}}{24 E I}\right) = \frac{q x^{3}}{5 E I}",
-        r"\int_0^L x(L-x)\,dx = \frac{L^{3}}{5}",
         r"\begin{bmatrix} k & -k \\ -k & k \end{bmatrix}\begin{bmatrix} 1 \\ 0 \end{bmatrix} = \begin{bmatrix} 0 \\ 0 \end{bmatrix}",
         r"\mathbf{F} = m\mathbf{a}",
         r"\Delta p = \rho g \Delta h",
@@ -172,3 +170,15 @@ def test_conditions_are_never_premises_for_other_relations(tmp_path, monkeypatch
     statuses = {item["statement"]: item["status"] for item in equation_evidence(root, paragraph)}
     assert statuses["t = 0"] == "value_or_condition" and statuses["x = 0"] == "value_or_condition"
     assert statuses["x = u_0 t"] == "unsupported"
+
+
+def test_a_computed_integral_or_derivative_that_differs_from_the_stated_closed_form_is_contradicted():
+    wrong = check_relation(r"\int_0^L \frac{q^{2}(L-x)^{4}}{8 E I}\,dx = \frac{q^{2} L^{5}}{24 E I}", {})
+    assert wrong is not None and wrong.kind == "contradiction" and "sample point" in wrong.detail
+    right = check_relation(r"\int_0^L \frac{q^{2}(L-x)^{4}}{8 E I}\,dx = \frac{q^{2} L^{5}}{40 E I}", {})
+    assert right is not None and right.kind == "identity"
+    derivative = check_relation(r"\frac{d}{dx}\left(\frac{q x^{4}}{24 E I}\right) = \frac{q x^{3}}{5 E I}", {})
+    assert derivative is not None and derivative.kind == "contradiction"
+    # An equation to solve that involves no computed integral or derivative is never called false.
+    assert _kind(r"x^{2} = 4") == "unknown"
+    assert _kind(r"\sin\theta = \frac12") == "unknown"
