@@ -719,6 +719,9 @@ def test_contract_complete_book_may_render_once_and_stays_unreleased(tmp_path, m
     assert done["tool"] is None
     assert done["released"] is False
     assert done["reason"] == "The DRAFT was rendered once. Do not request release."
+    assert isinstance(done["remaining_gaps"], list)
+    for gap in done["remaining_gaps"]:
+        assert gap["missing"], gap
     assert "preview" not in str(done["reason"]).lower()
     assert "hand" not in str(done["reason"]).lower()
     status = dispatch("studium_project_status", {}, session=session)
