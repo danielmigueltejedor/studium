@@ -866,10 +866,19 @@ def _math_statements(text: str) -> tuple[tuple[str, str], ...]:
     outside.append(text[last:])
     for sentence in sentences(" ".join(outside)):
         for formula in formulas(sentence):
-            left, _sign, right = formula.partition("=")
             # Plain-text relations only: LaTeX outside a math span is not read in pieces.
-            if "\\" not in formula and _complete_side(left, -1) and _complete_side(right, 1):
-                found.append(("claim", formula))
+            if "\\" in formula:
+                continue
+            # A chain ``a = b = c`` states ``a = b`` and ``b = c``, as it does inside a math span.
+            sides = [side.strip() for side in re.split(r"(?<![<>!:=])=(?!=)", formula)]
+            if len(sides) > 2 and all(sides):
+                links = [f"{sides[index]} = {sides[index + 1]}" for index in range(len(sides) - 1)]
+            else:
+                links = [formula]
+            for link in links:
+                left, _sign, right = link.partition("=")
+                if _complete_side(left, -1) and _complete_side(right, 1):
+                    found.append(("claim", link))
     return tuple(found)
 
 
