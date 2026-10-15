@@ -431,6 +431,18 @@ def _symbolic_result(stored: _Relation | None, check: _SymbolicIdentity) -> Veri
     premise = verify_equation(left, right, solution=solution, symbols=_free_symbols(left, right, *solution.values()))
     if premise.status is not VerificationStatus.SYMBOLICALLY_VERIFIED:
         return premise
+    mentioned = _free_symbols(left, right, *solution.values()) | set(solution)
+    unmentioned = sorted(stored_names - mentioned)
+    if unmentioned:
+        # A stored symbol the premise and the solution never mention is not constrained by them: the
+        # substituted equation then cannot be falsified, only left undecided.
+        return _unbound(
+            "symbolic",
+            "the stored final equation uses symbols the premise and solution never mention ("
+            + ", ".join(unmentioned)
+            + "); the check cannot decide it",
+            inputs,
+        )
     consequence = verify_equation(
         stored.left,
         stored.right,

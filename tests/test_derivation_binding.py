@@ -199,3 +199,24 @@ def test_a_residual_symbolic_form_still_binds(tmp_path):
     )
 
     assert checked["verification_status"] == "SYMBOLICALLY_VERIFIED", checked
+
+
+def test_a_stored_symbol_the_premise_never_mentions_leaves_the_check_undecided(tmp_path):
+    """A case computation (hc, Ixc, A for a rectangle) does not falsify a general stored equation for hcp."""
+
+    session = _project(tmp_path)
+    derivation = _record(session, r"h_{cp} = h_c + I_{xc}/(h_c A)", symbolic="hcp = hc + Ixc/(hc*A)")
+
+    checked = _check(
+        session,
+        derivation,
+        symbolic={
+            "equation_left": "hc + Ixc/(hc*A)",
+            "equation_right": "2*H/3",
+            "solution": {"hc": "H/2", "Ixc": "b*H**3/12", "A": "b*H"},
+        },
+    )
+
+    assert checked["verification_status"] == "UNVERIFIED", checked
+    (only,) = checked["derivation"]["verification"]["checks"]
+    assert "hcp" in str(only["detail"]) and "never mention" in str(only["detail"])
