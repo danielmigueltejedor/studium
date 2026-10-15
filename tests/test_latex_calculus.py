@@ -205,3 +205,29 @@ def test_the_first_statement_about_a_name_defines_it(tmp_path, monkeypatch):
     )
     statuses = [item["status"] for item in equation_evidence(root, paragraph)]
     assert statuses == ["unsupported"] + ["follows_from_stated_premises"] * 3
+
+
+def test_an_explicit_definition_is_a_premise_for_later_relations_in_the_paragraph(tmp_path):
+    from studium.authoring.grounding import equation_evidence
+
+    record = {
+        "id": "PAR-0001",
+        "section": "x",
+        "excerpts": [],
+        "text": (
+            r"La flecha $w(x) := \frac{q x^{4}}{24 E I}$ tiene por giro $w'(x) = \frac{q x^{3}}{6 E I}$ "
+            r"y no vale $w'(x) = \frac{q x^{3}}{7 E I}$."
+        ),
+    }
+    items = {item["statement"]: item for item in equation_evidence(tmp_path, record)}
+    giro = items[r"w'(x) = \frac{q x^{3}}{6 E I}"]
+    assert giro["status"] == "follows_from_stated_premises" and giro["human_review"] == "required"
+    assert items[r"w'(x) = \frac{q x^{3}}{7 E I}"]["status"] not in {"follows_from_stated_premises", "symbolically_verified"}
+
+
+def test_a_greek_letter_can_be_the_variable_of_integration():
+    right = check_relation(r"\int_{0}^{2\pi} \left(R\sin\theta\right)^{2}\,t\,R\,\mathrm{d}\theta = \pi R^{3}\,t", {})
+    assert right is not None and right.kind == "identity"
+    wrong = check_relation(r"\int_{0}^{2\pi} \left(R\sin\theta\right)^{2}\,t\,R\,\mathrm{d}\theta = \pi R^{3}\,t^{2}", {})
+    assert wrong is not None and wrong.kind == "contradiction"
+    assert check_relation(r"\int_0^{\pi} \cos\theta\,\mathrm{d}\theta = 1", {}).kind == "contradiction"

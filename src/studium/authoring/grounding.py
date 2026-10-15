@@ -1067,9 +1067,11 @@ def equation_evidence(
         notes: dict[str, object] = {}
         status, evidence = _evidence(loaded, record, kind, statement, premises, notes)
         # A value or a condition ("x = 0", "r = R") holds at one place: it is never a premise for other relations.
-        if kind == "claim" and status not in {"contradicted", "verification_failed", "value_or_condition"}:
+        # An explicit definition (":=" or "\\equiv") is a premise as well: the author named what follows from it.
+        if (kind == "claim" and status not in {"contradicted", "verification_failed", "value_or_condition"}) or kind == "definition":
             known = {item.name: item for item in premises}
-            definition = as_definition(statement, known)
+            written = statement.replace(":=", "=").replace("\\equiv", "=") if kind == "definition" else statement
+            definition = as_definition(written, known)
             # The first statement about a name defines it; a later one is a claim to check against it.
             if definition is not None and definition.name not in known:
                 premises.append(definition)
@@ -1262,8 +1264,13 @@ _GREEK_LETTERS = {
 
 
 def _plain_math(text: str) -> str:
-    """An excerpt typed with Unicode Greek letters and square brackets, as LaTeX: ``τ / γ`` becomes ``\\tau / \\gamma``."""
+    """An excerpt typed with Unicode Greek letters and square brackets, as LaTeX: ``τ / γ`` becomes ``\\tau / \\gamma``.
 
+    Alignment marks are dropped and row breaks (``\\\\``) become separators, so ``a&=b\\\\ c&=d`` reads as two relations.
+    """
+
+    text = re.sub(r"\\\\(?:\[\d*(?:\.\d+)?(?:ex|em|pt|mm|cm)?\]?)?", " ; ", text).replace("&", "")
+    text = re.sub(r"\\(?:begin|end)\{(?:aligned|align\*?|gathered|gather\*?|split|eqnarray\*?)\}", " ; ", text)
     out = []
     for index, character in enumerate(text):
         command = _GREEK_LETTERS.get(character)
@@ -1275,7 +1282,19 @@ def _plain_math(text: str) -> str:
     return "".join(out)
 
 
-_WORD = re.compile(r"(?!(?:dx|dy|dz|dt|ds|dA|dV)[,;:.]?$)[A-Za-z]{2,}[,;:.]?")
+_TEX_OR_GREEK = re.compile("\\\\|[" + "".join(_GREEK_LETTERS) + "]")
+_WORD = re.compile(r"(?!(?:dx|dy|dz|dt|ds|dA|dV)[,;:.]?$)(?:[A-Za-z]{2,}[,;:.]?|;)")
+
+
+def _balanced(side: str) -> str:
+    """Drop the unmatched outer braces a clipped LaTeX run leaves at its ends."""
+
+    side = side.strip()
+    while side.startswith("{") and side.count("{") > side.count("}"):
+        side = side[1:].lstrip()
+    while side.endswith("}") and side.count("}") > side.count("{"):
+        side = side[:-1].rstrip()
+    return side
 
 
 def _chain_relations(body: str) -> list[str]:
@@ -1298,6 +1317,7 @@ def _chain_relations(body: str) -> list[str]:
         run = re.sub(r"^\.+\s*", "", run)
         sides = [side.strip() for side in re.split(r"(?<![<>!:=])=(?!=)", run)]
         if len(sides) >= 2:
+            sides = [_balanced(side) for side in sides]
             pairs.extend(f"{sides[a]} = {sides[b]}" for a in range(len(sides)) for b in range(a + 1, len(sides)) if sides[a] and sides[b])
         index = end + 1
     return pairs
@@ -1308,7 +1328,7 @@ def _stated_in(statement: str, body: str) -> bool:
 
     if any(_same_relation(statement, candidate) for kind, candidate in math_statements(body) if kind == "claim"):
         return True
-    if any(character in body for character in _GREEK_LETTERS) and any(_same_relation(statement, pair) for pair in _chain_relations(body)):
+    if (_TEX_OR_GREEK.search(body) is not None) and any(_same_relation(statement, pair) for pair in _chain_relations(body)):
         return True
     needle = normalize_math(statement)
     haystack = normalize_math(body)

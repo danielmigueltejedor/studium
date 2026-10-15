@@ -765,7 +765,7 @@ class _Parser:
                 depth -= 1
             elif depth == 0 and position > self.index and token.kind == "name" and token.text == "d":
                 following = self.tokens[position + 1]
-                if following.kind == "name":
+                if following.kind == "name" or (following.kind == "cmd" and following.text[1:] in _GREEK):
                     return position
         raise Unsupported("an integral without a differential")
 
