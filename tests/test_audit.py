@@ -512,3 +512,24 @@ def _outside_boxes(tex: str) -> str:
 
 def _explode(*_args, **_kwargs):
     raise AssertionError("must not fetch")
+
+
+def test_ungrounded_formula_in_a_section_names_its_paragraph(tmp_path, monkeypatch):
+    monkeypatch.setattr("urllib.request.urlopen", _explode)
+    session, _root = _topic(tmp_path, "fluidos2", "Mecánica de fluidos")
+    _section(session, section_id="tema-1", title="Temperatura")
+    source_id = _source(session, "https://open.example/density")
+    excerpt_id = _excerpt(session, source_id, "https://open.example/density", text="The density is 2.")
+    paragraph = _paragraph(session, "tema-1", "The conversion is F = C × 9/5 + 32.", [excerpt_id])
+    computed = dispatch(
+        "studium_computation_check",
+        {"expression": "2 + 2", "result": 4, "section": "tema-1"},
+        session=session,
+    )
+    refused = dispatch(
+        "studium_audit_record",
+        {"target": "tema-1", "kind": "formula", "computation": computed["computation"]["id"]},
+        session=session,
+    )
+    assert refused["status"] == "audit.rejected"
+    assert f"F = C × 9/5 + 32 [{paragraph}]" in refused["message"]

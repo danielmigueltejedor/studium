@@ -341,9 +341,11 @@ def _chapter_conflict(root: Path, target_id: str, target_kind: str, evidence: di
         return "an empty section is a gap, not a written chapter"
     missing: list[str] = []
     for record in _grounded_records(root, target_id, target_kind):
+        where = f" [{record['id']}]" if target_kind != "paragraph" and isinstance(record.get("id"), str) else ""
         for formula in _ungrounded_formulas(root, record):
-            if formula not in missing:
-                missing.append(formula)
+            labelled = formula + where
+            if labelled not in missing and not any(item.startswith(formula + " [") for item in missing):
+                missing.append(labelled)
     if missing:
         return (
             "the formula is not grounded by a cited excerpt, a replayed example, or a checked derivation: "
