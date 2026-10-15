@@ -369,7 +369,7 @@ def _chapter_conflict(root: Path, target_id: str, target_kind: str, evidence: di
         if len(values) > 1:
             return f"the stored sources contradict each other on {name}"
     for _passage_id, text in _chapter_passages(root, target_id, target_kind):
-        for name, value in _quantities(text):
+        for name, value in _asserted_quantities(text):
             stored = by_name.get(name)
             if stored is not None and value not in stored:
                 return (
@@ -379,6 +379,23 @@ def _chapter_conflict(root: Path, target_id: str, target_kind: str, evidence: di
             if value not in bare and value not in cited_numbers:
                 return f"the chapter states {name} is {value}, which the stored sources do not support"
     return None
+
+
+#: A sentence that rules a value out ("Kelvin-Planck forbids Qc = 0") does not assert it.
+_RULES_OUT = re.compile(
+    r"\b(?:forbids?|forbidden|prohibits?|cannot|can't|never|impossible|unattainable|not|no|without)\b",
+    re.IGNORECASE,
+)
+
+
+def _asserted_quantities(text: str) -> list[tuple[str, str]]:
+    """The ``name = number`` claims a passage asserts, leaving out sentences that deny them."""
+
+    found: list[tuple[str, str]] = []
+    for sentence in re.split(r"(?<=[.!?])\s+", text):
+        if not _RULES_OUT.search(sentence):
+            found.extend(_quantities(sentence))
+    return found
 
 
 def _cited_numbers(root: Path, target_id: str, target_kind: str) -> set[str]:
