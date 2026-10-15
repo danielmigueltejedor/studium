@@ -190,3 +190,15 @@ def test_latex_escape_ascii_is_unchanged():
 def test_latex_escape_merges_unicode_scripts():
     assert latex_escape("x⁻²") == r"x\({}^{-2}\)"
     assert latex_escape("ρ₀") == r"\(\rho_{0}\)"
+
+
+def test_dollar_spans_with_comparisons_and_digit_led_variables_are_math():
+    """Regression (Theory of Structures book): "$x > a$" and "$2L/3$" were printed with their dollars."""
+
+    from studium.authoring.render import _dollar_ok
+
+    assert _dollar_ok("x > a")
+    assert _dollar_ok("2L/3")
+    assert _dollar_ok("0 < x < L")
+    assert not _dollar_ok("5")
+    assert not _dollar_ok("5 and 10")

@@ -897,19 +897,22 @@ def _match_explicit(text: str, index: int) -> tuple[int, int, str] | None:
 def _dollar_ok(inner: str) -> bool:
     if not inner.strip() or "\n" in inner or len(inner) > 300:
         return False
+    # A span that starts with a digit and has no letter ("$5$", "$5, $") is money, not math;
+    # "$2L/3$" names a variable and is math.
     if (
         inner.lstrip()[:1].isdigit()
         and "=" not in inner
         and "\\" not in inner
         and "{" not in inner
         and "}" not in inner
+        and not re.search(r"[A-Za-z]", inner)
     ):
         return False
     if any(character in _MATH for character in inner) or re.search(r"[=^_\\]", inner):
         return True
     if re.search(r"[A-Za-z]{3,}", inner):
         return False
-    return re.fullmatch(r"[A-Za-z0-9 +\-*/().,^_{}]+", inner) is not None and bool(
+    return re.fullmatch(r"[A-Za-z0-9 +\-*/().,^_{}<>|']+", inner) is not None and bool(
         re.search(r"[A-Za-z0-9]", inner)
     )
 
