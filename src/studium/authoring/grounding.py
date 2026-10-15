@@ -32,6 +32,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from studium.authoring.excerpts import excerpts_by_id
+from studium.authoring.latex_calculus import Definition, as_definition, check_with_premises
 from studium.storage.records import COMPUTATIONS, DERIVATIONS, fold_by_id
 
 MATH_KINDS = frozenset({"source", "derivation", "example"})
@@ -770,6 +771,7 @@ EQUATION_STATUSES = (
     "dimensionally_verified",
     "numerically_reproduced",
     "source_supported",
+    "follows_from_stated_premises",
     "derived_steps_unchecked",
     "numerically_ambiguous",
     "not_machine_checkable",
@@ -785,7 +787,14 @@ FORMULA_STATUSES = EQUATION_STATUSES + NON_CLAIM_STATUSES
 BLOCKING_STATUSES = frozenset({"unsupported", "contradicted", "verification_failed"})
 #: Statuses whose equation still needs a person to look at it.
 HUMAN_REVIEW_STATUSES = frozenset(
-    {"not_machine_checkable", "unsupported", "derived_steps_unchecked", "numerically_ambiguous", "source_supported"}
+    {
+        "not_machine_checkable",
+        "unsupported",
+        "derived_steps_unchecked",
+        "numerically_ambiguous",
+        "source_supported",
+        "follows_from_stated_premises",
+    }
 )
 _DERIVATION_EVIDENCE = {
     "SYMBOLICALLY_VERIFIED": "symbolically_verified",
@@ -1049,12 +1058,21 @@ def equation_evidence(
     display = {normalize_math(item) for item in _display_statements(text)}
     found: list[dict[str, object]] = []
     seen: set[str] = set()
+    premises: list[Definition] = []
     for kind, statement in math_statements(text):
         key = f"{kind}:{normalize_math(statement)}"
         if key in seen:
             continue
         seen.add(key)
-        status, evidence = _evidence(loaded, record, kind, statement)
+        notes: dict[str, object] = {}
+        status, evidence = _evidence(loaded, record, kind, statement, premises, notes)
+        # A value or a condition ("x = 0", "r = R") holds at one place: it is never a premise for other relations.
+        if kind == "claim" and status not in {"contradicted", "verification_failed", "value_or_condition"}:
+            known = {item.name: item for item in premises}
+            definition = as_definition(statement, known)
+            # The first statement about a name defines it; a later one is a claim to check against it.
+            if definition is not None and definition.name not in known:
+                premises.append(definition)
         found.append(
             {
                 "paragraph": record.get("id"),
@@ -1064,7 +1082,8 @@ def equation_evidence(
                 "status": status,
                 "evidence": evidence,
                 "important": normalize_math(statement) in display,
-                "machine_parseable": _relation(statement) is not None,
+                "machine_parseable": _relation(statement) is not None or notes.get("calculus_readable") is True,
+                "premises": notes.get("premises", []),
                 "dimensions": loaded.dimension_probe(statement) if kind == "claim" and _relation(statement) is not None else None,
                 "human_review": "required" if status in HUMAN_REVIEW_STATUSES - {"source_supported"}
                 else ("recommended" if status == "source_supported" else "none"),
@@ -1091,7 +1110,14 @@ def _status(context: GroundingContext, record: dict[str, object], kind: str, sta
     return _evidence(context, record, kind, statement)[0]
 
 
-def _evidence(context: GroundingContext, record: dict[str, object], kind: str, statement: str) -> tuple[str, list[str]]:
+def _evidence(
+    context: GroundingContext,
+    record: dict[str, object],
+    kind: str,
+    statement: str,
+    premises: list[Definition] | None = None,
+    notes: dict[str, object] | None = None,
+) -> tuple[str, list[str]]:
     """The strongest status the stored evidence gives this exact statement, and that evidence.
 
     A relation the parser cannot read is never verified by a parser: only a
@@ -1167,6 +1193,17 @@ def _evidence(context: GroundingContext, record: dict[str, object], kind: str, s
             found.extend(("source_supported", ref) for ref in refs)
         elif entry.get("kind") == "example":
             found.extend(("numerically_reproduced", ref) for ref in refs)
+    held = min((_RANK[status] for status, _identifier in found), default=len(EQUATION_STATUSES))
+    if kind == "claim" and held > _RANK["symbolically_verified"]:
+        outcome = check_with_premises(statement, premises or [])
+        if outcome is not None:
+            if notes is not None:
+                notes["calculus_readable"] = True
+                notes["premises"] = list(outcome.premises)
+            if outcome.kind == "contradiction":
+                return "contradicted", ["sympy"]
+            if outcome.kind == "identity":
+                found.append(("follows_from_stated_premises" if outcome.premises else "symbolically_verified", "sympy"))
     if found:
         best = min(found, key=lambda item: _RANK[item[0]])[0]
         return best, sorted({identifier for _status, identifier in found})
