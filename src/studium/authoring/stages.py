@@ -26,8 +26,7 @@ def verification_stages(root: Path, math_grounding: dict[str, object]) -> dict[s
     verified = _int(math_grounding.get("claims_verified"))
     by_status = math_grounding.get("by_status")
     counts = by_status if isinstance(by_status, dict) else {}
-    unresolved = math_grounding.get("unresolved_important")
-    important = len(unresolved) if isinstance(unresolved, list) else 0
+    important = _int(math_grounding.get("unresolved_important_count"))
     science_complete = claims == verified
     reasons: list[str] = []
     if audit_status != "passed":

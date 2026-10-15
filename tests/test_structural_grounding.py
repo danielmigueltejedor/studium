@@ -374,3 +374,16 @@ def test_a_relation_chained_in_a_derivation_equation_is_not_individually_verifie
     statuses = dict(formula_statuses(root, paragraph))
     # The check ran on one expression; neither relation of the two-relation equation is individually covered.
     assert set(statuses.values()) == {"derived_steps_unchecked"}
+
+
+def test_unresolved_important_count_is_not_capped_by_the_listing(tmp_path, monkeypatch):
+    monkeypatch.setattr("urllib.request.urlopen", _explode)
+    session, _root = _book(tmp_path)
+    excerpt = _excerpt(session, "La presión es fuerza por unidad de área.")
+    for index in range(53):
+        _paragraph(session, rf"Ecuación número {index}: $$\nabla\cdot\mathbf{{u}}_{{{index}}} = 0$$ en el fluido.", [excerpt])
+    summary = dispatch("studium_quality_report", {}, session=session)["math_grounding"]
+    assert summary["unresolved_important_count"] == 53
+    assert len(summary["unresolved_important"]) == 50
+    review = dispatch("studium_book_review", {}, session=session)
+    assert review["scientific_verification"]["unresolved_important_equations"] == 53

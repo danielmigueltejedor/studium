@@ -1427,6 +1427,7 @@ def grounding_summary(root: Path) -> dict[str, object]:
     claims = 0
     verified = 0
     unresolved_important: list[dict[str, object]] = []
+    important_unresolved = 0
     dimensions: dict[str, int] = {"consistent": 0, "inconsistent": 0, "unavailable": 0}
     dimension_conflicts: list[dict[str, object]] = []
     declared: dict[str, int] = {"source": 0, "derivation": 0, "example": 0}
@@ -1449,8 +1450,10 @@ def grounding_summary(root: Path) -> dict[str, object]:
                 claims += 1
                 if status in VERIFIED_STATUSES:
                     verified += 1
-                elif item["important"] and len(unresolved_important) < 50:
-                    unresolved_important.append({key: item[key] for key in ("paragraph", "statement", "status")})
+                elif item["important"]:
+                    important_unresolved += 1
+                    if len(unresolved_important) < 50:
+                        unresolved_important.append({key: item[key] for key in ("paragraph", "statement", "status")})
         for entry in declared_math(record):
             kind = entry.get("kind")
             if kind in declared:
@@ -1473,6 +1476,7 @@ def grounding_summary(root: Path) -> dict[str, object]:
         },
         "scientific_verification_complete": claims == verified,
         "unresolved_important": unresolved_important,
+        "unresolved_important_count": important_unresolved,
         "dimension_probe": dimensions,
         "dimension_conflicts": dimension_conflicts,
         "declared": declared,
