@@ -13,8 +13,9 @@ from pathlib import Path
 from studium.authoring.academic_blueprint import current_academic_blueprint
 from studium.authoring.blueprint import current_sections
 from studium.authoring.derivations import derivations_for_section
+from studium.authoring.diagrams import diagram_state, problem_figures, renderable
 from studium.authoring.excerpts import excerpts_by_id
-from studium.authoring.figures import FIGURE_REF, figures_in_section
+from studium.authoring.figures import FIGURE_REF, figures_in_section, referenced_figure_keys
 from studium.authoring.grounding import FORMULA_STATUSES, GroundingContext, formula_statuses
 from studium.authoring.languages import (
     INVALID_LANGUAGE,
@@ -28,6 +29,8 @@ from studium.authoring.notation import notation_registry
 from studium.authoring.paragraphs import supported_paragraphs
 from studium.authoring.problems import problem_result_current
 from studium.authoring.support import corroboration_for_excerpts, supported_drafts
+from studium.diagrams.registry import Options as DiagramOptions
+from studium.diagrams.registry import family_laws
 from studium.domain.profiles import BOOK_TOPIC
 from studium.research.public_sources import bibliography_counts
 from studium.storage.init_project import book_kind, load_project_toml, load_state_holding_lock
@@ -643,6 +646,29 @@ _EXTRA_BOX_LABELS: dict[str, dict[str, str]] = {
         "answer_ambiguous": "la respuesta enunciada termina en ceros que pueden no ser significativos; sólo coincide si son de relleno. La respuesta no está comprobada.",
         "answer_unreplayable": "la respuesta no se pudo reproducir con los pasos almacenados. La respuesta no está comprobada.",
         "user_material": "Material aportado por el usuario (privado; no verificado).",
+        "statement": "Enunciado",
+        "free_body": "Diagrama de sólido libre",
+        "equilibrium": "Equilibrio",
+        "laws": "Solución matemática",
+        "graphical": "Solución gráfica",
+        "checks": "Verificación",
+        "worked_number": "Problema resuelto",
+        "diagram_report": "Verificación de los diagramas",
+        "diagram_intro": "Cada diagrama se dibuja a partir de los datos almacenados del problema y se comprueba aparte del dibujo. La tabla da el estado de cada uno; el detalle de las comprobaciones queda en el proyecto.",
+        "diagram_figure": "Figura",
+        "diagram_generator": "Generador",
+        "diagram_status": "Estado",
+        "diagram_checks": "Comprobaciones",
+        "checks_sentence": "Comprobaciones automáticas sobre los datos del problema: {symbolic} exactas, {numeric} numéricas y {dimensional} dimensionales, todas superadas. Los diagramas se han comprobado punto a punto contra las funciones calculadas.",
+        "checks_sentence_plain": "Comprobaciones automáticas sobre los datos del problema: {symbolic} exactas, {numeric} numéricas y {dimensional} dimensionales, todas superadas.",
+        "mathematically_verified": "verificado matemáticamente",
+        "numerically_checked": "comprobado numéricamente",
+        "dimensionally_consistent": "dimensionalmente coherente",
+        "visually_inspected": "inspeccionado visualmente",
+        "not_machine_checkable": "no comprobable por máquina",
+        "unverified": "sin comprobar",
+        "verification_failed": "comprobación fallida",
+        "stale": "desactualizado",
     },
 }
 _EXTRA_BOX_DEFAULTS = {
@@ -677,6 +703,29 @@ _EXTRA_BOX_DEFAULTS = {
     "answer_unreplayable": "the answer could not be reproduced from the stored steps. The answer is not checked.",
     "not_reproduced": "not reproduced",
     "step_word": "Step",
+    "statement": "Problem statement",
+    "free_body": "Free-body diagram",
+    "equilibrium": "Equilibrium",
+    "laws": "Mathematical solution",
+    "graphical": "Graphical solution",
+    "checks": "Verification",
+    "worked_number": "Worked problem",
+    "diagram_report": "Diagram verification",
+    "diagram_intro": "Every diagram is drawn from the problem's stored data and checked apart from the drawing. The table gives each one's status; the detailed checks stay in the project.",
+    "diagram_figure": "Figure",
+    "diagram_generator": "Generator",
+    "diagram_status": "Status",
+    "diagram_checks": "Checks",
+    "checks_sentence": "Automatic checks on the problem data: {symbolic} exact, {numeric} numeric and {dimensional} dimensional, all passed. The diagrams were compared point by point with the computed functions.",
+    "checks_sentence_plain": "Automatic checks on the problem data: {symbolic} exact, {numeric} numeric and {dimensional} dimensional, all passed.",
+    "mathematically_verified": "mathematically verified",
+    "numerically_checked": "numerically checked",
+    "dimensionally_consistent": "dimensionally consistent",
+    "visually_inspected": "visually inspected",
+    "not_machine_checkable": "not machine-checkable",
+    "unverified": "unverified",
+    "verification_failed": "verification failed",
+    "stale": "stale",
 }
 
 #: Verification statuses in prose. The raw enum name stays the fallback so a
@@ -848,19 +897,22 @@ def _match_explicit(text: str, index: int) -> tuple[int, int, str] | None:
 def _dollar_ok(inner: str) -> bool:
     if not inner.strip() or "\n" in inner or len(inner) > 300:
         return False
+    # A span that starts with a digit and has no letter ("$5$", "$5, $") is money, not math;
+    # "$2L/3$" names a variable and is math.
     if (
         inner.lstrip()[:1].isdigit()
         and "=" not in inner
         and "\\" not in inner
         and "{" not in inner
         and "}" not in inner
+        and not re.search(r"[A-Za-z]", inner)
     ):
         return False
     if any(character in _MATH for character in inner) or re.search(r"[=^_\\]", inner):
         return True
     if re.search(r"[A-Za-z]{3,}", inner):
         return False
-    return re.fullmatch(r"[A-Za-z0-9 +\-*/().,^_{}]+", inner) is not None and bool(
+    return re.fullmatch(r"[A-Za-z0-9 +\-*/().,^_{}<>|']+", inner) is not None and bool(
         re.search(r"[A-Za-z0-9]", inner)
     )
 
@@ -1595,6 +1647,7 @@ def _document(root: Path) -> str:
     lines.extend(_formula_sheet_lines(root, copy))
     lines.extend([r"\chapter{" + latex_escape(copy["solutions"]) + "}"])
     lines.extend(_solution_lines(root, copy, language))
+    lines.extend(_diagram_report_lines(root, language))
     lines.extend([r"\chapter{" + latex_escape(copy["audit"]) + "}"])
     lines.extend(_audit_lines(root, paragraphs, claims, titles, excerpts, sources, copy, kind, counts, language))
     lines.extend(
@@ -1799,6 +1852,8 @@ def _chapter_lines(
     lines.extend(_box(copy["consejo"], _plain(consejo, figure_ref), "consejo"))
     for text in definitions:
         lines.extend(_box(copy["definition"], _plain([text], figure_ref), "definition"))
+    boxed_keys = [key for text in (*consejo, *definitions, *self_check) for key in _cited_keys(text)]
+    lines.extend(_figure_lines(root, section_id, copy, figures_shown, keys=boxed_keys))
     if chapter_boxes:
         lines.extend(_chapter_back_matter(root, section_id, copy, language))
     lines.extend(_box(copy["self_check"], _plain(self_check, figure_ref), "self_check"))
@@ -1836,12 +1891,18 @@ def _body_lines(
             lines.extend(["", r"\section{" + latex_escape(value) + "}"])
             continue
         lines.extend(_plain([value], figure_ref))
+        # A cited figure follows the first paragraph that cites it; the rest follow the first paragraph.
+        lines.extend(_figure_lines(root, section_id, copy, figures_shown, keys=_cited_keys(value)))
         if not placed:
-            lines.extend(_figure_lines(root, section_id, copy, figures_shown))
+            lines.extend(_figure_lines(root, section_id, copy, figures_shown, uncited=True))
             placed = True
     if not placed:
-        lines.extend(_figure_lines(root, section_id, copy, figures_shown))
+        lines.extend(_figure_lines(root, section_id, copy, figures_shown, uncited=True))
     return lines
+
+
+def _cited_keys(text: str) -> list[str]:
+    return [match.group(1).lower() for match in FIGURE_REF.finditer(text)]
 
 
 def _body_chunks(body: list[str]) -> list[tuple[str, str]]:
@@ -1958,11 +2019,17 @@ def _worked_box(root: Path, section_id: str, copy: dict[str, str], language: Boo
     ]
     if not problems and not computations:
         return []
+    structured = [record for record in problems if isinstance(record.get("solution"), dict) and record.get("solution")]
+    if structured:
+        lines: list[str] = []
+        for index, problem in enumerate(structured, 1):
+            solution = problem["solution"]
+            assert isinstance(solution, dict)
+            body = _solution_body(problem, solution, copy, language, root=root)
+            title = copy["worked"] if len(structured) == 1 else f"{_extra_label(language, 'worked_number')} {index}"
+            lines.extend(_box(title, body, "worked"))
+        return lines
     problem = problems[0] if problems else {}
-    solution = problem.get("solution")
-    if isinstance(solution, dict) and solution:
-        body = _solution_body(problem, solution, copy, language)
-        return _box(copy["worked"], body, "worked")
     computation = computations[0] if computations else {}
     prompt = _str_field(problem, "prompt")
     expected = _str_field(problem, "expected")
@@ -1988,13 +2055,46 @@ def _worked_box(root: Path, section_id: str, copy: dict[str, str], language: Boo
     return _box(copy["worked"], body, "worked")
 
 
-def _solution_body(problem: dict[str, object], solution: dict[str, object], copy: dict[str, str], language: BookLanguage) -> list[str]:
-    """A structured, multi-step engineering solution: model, substitution, result."""
+def _solution_body(
+    problem: dict[str, object],
+    solution: dict[str, object],
+    copy: dict[str, str],
+    language: BookLanguage,
+    *,
+    root: Path | None = None,
+    skip_stages: tuple[str, ...] = (),
+) -> list[str]:
+    """A structured engineering solution in reading order.
+
+    Statement and its figure; physical model; free-body diagram; equilibrium
+    steps; the laws computed from the problem's structured data; the result;
+    the graphical solution; interpretation; a one-paragraph verification
+    summary; common mistakes. Diagrams appear at the stage they were recorded
+    for. Machine evidence stays out of the student's text.
+    """
+
+    staged: dict[str, list[dict[str, object]]] = {}
+    identifier = problem.get("id")
+    if root is not None and isinstance(identifier, str):
+        for record in problem_figures(root, identifier):
+            block = record.get("diagram")
+            stage = block.get("stage") if isinstance(block, dict) else None
+            if isinstance(stage, str) and stage not in skip_stages:
+                staged.setdefault(stage, []).append(record)
+
+    def figures(stage: str, heading: str | None = None) -> list[str]:
+        drawn: list[str] = []
+        for record in staged.get(stage, []):
+            drawn.extend(_single_figure_lines(root, record, copy) if root is not None else [])
+        if drawn and heading:
+            drawn = ["", r"\noindent\textbf{" + latex_escape(heading) + "}", *drawn]
+        return drawn
 
     body: list[str] = []
     prompt = _str_field(problem, "prompt")
     if prompt.strip():
         body.extend(_labeled(copy["enunciado"], prompt))
+    body.extend(figures("statement"))
     given = solution.get("given")
     if isinstance(given, list):
         body.extend(_given_lines(given, language))
@@ -2007,13 +2107,26 @@ def _solution_body(problem: dict[str, object], solution: dict[str, object], copy
     assumptions = solution.get("assumptions")
     if isinstance(assumptions, list):
         body.extend(_bullet_items(_extra_label(language, "assumptions"), [str(item) for item in assumptions], language))
+    body.extend(figures("model"))
+    body.extend(figures("free_body", _extra_label(language, "free_body")))
     steps = solution.get("steps")
+    development = solution.get("development")
     if isinstance(steps, list) and steps:
-        body.extend(_steps_lines(steps, language))
-    else:
-        development = solution.get("development")
-        if isinstance(development, list) and development:
+        if isinstance(development, list) and development and staged:
             body.extend(_numbered_steps([str(item) for item in development], [], language))
+        body.extend(_steps_lines(steps, language))
+    elif isinstance(development, list) and development:
+        body.extend(_numbered_steps([str(item) for item in development], [], language))
+    body.extend(figures("equilibrium"))
+    structure = problem.get("structure")
+    if isinstance(structure, dict) and "laws" not in skip_stages:
+        options = DiagramOptions(language=language.tag)
+        laws = family_laws(structure.get("family"), structure.get("spec"), options)
+        if laws:
+            body.extend(["", r"\noindent\textbf{" + latex_escape(_extra_label(language, "laws")) + "}"])
+            for block in laws:
+                body.extend(_display_math(block))
+    body.extend(figures("solution"))
     substitution = solution.get("substitution")
     if isinstance(substitution, str) and substitution.strip():
         body.extend(["", r"\noindent\textbf{" + latex_escape(_extra_label(language, "substitution")) + "}"])
@@ -2022,9 +2135,13 @@ def _solution_body(problem: dict[str, object], solution: dict[str, object], copy
     if isinstance(result, str) and result.strip():
         body.extend(["", r"\noindent\textbf{" + latex_escape(_extra_label(language, "result")) + "}"])
         body.extend(_display_math(result))
+    body.extend(figures("graphical", _extra_label(language, "graphical")))
     interpretation = solution.get("interpretation")
     if isinstance(interpretation, str) and interpretation.strip():
         body.extend(_labeled(_extra_label(language, "interpretation"), interpretation))
+    body.extend(figures("interpretation"))
+    body.extend(_structure_check_lines(problem, staged, language))
+    body.extend(figures("verification"))
     step_checks = problem.get("step_checks")
     if isinstance(step_checks, list):
         body.extend(_step_check_lines(step_checks, language))
@@ -2036,6 +2153,23 @@ def _solution_body(problem: dict[str, object], solution: dict[str, object], copy
     if isinstance(mistakes, list):
         body.extend(_bullet_items(_extra_label(language, "mistakes"), [str(item) for item in mistakes], language))
     return body
+
+
+def _structure_check_lines(
+    problem: dict[str, object], staged: dict[str, list[dict[str, object]]], language: BookLanguage
+) -> list[str]:
+    """One student-facing sentence saying what the machine checked. Shown only when everything passed."""
+
+    summary = problem.get("structure_check")
+    if not isinstance(summary, dict) or summary.get("status") in (None, "verification_failed"):
+        return []
+    counts = summary.get("counts") if isinstance(summary.get("counts"), dict) else {}
+    assert isinstance(counts, dict)
+    key = "checks_sentence" if staged else "checks_sentence_plain"
+    sentence = _extra_label(language, key).format(
+        symbolic=counts.get("symbolic", 0), numeric=counts.get("numeric", 0), dimensional=counts.get("dimensional", 0)
+    )
+    return _labeled(_extra_label(language, "checks"), sentence)
 
 
 def _labeled(label: str, text: str, *, expression: bool = False, language: str = "") -> list[str]:
@@ -2483,6 +2617,12 @@ def _exercise_box(root: Path, section_id: str, language: BookLanguage) -> list[s
         body.extend(["", r"\noindent\textbf{" + latex_escape(head) + "}"])
         if prompt.strip():
             body.extend(emit_prose(prompt.strip()))
+        identifier = record.get("id")
+        if isinstance(identifier, str):
+            for figure in problem_figures(root, identifier):
+                block = figure.get("diagram")
+                if isinstance(block, dict) and block.get("stage") == "statement":
+                    body.extend(_single_figure_lines(root, figure, messages(language)))
     return _box(label, body, "exercise")
 
 
@@ -2491,6 +2631,9 @@ def _figure_lines(
     section_id: str,
     copy: dict[str, str],
     shown: set[str] | None = None,
+    *,
+    keys: list[str] | None = None,
+    uncited: bool = False,
 ) -> list[str]:
     """Checked drawings inline. No float, so a short drawing does not take a page.
 
@@ -2503,49 +2646,136 @@ def _figure_lines(
     with academic sections calls :func:`_chapter_lines` once per section, but its
     figures are stored per chapter, so without this set every section would
     repeat the same drawings.
+
+    ``keys`` keeps only the figures cited by those keys, in citation order;
+    ``uncited`` keeps only figures that no paragraph of the book cites.
     """
 
     lines: list[str] = []
-    for record in figures_in_section(root, section_id):
+    records = figures_in_section(root, section_id)
+    if keys is not None:
+        wanted = list(dict.fromkeys(keys))
+        records = sorted(
+            (record for record in records if _figure_keys(record) & set(wanted)),
+            key=lambda record: min(wanted.index(key) for key in _figure_keys(record) & set(wanted)),
+        )
+    elif uncited:
+        cited = {key.lower() for key in referenced_figure_keys(root)}
+        records = [record for record in records if not (_figure_keys(record) & cited)]
+    for record in records:
         identifier = record.get("id")
         if shown is not None and isinstance(identifier, str) and identifier in shown:
             continue
-        output = _checked_output(root, record)
-        if output is None:
+        block = record.get("diagram")
+        if isinstance(block, dict) and isinstance(block.get("problem"), str):
+            # A problem's diagram is drawn inside that problem, at its stage.
+            continue
+        drawn = _single_figure_lines(root, record, copy)
+        if not drawn:
             continue
         if shown is not None and isinstance(identifier, str):
             shown.add(identifier)
-        if record.get("kind") == "tikz" and isinstance(record.get("source"), str):
-            body = "\n".join(
-                [
-                    r"\begin{tikzpicture}",
-                    str(record["source"]).strip(),
-                    r"\end{tikzpicture}",
-                ]
-            )
-            fitted = _fit_block(body, consume_box=False)
-        else:
-            fitted = _fit_block(r"\includegraphics{" + output + "}", consume_box=True)
-        caption = _str_field(record, "caption")
-        prefix = _figure_caption_prefix(record, copy)
-        lines.extend(
-            [
-                "",
-                r"\par\vspace{\baselineskip}",
-                r"\noindent\begin{minipage}{\linewidth}",
-                r"\centering",
-            ]
-        )
-        lines.extend(fitted)
-        if caption.strip():
-            lines.extend([r"\par\nopagebreak", r"{\small " + prefix + render_text_run(caption) + r"\par}"])
-        lines.extend(
-            [
-                r"\end{minipage}",
-                r"\par\vspace{\baselineskip}",
-            ]
-        )
+        lines.extend(drawn)
     return lines
+
+
+def _figure_keys(record: dict[str, object]) -> set[str]:
+    found = set()
+    for field in ("key", "id"):
+        value = record.get(field)
+        if isinstance(value, str) and value.strip():
+            found.add(value.strip().lower())
+    return found
+
+
+def _single_figure_lines(root: Path, record: dict[str, object], copy: dict[str, str]) -> list[str]:
+    """One checked drawing with its numbered caption, or nothing.
+
+    A drawing built from structured data renders only while its checks pass
+    and the data it was drawn from are current.
+    """
+
+    lines: list[str] = []
+    output = _checked_output(root, record)
+    if output is None or not renderable(root, record):
+        return lines
+    if record.get("kind") == "tikz" and isinstance(record.get("source"), str):
+        body = "\n".join(
+            [
+                r"\begin{tikzpicture}",
+                str(record["source"]).strip(),
+                r"\end{tikzpicture}",
+            ]
+        )
+        fitted = _fit_block(body, consume_box=False)
+    else:
+        fitted = _fit_block(r"\includegraphics{" + output + "}", consume_box=True)
+    caption = _str_field(record, "caption")
+    prefix = _figure_caption_prefix(record, copy)
+    lines.extend(
+        [
+            "",
+            r"\par\vspace{\baselineskip}",
+            r"\noindent\begin{minipage}{\linewidth}",
+            r"\centering",
+        ]
+    )
+    lines.extend(fitted)
+    if caption.strip():
+        lines.extend([r"\par\nopagebreak", r"{\small " + prefix + render_text_run(caption) + r"\par}"])
+    lines.extend(
+        [
+            r"\end{minipage}",
+            r"\par\vspace{\baselineskip}",
+        ]
+    )
+    return lines
+
+
+def _diagram_report_lines(root: Path, language: BookLanguage) -> list[str]:
+    """Appendix table: every rendered diagram, its generator and its current status."""
+
+    rows: list[str] = []
+    for record in fold_by_id(root / FIGURES):
+        if record.get("deleted") is True or not isinstance(record.get("diagram"), dict):
+            continue
+        block = record["diagram"]
+        assert isinstance(block, dict)
+        state = diagram_state(root, record)
+        counts = state.get("counts") if isinstance(state.get("counts"), dict) else {}
+        assert isinstance(counts, dict)
+        total = sum(int(value) for value in counts.values() if isinstance(value, int))
+        key = record.get("key") if isinstance(record.get("key"), str) else record.get("id")
+        reference = r"\ref{fig:" + _figure_label_key(str(key)) + "}"
+        status = _extra_label(language, str(state["status"])) if str(state["status"]) in _EXTRA_BOX_DEFAULTS else str(state["status"])
+        rows.append(
+            reference
+            + " & "
+            + r"\texttt{" + latex_escape(str(block.get("generator"))) + "}"
+            + " & "
+            + latex_escape(status)
+            + " & "
+            + str(total)
+            + r" \\"
+        )
+    if not rows:
+        return []
+    return [
+        r"\chapter{" + latex_escape(_extra_label(language, "diagram_report")) + "}",
+        latex_escape(_extra_label(language, "diagram_intro")),
+        "",
+        r"\begin{longtable}{llll}",
+        latex_escape(_extra_label(language, "diagram_figure"))
+        + " & "
+        + latex_escape(_extra_label(language, "diagram_generator"))
+        + " & "
+        + latex_escape(_extra_label(language, "diagram_status"))
+        + " & "
+        + latex_escape(_extra_label(language, "diagram_checks"))
+        + r" \\ \hline",
+        *rows,
+        r"\end{longtable}",
+    ]
 
 
 def _figure_caption_prefix(record: dict[str, object], copy: dict[str, str]) -> str:
@@ -2815,7 +3045,7 @@ def _solution_lines(root: Path, copy: dict[str, str], language: BookLanguage) ->
             # A practice problem with a stored solution gets the same full
             # engineering solution the worked problem does, so the appendix is a
             # real solutions manual instead of a bare answer list.
-            lines.extend(_solution_body(record, solution, copy, language))
+            lines.extend(_solution_body(record, solution, copy, language, root=root, skip_stages=("statement",)))
             continue
         lines.extend(["", *emit_prose(prompt)])
         if witnessed:

@@ -81,6 +81,8 @@ _TOKEN = re.compile(
 class Token:
     kind: str
     text: str
+    #: An explicit thin space (``\\,``, ``\\;``, ``\\:``) came just before this token.
+    spaced: bool = False
 
 
 @dataclass
@@ -118,15 +120,21 @@ def tokenize(text: str) -> list[Token]:
     cleaned = text.replace("{,}", ".")
     cleaned = re.sub(r"(?<=\d)(?:\\[,;:!]|~)\s*(?=\d{3}(?!\d))", "", cleaned)
     cleaned = re.sub(r"\\(?:left|right|big|Big|bigg|Bigg)(?![A-Za-z])\s*", "", cleaned)
-    cleaned = re.sub(r"\\[,;:!]|~|\\q?quad(?![A-Za-z])", " ", cleaned)
+    # An explicit space ends the argument of a function written without parentheses: in
+    # ``\\sin x\\,R`` the argument is ``x``. Mark it with a thin-space character.
+    cleaned = re.sub(r"\\[,;:]", "\u2009", cleaned)
+    cleaned = re.sub(r"\\!|~|\\q?quad(?![A-Za-z])", " ", cleaned)
     cleaned = re.sub(r"\\mathrm\s*\{\s*d\s*\}", "d", cleaned)
     cleaned = re.sub(r"\^\s*\{?\s*((?:\\prime\s*)+)\}?", lambda match: "'" * match.group(1).count("\\prime"), cleaned)
     tokens: list[Token] = []
+    spaced = False
     for match in _TOKEN.finditer(cleaned):
         kind = match.lastgroup or ""
         if kind == "space":
+            spaced = spaced or "\u2009" in match.group()
             continue
-        tokens.append(Token(kind, match.group()))
+        tokens.append(Token(kind, match.group(), spaced))
+        spaced = False
         if len(tokens) > MAX_TOKENS:
             raise Unsupported("the relation is too long")
     if sum(len(token.text) for token in tokens) != len("".join(cleaned.split())):
@@ -545,6 +553,8 @@ class _Parser:
         while self.starts_factor() and not self.at_op("|") and not self.at_op("("):
             token = self.peek()
             if token is not None and token.kind == "cmd" and token.text[1:] in _FUNCTIONS:
+                break
+            if token is not None and token.spaced:
                 break
             value = value * self.parse_power()
         return value
