@@ -347,3 +347,30 @@ def test_dimension_probe_uses_the_notation_units_and_flags_symbol_reuse(tmp_path
     summary = dispatch("studium_quality_report", {}, session=session)["math_grounding"]
     assert summary["dimension_probe"]["inconsistent"] == 1
     assert summary["dimension_conflicts"][0]["statement"] == r"D = C_D\,\tfrac12\rho V^{2} S"
+
+
+def test_left_and_right_delimiters_are_not_relation_operators():
+    """\\left starts with \\le: it once cut 'y = a/2 \\left(...\\right)' into a fragment that matched a derivation."""
+
+    text = (
+        r"\begin{equation} y = \frac{a}{2}\left(\frac{2 t x}{u_0} - \frac{x^{2}}{u_0^{2}}\right), "
+        r"\qquad 0 \le x \le u_0 t \end{equation}"
+    )
+    assert math_statements(text) == [
+        ("claim", r"y = \frac{a}{2}\left(\frac{2 t x}{u_0} - \frac{x^{2}}{u_0^{2}}\right)"),
+        ("condition", r"0 \le x"),
+        ("condition", r"x \le u_0 t"),
+    ]
+    assert math_statements(r"$a \leftarrow b$ y $c \nearrow d$") == []
+
+
+def test_a_relation_chained_in_a_derivation_equation_is_not_individually_verified(tmp_path, monkeypatch):
+    monkeypatch.setattr("urllib.request.urlopen", _explode)
+    session, root = _book(tmp_path)
+    excerpt = _excerpt(session, "La presión es fuerza por unidad de área.")
+    derivation = _derivation_with_steps(session, "p = F / A, \\qquad q = F / (2 A)", [])
+    _check_numeric(session, derivation, "F / A", {"F": 100, "A": 2}, 50)
+    paragraph = _paragraph(session, r"Se tiene $q = F / (2 A)$ en la sección y $p = F / A$ en general.", [excerpt])
+    statuses = dict((statement, status) for statement, status in formula_statuses(root, paragraph))
+    # The check ran on one expression; neither relation of the two-relation equation is individually covered.
+    assert set(statuses.values()) == {"derived_steps_unchecked"}

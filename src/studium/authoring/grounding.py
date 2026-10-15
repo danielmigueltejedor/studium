@@ -806,7 +806,7 @@ _SPAN = re.compile(
 #: Math spans shown as display equations: environments, ``$$`` and ``\\[``.
 _DISPLAY = re.compile(r"\\begin\{(" + _ENVIRONMENTS + r")\}(.+?)\\end\{\1\}|\$\$(.+?)\$\$|\\\[(.+?)\\\]", re.S)
 _RELATION_OPS = re.compile(
-    r"\\approx|\\simeq|\\equiv|\\geq?|\\leq?|\\neq?|\\gg|\\ll|\\propto|\\sim\b|:=|(?<![<>!\\])[<>]=?|(?<![<>!\\:])="
+    r"\\(?:approx|simeq|equiv|geq?|leq?|neq?|gg|ll|propto|sim)(?![A-Za-z])|:=|(?<![<>!\\])[<>]=?|(?<![<>!\\:])="
 )
 _OP_KINDS = {
     "=": "claim",
@@ -1124,11 +1124,16 @@ def _evidence(context: GroundingContext, record: dict[str, object], kind: str, s
         identifier = str(derivation.get("id"))
         verification = derivation.get("verification")
         derivation_status = str(verification.get("status")) if isinstance(verification, dict) else "UNVERIFIED"
-        if any(_same_relation(statement, line) for line in _final_statements(derivation)):
+        covered, chained = _final_relations(derivation)
+        if any(_same_relation(statement, line) for line in covered):
             if derivation_status in _DERIVATION_EVIDENCE:
                 found.append((_DERIVATION_EVIDENCE[derivation_status], identifier))
             elif derivation_status == "FAILED":
                 failed.append(identifier)
+            continue
+        if derivation_status in _DERIVATION_EVIDENCE and any(_same_relation(statement, line) for line in chained):
+            # The equation states several relations and the check covers one of them, not necessarily this one.
+            found.append(("derived_steps_unchecked", identifier))
             continue
         steps = derivation.get("steps_latex")
         lines = [line for line in steps if isinstance(line, str)] if isinstance(steps, list) else []
@@ -1170,17 +1175,29 @@ def _string_list(value: object) -> list[str]:
     return [item for item in value if isinstance(item, str)] if isinstance(value, list) else []
 
 
-def _final_statements(derivation: dict[str, object]) -> list[str]:
-    """The equation a derivation check is about: the final equation and its symbolic form."""
+def _final_relations(derivation: dict[str, object]) -> tuple[list[str], list[str]]:
+    """Relations a derivation's check is about, and relations that only share its equation.
 
-    lines: list[str] = []
+    A derivation whose equation states one relation is covered by its check.
+    When the equation states several (``a = b = c``, ``u(r) = ..., Q = ...``)
+    the check verifies the stored symbolic residual, and which of the
+    relations that residual encodes is not recorded, so none of them is
+    covered individually. The symbolic form itself always is.
+    """
+
+    covered: list[str] = []
+    chained: list[str] = []
     equation = derivation.get("equation")
     if isinstance(equation, str) and equation.strip():
-        lines.append(equation.strip())
+        relations = [statement for kind, statement in math_statements(f"${equation.strip()}$") if kind == "claim"]
+        if len(relations) <= 1:
+            covered.append(equation.strip())
+        else:
+            chained.extend(relations)
     symbolic = derivation.get("symbolic")
     if isinstance(symbolic, str) and symbolic.strip():
-        lines.append(symbolic.strip() if "=" in symbolic else f"{symbolic.strip()} = 0")
-    return lines
+        covered.append(symbolic.strip() if "=" in symbolic else f"{symbolic.strip()} = 0")
+    return covered, chained
 
 
 def _same_relation(statement: str, other: str) -> bool:
