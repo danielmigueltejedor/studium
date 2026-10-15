@@ -758,7 +758,7 @@ _FUNC_WORDS = frozenset(
 def render_text_run(value: str) -> str:
     """Escape prose, keep explicit math, and wrap Unicode formulas in math mode."""
 
-    text = value.replace("\r\n", "\n").replace("\r", "\n")
+    text = _SPELLED_DELTA.sub("Δ", value.replace("\r\n", "\n").replace("\r", "\n"))
     explicit = _explicit_spans(text)
     formulas = _formula_spans(text, explicit)
     events = [(start, end, tex) for start, end, tex in explicit]
@@ -929,6 +929,10 @@ def _script_content(mapping: dict[str, str], character: str) -> str:
 
 def _formula_tex(span: str) -> str:
     return "\\(" + _map_math_run(span, escape=True) + "\\)"
+
+
+#: ``delta U = ...`` spelled in words is a finite change, written as a Delta.
+_SPELLED_DELTA = re.compile(r"\b[Dd]elta (?=[A-Za-z](?:_[A-Za-z0-9]+)? ?=)")
 
 
 def _formula_spans(text: str, blocked: list[tuple[int, int, str]]) -> list[tuple[int, int]]:

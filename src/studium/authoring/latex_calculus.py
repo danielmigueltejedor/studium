@@ -1000,7 +1000,10 @@ def as_definition(statement: str, defs: dict[str, Definition]) -> Definition | N
         left_text, right_text = _split_relation(statement)
     except Unsupported:
         return None
-    tokens = tokenize(left_text) if left_text.strip() else []
+    try:
+        tokens = tokenize(left_text) if left_text.strip() else []
+    except Unsupported:
+        return None
     if not tokens:
         return None
     try:
