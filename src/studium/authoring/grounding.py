@@ -1118,6 +1118,10 @@ def _evidence(context: GroundingContext, record: dict[str, object], kind: str, s
     for excerpt_id in _string_list(record.get("excerpts")):
         excerpt = context.excerpts.get(excerpt_id)
         body = excerpt.get("text") if isinstance(excerpt, dict) else None
+        check = excerpt.get("quote_check") if isinstance(excerpt, dict) else None
+        if isinstance(check, dict) and check.get("status") == "client_transcription":
+            # Typed from a page image: the server never saw those words, so they cannot support an equation.
+            continue
         if isinstance(body, str) and _stated_in(statement, body):
             found.append(("source_supported", excerpt_id))
     for derivation in context.derivations(record.get("section")):

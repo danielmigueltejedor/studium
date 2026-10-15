@@ -15,6 +15,10 @@ from io import BytesIO
 from pathlib import Path
 
 _PDFTOTEXT_TIMEOUT = 120
+_PDFTOPPM_TIMEOUT = 120
+MIN_DPI = 50
+MAX_DPI = 200
+DEFAULT_DPI = 110
 _TEXT_TYPES = frozenset({"text/plain", "text/markdown", "text/x-tex", "text/csv", "text/html"})
 _DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 _PPTX = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
@@ -123,3 +127,55 @@ def _strip_markup(raw: str) -> str:
 
 def _natural(name: str) -> list[object]:
     return [int(part) if part.isdigit() else part for part in re.split(r"(\d+)", name)]
+
+
+def pdf_page_count(data: bytes) -> int | None:
+    """Number of pages of a PDF (poppler ``pdfinfo``), or ``None`` when it cannot be read."""
+
+    tool = shutil.which("pdfinfo")
+    if tool is None:
+        return None
+    with tempfile.TemporaryDirectory(prefix="studium-local-") as folder:
+        path = Path(folder) / "source.pdf"
+        path.write_bytes(data)
+        try:
+            run = subprocess.run([tool, str(path)], capture_output=True, timeout=_PDFTOTEXT_TIMEOUT, check=False)
+        except (OSError, subprocess.TimeoutExpired):
+            return None
+    if run.returncode != 0:
+        return None
+    found = re.search(r"^Pages:\s+(\d+)", run.stdout.decode("utf-8", errors="replace"), re.MULTILINE)
+    return int(found.group(1)) if found else None
+
+
+def render_pdf_page(data: bytes, page: int, dpi: int = DEFAULT_DPI) -> tuple[bytes | None, str | None]:
+    """One PDF page as PNG bytes (poppler ``pdftoppm``), or ``None`` with the reason."""
+
+    tool = shutil.which("pdftoppm")
+    if tool is None:
+        return None, "pdftoppm (poppler) is not installed, so a page cannot be rendered"
+    with tempfile.TemporaryDirectory(prefix="studium-page-") as folder:
+        source = Path(folder) / "source.pdf"
+        source.write_bytes(data)
+        target = Path(folder) / "page"
+        try:
+            run = subprocess.run(
+                [tool, "-f", str(page), "-l", str(page), "-r", str(dpi), "-png", "-singlefile", str(source), str(target)],
+                capture_output=True,
+                timeout=_PDFTOPPM_TIMEOUT,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return None, "pdftoppm could not render the page"
+        image = Path(f"{target}.png")
+        if run.returncode != 0 or not image.is_file():
+            return None, "pdftoppm could not render the page"
+        return image.read_bytes(), None
+
+
+def png_size(image: bytes) -> tuple[int, int] | None:
+    """Width and height from a PNG header."""
+
+    if len(image) < 24 or not image.startswith(b"\x89PNG\r\n\x1a\n"):
+        return None
+    return int.from_bytes(image[16:20], "big"), int.from_bytes(image[20:24], "big")

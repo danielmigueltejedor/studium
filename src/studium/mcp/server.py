@@ -83,6 +83,7 @@ from studium.research.sources import (
     source_impact,
     source_intake_attachment,
     source_list,
+    source_page_image,
     source_register,
     source_reject,
     source_remove,
@@ -723,6 +724,11 @@ def _dispatch(session: McpSession, name: str, arguments: Mapping[str, object]) -
         return source_impact(root, source_id)
     if name == "studium_source_intake":
         return _intake(root, arguments, actor)
+    if name == "studium_source_page_image":
+        source_id = arguments.get("source_id")
+        if not isinstance(source_id, str):
+            return {"status": "mcp.invalid_input", "message": "source_id is required"}
+        return source_page_image(root, source_id, arguments.get("path"), arguments.get("page"), arguments.get("dpi"))
     if name == "studium_source_register":
         decision = arguments.get("decision")
         mark = arguments.get("mark_prompted") is True
@@ -981,6 +987,7 @@ def _dispatch(session: McpSession, name: str, arguments: Mapping[str, object]) -
             path=arguments.get("path"),
             locator=arguments.get("locator"),
             page=arguments.get("page"),
+            transcribed_from_image=arguments.get("transcribed_from_image"),
             actor=actor,
         )
     if name == "studium_excerpt_list":
