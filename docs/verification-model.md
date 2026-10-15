@@ -96,6 +96,7 @@ Each equation claim gets the strongest status its stored evidence gives that exa
 | `dimensionally_verified` | final equation of a derivation with only a dimensional check | no |
 | `numerically_reproduced` | a replayed computation, a derivation with only a numeric check, or numbers that hold at their written precision | no |
 | `source_supported` | a cited excerpt states the whole relation (not a proof) | no |
+| `follows_from_stated_premises` | a calculation (derivatives, integrals, matrix products, algebra) shows the relation follows from definitions stated earlier in the same paragraph; the definitions keep their own status | no — needs human review of the premises |
 | `derived_steps_unchecked` | only an intermediate step of a checked derivation states it | no |
 | `numerically_ambiguous` | numbers that hold only if trailing zeros are placeholders | no |
 | `not_machine_checkable` | nothing backs it and the relation parser cannot read it | no — needs human review |
@@ -106,3 +107,9 @@ Each equation claim gets the strongest status its stored evidence gives that exa
 Definitions (`\equiv`, `:=`), approximations (`\approx`) and values or conditions (`x = 0`, `r = R`) are not claims. An unparseable equation can only be `source_supported` or `not_machine_checkable`; it is never verified by the parser. `studium_equation_report` lists every equation with its status, evidence ids, whether it is a display equation and whether a person must still review it. The source-audit appendix prints only per-paragraph counts, never a label after each equation.
 
 Draft, evidence audit, scientific verification, human approval and publication readiness are separate stages (`stages` in `studium_quality_report` and `studium_book_review`). A draft renders with unverified mathematics; `audit_passed` is the evidence audit only; scientific verification is complete only when every equation claim is verified; no human approval is recorded by Studium yet.
+
+### Derivatives, integrals and matrices
+
+When the scalar parser refuses a relation, `latex_calculus` reads it as SymPy with its own recursive-descent parser (nothing is evaluated by name): `\frac{d^n f}{dx^n}`, `\frac{\partial f}{\partial x}`, `\frac{d}{dx}(...)`, `f'(x)`, `\int_a^b f\,dx`, `bmatrix` and `pmatrix` literals with sums, products, transposes and inverses, `\frac12`, roots, functions, `\log_{10}`, degrees, `\Delta p` as one quantity. It refuses what it cannot read faithfully: `\nabla`, `\sum`, `\oint`, indefinite integrals, vector or tensor products, the derivative of a bare symbol that is not a function (`d(mv)/dt` with nothing saying `m` depends on `t`).
+
+A relation that is an identity is `symbolically_verified` (evidence `sympy`). A definition stated earlier in the same paragraph (`w(x) = ...`, `\mathbf{K} = ...`, a symbolic `name = expression`) is a premise: a later relation that is an identity once the premises are substituted is `follows_from_stated_premises` and lists them. A value or a condition (`x = 0`, `r = R`) is never a premise, because it holds at one place. A relation whose two exact sides differ by a nonzero constant is `contradicted`; a decimal literal never makes a contradiction, because it may be a rounded value. A relation that is not an identity stays `not_machine_checkable` or `unsupported`: failing to prove an equation is not a proof that it is wrong.
