@@ -182,3 +182,26 @@ def test_a_computed_integral_or_derivative_that_differs_from_the_stated_closed_f
     # An equation to solve that involves no computed integral or derivative is never called false.
     assert _kind(r"x^{2} = 4") == "unknown"
     assert _kind(r"\sin\theta = \frac12") == "unknown"
+
+
+def test_a_definition_is_not_a_claim_that_two_expressions_coincide():
+    # U = integral(...) defines U; the free symbols differ, so no verdict on it.
+    assert _kind(r"U = \int_0^L \frac{q^{2}(L-x)^{4}}{8 E I}\,dx") == "unknown"
+    # A value of an undefined function is opaque: u(0) is never the product of u and 0.
+    assert _kind(r"u(0) = 0") == "unknown"
+    assert check_relation(r"\int_0^L \frac{M(x)^{2}}{2 E I}\,dx = U", {}) is None
+
+
+def test_the_first_statement_about_a_name_defines_it(tmp_path, monkeypatch):
+    monkeypatch.setattr("urllib.request.urlopen", _explode)
+    session, root = _book(tmp_path)
+    excerpt = _excerpt(session, "La presión es fuerza por unidad de área.")
+    paragraph = _paragraph(
+        session,
+        r"La flecha es $w(x) = \frac{q x^{2}}{24 E I}\left(6L^{2} - 4Lx + x^{2}\right)$, el giro "
+        r"$w'(x) = \frac{q x}{6 E I}\left(3L^{2} - 3Lx + x^{2}\right)$, la flecha en el extremo $w(L) = \frac{q L^{4}}{8 E I}$ "
+        r"y el giro en el extremo $w'(L) = \frac{q L^{3}}{6 E I}$.",
+        [excerpt],
+    )
+    statuses = [item["status"] for item in equation_evidence(root, paragraph)]
+    assert statuses == ["unsupported"] + ["follows_from_stated_premises"] * 3

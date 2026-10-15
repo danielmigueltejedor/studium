@@ -389,6 +389,14 @@ class _Parser:
             return defined.expr
         if key in self.context.functions:
             return sympy.Function(key)(sympy.Symbol(self.context.functions[key]))
+        if self.at_op("("):
+            inside, after = self.peek(1), self.peek(2)
+            if inside is not None and inside.kind in {"name", "num"} and after is not None and after.kind == "op" and after.text == ")":
+                # u(0), w(L), M(x): a value of a function, not the product of u and 0. Opaque, never evaluated.
+                self.take()
+                argument = self.parse_sum()
+                self.expect_op(")")
+                return sympy.Function(key)(argument)
         return sympy.Symbol(key)
 
     def primed(self, key: str) -> Any:
@@ -936,7 +944,14 @@ def check_relation(statement: str, defs: dict[str, Definition] | None = None) ->
                 return Outcome("contradiction", premises, f"the sides differ by {constant}")
     except Exception:
         return None
-    if context.calculus and not context.decimals and not isinstance(difference, sympy.MatrixBase):
+    # Both sides must be explicit expressions of the same quantities: "U = integral(...)" defines U, it is not
+    # a claim that two expressions coincide.
+    if (
+        context.calculus
+        and not context.decimals
+        and not isinstance(difference, sympy.MatrixBase)
+        and left.free_symbols == right.free_symbols
+    ):
         detail = _differs_numerically(difference)
         if detail is not None:
             return Outcome("contradiction", premises, detail)

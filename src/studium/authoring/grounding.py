@@ -1068,8 +1068,10 @@ def equation_evidence(
         status, evidence = _evidence(loaded, record, kind, statement, premises, notes)
         # A value or a condition ("x = 0", "r = R") holds at one place: it is never a premise for other relations.
         if kind == "claim" and status not in {"contradicted", "verification_failed", "value_or_condition"}:
-            definition = as_definition(statement, {item.name: item for item in premises})
-            if definition is not None:
+            known = {item.name: item for item in premises}
+            definition = as_definition(statement, known)
+            # The first statement about a name defines it; a later one is a claim to check against it.
+            if definition is not None and definition.name not in known:
                 premises.append(definition)
         found.append(
             {
