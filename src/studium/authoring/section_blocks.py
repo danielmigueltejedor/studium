@@ -80,3 +80,23 @@ def mark_blocked(root: Path, *, section_id: str, title: str, reason: str) -> dic
     except ProjectLocked:
         return record
     return record
+
+
+def release_block(root: Path, *, section_id: str) -> bool:
+    """Lift a block whose cause has been fixed. Returns True when a block was lifted."""
+
+    if section_id not in blocked_ids(root):
+        return False
+    record: dict[str, object] = {
+        "schema_version": "1.0.0",
+        "id": section_id,
+        "section": section_id,
+        "status": "released",
+        "recorded_at": utc_now(),
+    }
+    try:
+        with project_lock(root):
+            append_jsonl(root / SECTION_BLOCKS, record)
+    except ProjectLocked:
+        return False
+    return True
