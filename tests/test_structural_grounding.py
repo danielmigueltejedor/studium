@@ -275,7 +275,9 @@ def test_equivalence_check_is_bounded_on_large_numeric_and_transcendental_relati
     from studium.authoring.grounding import equivalent_math
 
     started = time.perf_counter()
-    assert equivalent_math(r"\Delta v = 3000\ln 5", r"\Delta v = 3000\ln(25)/2") is False
+    # ln 25 / 2 is ln 5: SymPy rewrites the integer logarithm itself, so this is a genuine match.
+    assert equivalent_math(r"\Delta v = 3000\ln 5", r"\Delta v = 3000\ln(25)/2") is True
+    assert equivalent_math(r"\Delta v = 3000\ln 5", r"\Delta v = 3000\ln 7") is False
     assert equivalent_math(r"v = \sqrt{2\cdot 9{,}81\cdot 1000^{7}}", r"v = \sqrt{2 g h}") is False
     assert equivalent_math(r"y = e^{x}\ln(x)^{9}(x+1)^{8}", r"y = e^{x}\ln(x)^{9}(x+1)^{8}") is True
     # Different symbols are never the same relation.
