@@ -371,6 +371,6 @@ def test_a_relation_chained_in_a_derivation_equation_is_not_individually_verifie
     derivation = _derivation_with_steps(session, "p = F / A, \\qquad q = F / (2 A)", [])
     _check_numeric(session, derivation, "F / A", {"F": 100, "A": 2}, 50)
     paragraph = _paragraph(session, r"Se tiene $q = F / (2 A)$ en la sección y $p = F / A$ en general.", [excerpt])
-    statuses = dict((statement, status) for statement, status in formula_statuses(root, paragraph))
+    statuses = dict(formula_statuses(root, paragraph))
     # The check ran on one expression; neither relation of the two-relation equation is individually covered.
     assert set(statuses.values()) == {"derived_steps_unchecked"}
