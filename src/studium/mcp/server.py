@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import BinaryIO
 
 from studium import __version__
+from studium.authoring import diagrams as diagram_store
 from studium.authoring.academic_blueprint import (
     get_academic_blueprint,
     scaffold_academic_blueprint,
@@ -44,12 +45,20 @@ from studium.authoring.paragraphs import (
     replace_paragraph,
 )
 from studium.authoring.problem_review import review_stored_problem
-from studium.authoring.problems import check_problem, list_problems, record_problem, remove_problem
+from studium.authoring.problems import (
+    check_problem,
+    list_problems,
+    record_problem,
+    remove_problem,
+    update_problem_structure,
+)
 from studium.authoring.quality import assess_book, chapter_quality
 from studium.authoring.quality_report import quality_report
 from studium.authoring.render import render_draft
 from studium.authoring.verify import verify_book
 from studium.config.resolve import is_project, resolve_project
+from studium.diagrams.registry import catalogue as diagram_catalogue
+from studium.diagrams.registry import solve_structure
 from studium.domain.profiles import (
     BOOK_TOPIC,
     COURSE_PUBLIC_SOURCE_NEXT_ACTION,
@@ -829,8 +838,59 @@ def _dispatch(session: McpSession, name: str, arguments: Mapping[str, object]) -
             learning_objectives=arguments.get("learning_objectives") if "learning_objectives" in arguments else None,
             method=arguments.get("method") if "method" in arguments else None,
             solution=arguments.get("solution") if "solution" in arguments else None,
+            structure=arguments.get("structure") if "structure" in arguments else None,
             actor=actor,
         )
+    if name == "studium_problem_structure_update":
+        regenerate = arguments.get("regenerate")
+        return update_problem_structure(
+            root,
+            arguments.get("id"),
+            arguments.get("structure"),
+            regenerate=regenerate is not False,
+            actor=actor if isinstance(actor, dict) else None,
+        )
+    if name == "studium_diagram_catalogue":
+        return {"status": "ok", **diagram_catalogue()}
+    if name == "studium_structure_solve":
+        return solve_structure(arguments.get("family"), arguments.get("spec"), arguments.get("claims"))
+    if name == "studium_diagram_preview":
+        return diagram_store.preview_diagram(
+            root,
+            generator_name=arguments.get("generator"),
+            spec=arguments.get("spec"),
+            settings=arguments.get("settings"),
+            claims=arguments.get("claims"),
+        )
+    if name == "studium_diagram_record":
+        return diagram_store.record_diagram(
+            root,
+            generator_name=arguments.get("generator"),
+            caption=arguments.get("caption"),
+            section=arguments.get("section"),
+            excerpts=arguments.get("excerpts"),
+            key=arguments.get("key"),
+            spec=arguments.get("spec"),
+            problem=arguments.get("problem"),
+            stage=arguments.get("stage"),
+            settings=arguments.get("settings"),
+            claims=arguments.get("claims"),
+            actor=actor if isinstance(actor, dict) else None,
+        )
+    if name == "studium_diagram_verify":
+        return diagram_store.verify_diagram(root, arguments.get("id"))
+    if name == "studium_diagram_regenerate":
+        return diagram_store.regenerate_diagrams(root, figure=arguments.get("id"), problem=arguments.get("problem"))
+    if name == "studium_diagram_inspect":
+        return diagram_store.inspect_diagram(
+            root,
+            arguments.get("id"),
+            passed=arguments.get("passed"),
+            inspector=arguments.get("inspector"),
+            notes=arguments.get("notes"),
+        )
+    if name == "studium_diagram_report":
+        return diagram_store.diagram_report(root)
     if name == "studium_problem_check":
         return check_problem(root, arguments.get("id") if "id" in arguments else None)
     if name == "studium_problem_remove":
@@ -1436,7 +1496,16 @@ def _failed(payload: Mapping[str, object]) -> bool:
         "audit_passed",
         "bibliographic_conflict",
         "bibliographic_identity",
+        "solved",
+        "previewed",
+        "verified",
+        "regenerated",
+        "inspected",
+        "updated",
     }:
+        return False
+    # A stale diagram is a verdict about the stored drawing, not a failed call.
+    if status == "stale" and isinstance(payload.get("figure_id"), str):
         return False
     if status == "no_active_project" and payload.get("next_action") == "create":
         return False

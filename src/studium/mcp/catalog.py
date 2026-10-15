@@ -387,6 +387,90 @@ _TOOLS: tuple[dict[str, object], ...] = (
         ),
     },
     {
+        "name": "studium_diagram_catalogue",
+        "class": "READ",
+        "description": (
+            "List the structured-data families (beam, section, thin_wall, stress_state, ...), the diagram "
+            "generators that draw them, the problem stages a diagram can belong to, and the sign-convention "
+            "presets. Changes nothing."
+        ),
+    },
+    {
+        "name": "studium_structure_solve",
+        "class": "READ",
+        "description": (
+            "Solve and check structured problem data of one family without drawing or storing anything. "
+            "Returns the exact solution (reactions, piecewise laws, key values) and the verification evidence, "
+            "each check with its category: symbolic, numeric, dimensional. Optional claims (values an author "
+            "intends to state) are compared with the solution; a mismatch is a failed check. "
+            "The sign convention must be declared in the data; none is assumed."
+        ),
+    },
+    {
+        "name": "studium_diagram_preview",
+        "class": "READ",
+        "description": (
+            "Draw one diagram from structured data with a registered generator and check it, without storing it. "
+            "Returns the TikZ body, the solution data and the evidence, including representation checks that "
+            "compare the drawn coordinates and printed values with the stored functions."
+        ),
+    },
+    {
+        "name": "studium_diagram_record",
+        "class": "WRITE",
+        "description": (
+            "Generate, check, store and compile a diagram as a figure. Give either spec (structured data) or "
+            "problem (a problem id whose structure is used), and a stage (statement, model, free_body, "
+            "equilibrium, solution, graphical, verification, interpretation) to place it inside that problem's "
+            "worked solution. A diagram whose checks fail is rejected and not stored. Compiling is not a check "
+            "of the mathematics; the verification status is stored apart from the drawing. "
+            "Does not fetch URLs and does not move the book to RELEASED."
+        ),
+    },
+    {
+        "name": "studium_diagram_verify",
+        "class": "WRITE",
+        "description": (
+            "Draw a stored diagram again from its data and re-run every check. A diagram whose problem data "
+            "changed, or whose regenerated drawing differs from the stored one, is reported stale and is not rendered."
+        ),
+    },
+    {
+        "name": "studium_diagram_regenerate",
+        "class": "WRITE",
+        "description": (
+            "Redraw one diagram (id) or every diagram of a problem (problem) from the current structured data, "
+            "re-check and recompile it. The figure keeps its id, key, caption and stage."
+        ),
+    },
+    {
+        "name": "studium_diagram_inspect",
+        "class": "WRITE",
+        "description": (
+            "Record a visual inspection of a rendered diagram (passed true or false, inspector human or agent, notes). "
+            "A failed inspection marks the diagram failed. A passed inspection is an attestation and never raises a "
+            "diagram to mathematically verified."
+        ),
+    },
+    {
+        "name": "studium_diagram_report",
+        "class": "READ",
+        "description": (
+            "Every stored diagram with its generator, problem, stage, compile state and current verification "
+            "status (mathematically_verified, numerically_checked, dimensionally_consistent, visually_inspected, "
+            "not_machine_checkable, unverified, verification_failed, stale). Changes nothing."
+        ),
+    },
+    {
+        "name": "studium_problem_structure_update",
+        "class": "WRITE",
+        "description": (
+            "Replace the structured data of a stored problem (loads, supports, geometry) and keep its statement. "
+            "Data that contradict their own claims are rejected. The answer check and every diagram drawn from the "
+            "old data become stale; with regenerate (default true) the diagrams are redrawn and re-checked at once."
+        ),
+    },
+    {
         "name": "studium_figure_list",
         "class": "READ",
         "description": (
@@ -1215,6 +1299,14 @@ def _schema(tool: Mapping[str, object]) -> dict[str, object]:
                     "description": "Academic blueprint concept ids this problem exercises. Unknown ids are rejected.",
                 },
                 "method": {"type": "string", "description": "Short sentence naming the expected solution method."},
+                "structure": {
+                    "type": "object",
+                    "description": (
+                        "Structured data of the problem in a registered family: {family, spec, claims}. "
+                        "It is solved and checked now; data that contradict their own claims are rejected. "
+                        "Diagrams recorded with problem=<id> are drawn from it and go stale when it changes."
+                    ),
+                },
                 "solution": {
                     "type": "object",
                     "description": (
@@ -1403,6 +1495,98 @@ def _schema(tool: Mapping[str, object]) -> dict[str, object]:
                 },
             },
             "required": ["id"],
+            "additionalProperties": True,
+        }
+    elif name == "studium_diagram_catalogue" or name == "studium_diagram_report":
+        input_schema = {
+            "type": "object",
+            "properties": {"project": _project_property()},
+            "additionalProperties": True,
+        }
+    elif name == "studium_structure_solve":
+        input_schema = {
+            "type": "object",
+            "properties": {
+                "project": _project_property(),
+                "family": {"type": "string", "description": "Family name from studium_diagram_catalogue, e.g. beam."},
+                "spec": {"type": "object", "description": "Structured data of that family, with its declared convention."},
+                "claims": {"type": "object", "description": "Optional values the author intends to state, to be checked."},
+            },
+            "required": ["family", "spec"],
+            "additionalProperties": True,
+        }
+    elif name == "studium_diagram_preview":
+        input_schema = {
+            "type": "object",
+            "properties": {
+                "project": _project_property(),
+                "generator": {"type": "string", "description": "Generator name, e.g. beam.internal_forces."},
+                "spec": {"type": "object", "description": "Structured data of the generator's family."},
+                "settings": {"type": "object", "description": "Optional drawing settings (decimals, functions, values)."},
+                "claims": {"type": "object", "description": "Optional values to check."},
+            },
+            "required": ["generator", "spec"],
+            "additionalProperties": True,
+        }
+    elif name == "studium_diagram_record":
+        input_schema = {
+            "type": "object",
+            "properties": {
+                "project": _project_property(),
+                "generator": {"type": "string", "description": "Generator name from studium_diagram_catalogue."},
+                "caption": {"type": "string", "description": "Figure caption."},
+                "section": {"type": "string", "description": "Blueprint section id; defaults to the problem's section."},
+                "excerpts": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Stored excerpt ids; defaults to the problem's excerpts.",
+                },
+                "key": {"type": "string", "description": "Stable slug to cite the figure as {{fig:key}}."},
+                "spec": {"type": "object", "description": "Structured data, for a diagram that belongs to no problem."},
+                "problem": {"type": "string", "description": "Problem id whose structured data the diagram draws."},
+                "stage": {"type": "string", "description": "Step of the worked solution the diagram belongs to."},
+                "settings": {"type": "object", "description": "Optional drawing settings."},
+                "claims": {"type": "object", "description": "Optional values to check; defaults to the problem's claims."},
+            },
+            "required": ["generator", "caption"],
+            "additionalProperties": True,
+        }
+    elif name in ("studium_diagram_verify", "studium_diagram_inspect"):
+        input_schema = {
+            "type": "object",
+            "properties": {
+                "project": _project_property(),
+                "id": {"type": "string", "description": "Figure id of a diagram."},
+                "passed": {"type": "boolean", "description": "Inspect only: whether the drawing looked right."},
+                "inspector": {"type": "string", "enum": ["human", "agent"], "description": "Inspect only."},
+                "notes": {"type": "string", "description": "Inspect only: what was looked at."},
+            },
+            "required": ["id"],
+            "additionalProperties": True,
+        }
+    elif name == "studium_diagram_regenerate":
+        input_schema = {
+            "type": "object",
+            "properties": {
+                "project": _project_property(),
+                "id": {"type": "string", "description": "One diagram's figure id."},
+                "problem": {"type": "string", "description": "Redraw every diagram of this problem."},
+            },
+            "additionalProperties": True,
+        }
+    elif name == "studium_problem_structure_update":
+        input_schema = {
+            "type": "object",
+            "properties": {
+                "project": _project_property(),
+                "id": {"type": "string", "description": "Problem id."},
+                "structure": {
+                    "type": "object",
+                    "description": "New structured data: {family, spec, claims}. The statement is kept.",
+                },
+                "regenerate": {"type": "boolean", "description": "Redraw the problem's diagrams now. Default true."},
+            },
+            "required": ["id", "structure"],
             "additionalProperties": True,
         }
     elif name == "studium_figure_list":

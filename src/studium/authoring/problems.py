@@ -97,9 +97,16 @@ def record_problem(
     learning_objectives: object = None,
     method: object = None,
     solution: object = None,
+    structure: object = None,
     actor: dict[str, object] | None = None,
 ) -> dict[str, object]:
-    """Store one problem. Does not run it and does not change project state."""
+    """Store one problem. Does not run it and does not change project state.
+
+    ``structure`` holds the problem's data in a registered family (a beam, a
+    cross-section, a stress state). It is solved and checked here; data that
+    contradict their own claims are rejected. Diagrams of the problem are drawn
+    from it and go stale when it changes.
+    """
 
     section_id, section_error = _section(root, section)
     if section_error is not None:
@@ -128,6 +135,9 @@ def record_problem(
     solution_value, solution_error = _solution(solution)
     if solution_error is not None:
         return solution_error
+    structure_value, structure_check, structure_error = _structure(structure)
+    if structure_error is not None:
+        return structure_error
     if solution_value is not None and numeric is None:
         return _error("mcp.invalid_input", "a structured solution needs a numeric problem")
     assert section_id is not None and cleaned_prompt is not None
@@ -184,6 +194,9 @@ def record_problem(
                 record["method"] = method_text
             if solution_value is not None:
                 record["solution"] = solution_value
+            if structure_value is not None:
+                record["structure"] = structure_value
+                record["structure_check"] = structure_check
             if rust is not None:
                 relative = f"problems/{identifier}/main.rs"
                 assert rust_source is not None and rust_invocation is not None
@@ -304,6 +317,12 @@ def _check_numeric(root: Path, record: dict[str, object]) -> dict[str, object]:
     if step_checks:
         updated["step_checks"] = step_checks
     updated["answer_check"] = answer_check
+    if isinstance(record.get("structure"), dict):
+        _, fresh_check, fresh_error = _structure(record["structure"])
+        updated["structure_check"] = fresh_check if fresh_check is not None else {
+            "status": "verification_failed",
+            "failed": [str((fresh_error or {}).get("message"))],
+        }
     if independent:
         updated["corroboration"] = "two_witnesses"
     else:
@@ -327,6 +346,8 @@ def _check_numeric(root: Path, record: dict[str, object]) -> dict[str, object]:
     if step_checks:
         body["step_checks"] = step_checks
         body["steps_reproduced"] = all(check.get("reproduced") is True for check in step_checks)
+    if isinstance(updated.get("structure_check"), dict):
+        body["structure_check"] = updated["structure_check"]
     return body
 
 
@@ -815,6 +836,9 @@ def problem_input_sha256(root: Path, record: dict[str, object]) -> str:
     solution = record.get("solution")
     if solution:
         parts.append(json.dumps(solution, sort_keys=True, ensure_ascii=False))
+    structure = record.get("structure")
+    if structure:
+        parts.append(json.dumps(structure, sort_keys=True, ensure_ascii=False))
     stored = excerpts_by_id(root)
     raw_value = record.get("excerpts")
     raw = raw_value if isinstance(raw_value, list) else []
@@ -869,6 +893,11 @@ def _public(record: dict[str, object], root: Path | None = None) -> dict[str, ob
         visible["solution"] = solution
     if isinstance(record.get("step_checks"), list):
         visible["step_checks"] = record["step_checks"]
+    structure = record.get("structure")
+    if isinstance(structure, dict):
+        visible["structure"] = {"family": structure.get("family"), "has_claims": bool(structure.get("claims"))}
+        if isinstance(record.get("structure_check"), dict):
+            visible["structure_check"] = record["structure_check"]
     if record.get("kind") == "rust":
         visible["source_path"] = record.get("source_path")
         visible["invocation"] = record.get("invocation")
@@ -1255,6 +1284,103 @@ def _solution(value: object) -> tuple[dict[str, object] | None, dict[str, object
     if not normalized:
         return None, _error("mcp.invalid_input", "solution has no usable field")
     return normalized, None
+
+
+def _structure(
+    value: object,
+) -> "tuple[dict[str, object] | None, dict[str, object] | None, dict[str, object] | None]":
+    """Validate, solve and check a problem's structured data.
+
+    Returns the normalized structure, a compact check summary, and an error.
+    Data that cannot be solved, or whose own claims fail, are an error.
+    """
+
+    if value is None:
+        return None, None, None
+    from studium.diagrams.registry import solve_structure
+
+    if not isinstance(value, dict) or not isinstance(value.get("family"), str) or not isinstance(value.get("spec"), dict):
+        return None, None, _error("mcp.invalid_input", "structure needs a family name and a spec object")
+    claims = value.get("claims")
+    if claims is not None and not isinstance(claims, dict):
+        return None, None, _error("mcp.invalid_input", "structure.claims must be an object")
+    result = solve_structure(value["family"], value["spec"], claims)
+    if result.get("status") != "solved":
+        return None, None, _error("problem.structure_invalid", str(result.get("message")))
+    verification = result.get("verification")
+    assert isinstance(verification, dict)
+    summary: dict[str, object] = {
+        "status": verification.get("status"),
+        "failed": verification.get("failed"),
+        "counts": verification.get("counts"),
+    }
+    if verification.get("status") == "verification_failed":
+        failed = [
+            f"{item.get('name')}: {item.get('detail')}"
+            for item in verification.get("checks") or []
+            if isinstance(item, dict) and item.get("passed") is not True
+        ]
+        return None, None, {
+            "status": "problem.structure_contradicted",
+            "message": "the structured data contradict their own claims or fail a check: " + "; ".join(failed)[:1500],
+            "verification": summary,
+        }
+    normalized: dict[str, object] = {"family": value["family"], "spec": value["spec"]}
+    if claims:
+        normalized["claims"] = claims
+    return normalized, summary, None
+
+
+def update_problem_structure(
+    root: Path,
+    problem_id: object,
+    structure: object,
+    *,
+    regenerate: bool = True,
+    actor: dict[str, object] | None = None,
+) -> dict[str, object]:
+    """Replace a problem's structured data, keep its statement, and redraw its diagrams.
+
+    The stored answer check and every diagram drawn from the old data become
+    stale at once; with ``regenerate`` the diagrams are drawn again from the
+    new data and checked. Re-run ``studium_problem_check`` for the answer.
+    """
+
+    identifier = _identifier(problem_id)
+    if identifier is None:
+        return _error("mcp.invalid_input", "id is required")
+    current = _find(root, identifier)
+    if current is None:
+        return _error("problem.not_found", "no stored problem with that id")
+    normalized, summary, error = _structure(structure)
+    if error is not None:
+        return error
+    assert normalized is not None
+    updated = dict(current)
+    updated["structure"] = normalized
+    updated["structure_check"] = summary
+    for stale_key in ("answer_check", "step_checks", "corroboration"):
+        updated.pop(stale_key, None)
+    updated["status"] = "unchecked"
+    updated["correct"] = False
+    try:
+        with project_lock(root):
+            append_jsonl(root / PROBLEMS, updated)
+            _audit(root, record=updated, actor=actor, operation="update_problem_structure")
+    except ProjectLocked:
+        return _error("storage.locked", "project is locked")
+    body: dict[str, object] = {
+        "status": "updated",
+        "problem": _public(updated, root),
+        "message": "The structured data changed. Diagrams drawn from the old data are stale; re-run studium_problem_check.",
+    }
+    if regenerate:
+        from studium.authoring.diagrams import problem_figures, regenerate_diagrams
+
+        body["diagrams"] = (
+            regenerate_diagrams(root, problem=identifier).get("diagrams") if problem_figures(root, identifier) else []
+        )
+    return body
 
 
 def _rejected(root: Path, blockers: list[dict[str, object]]) -> dict[str, object]:

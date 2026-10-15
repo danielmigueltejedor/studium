@@ -231,3 +231,15 @@ def test_a_greek_letter_can_be_the_variable_of_integration():
     wrong = check_relation(r"\int_{0}^{2\pi} \left(R\sin\theta\right)^{2}\,t\,R\,\mathrm{d}\theta = \pi R^{3}\,t^{2}", {})
     assert wrong is not None and wrong.kind == "contradiction"
     assert check_relation(r"\int_0^{\pi} \cos\theta\,\mathrm{d}\theta = 1", {}).kind == "contradiction"
+
+
+def test_thin_space_ends_an_unparenthesised_function_argument():
+    """Regression (Theory of Structures book): ``\\sin x\\,R`` was read as sin(x R)."""
+
+    import sympy
+
+    from studium.authoring.latex_calculus import _Context, _parse_side
+
+    x, r = sympy.symbols("x R")
+    assert sympy.simplify(_parse_side(r"\sin x\,R", _Context()) - sympy.sin(x) * r) == 0
+    assert sympy.simplify(_parse_side(r"\sin x R", _Context()) - sympy.sin(x * r)) == 0
