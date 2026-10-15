@@ -16,6 +16,7 @@ caller receives the validation result next to the LaTeX.
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 
 from studium.verification.parser import CONSTANTS, FUNCTIONS
 
@@ -119,20 +120,27 @@ def _names(expression: str) -> list[str]:
     return found
 
 
-def _sympy_parse(symbolic: str):
+def _sympy_parse(symbolic: str, symbols: Iterable[str] = ()):
     """Parse a restricted symbolic expression. The character set and the names
-    are checked first, so SymPy never sees arbitrary code."""
+    are checked first, so SymPy never sees arbitrary code.
+
+    ``E`` and ``I`` are Euler's number and the imaginary unit unless the caller names them in ``symbols``:
+    a book writes ``E`` for Young's modulus and ``I`` for a second moment of area, and a substitution
+    that read them as constants would print ``e`` in place of the value.
+    """
 
     import sympy
 
     cleaned = _clean_symbolic(symbolic).replace("^", "**")
-    names = _names(cleaned)
+    forced = {name for name in symbols if name in {"E", "I"}}
+    names = _names(cleaned) + [name for name in sorted(forced) if re.search(rf"(?<![A-Za-z0-9_]){name}(?![A-Za-z0-9_])", cleaned)]
     local: dict[str, object] = {name: sympy.Symbol(name) for name in names}
     for function in FUNCTIONS:
         local.setdefault(function, getattr(sympy, function, None))
     local.setdefault("sqrt", sympy.sqrt)
     local.setdefault("pi", sympy.pi)
     local.setdefault("E", sympy.E)
+    local.setdefault("I", sympy.I)
     for name in names:
         if local.get(name) is None:
             local[name] = sympy.Symbol(name)
@@ -142,15 +150,16 @@ def _sympy_parse(symbolic: str):
         raise MathError("symbolic is not a valid expression") from exc
 
 
-def symbolic_latex(symbolic: str, *, extra_names: dict[str, str] | None = None) -> str:
+def symbolic_latex(symbolic: str, *, extra_names: dict[str, str] | None = None, symbols: Iterable[str] = ()) -> str:
     """Return typeset LaTeX for a symbolic expression.
 
+    ``symbols`` names the identifiers (``E``, ``I``) to read as plain symbols, not as constants.
     Raises :class:`MathError` when the input is not parseable.
     """
 
     import sympy
 
-    expression = _sympy_parse(symbolic)
+    expression = _sympy_parse(symbolic, symbols)
     names = dict(DEFAULT_SYMBOL_NAMES)
     if extra_names:
         names.update(extra_names)
@@ -184,7 +193,7 @@ def substitution_latex(symbolic: str, values: dict[str, tuple[str, str]]) -> str
 
     import sympy
 
-    expression = _sympy_parse(symbolic)
+    expression = _sympy_parse(symbolic, values)
     names = dict(DEFAULT_SYMBOL_NAMES)
     for symbol, (number, unit) in values.items():
         if not symbol.isidentifier():

@@ -1415,6 +1415,19 @@ def _arithmetic_side(side: str) -> str | None:
     return text
 
 
+def _written_number(text: str) -> str | None:
+    """One typeset number (``2.55``, or ``2.55e7`` once scientific notation is joined), else None.
+
+    A claim written to a given precision is rounded to its last digit, so ``2.55×10^7`` agrees with 2.5516e7;
+    it is read at that precision, never compared as an exact quotient.
+    """
+
+    plain = text.replace(" ", "")
+    if plain.startswith("(") and plain.endswith(")"):
+        plain = plain[1:-1]
+    return plain if re.fullmatch(r"-?\d+(?:\.\d+)?(?:e[+-]?\d+)?", plain) else None
+
+
 def _arithmetic_verdict(statement: str) -> str | None:
     """``numerically_reproduced`` / ``contradicted`` for a relation between plain numbers, else None."""
 
@@ -1427,10 +1440,11 @@ def _arithmetic_verdict(statement: str) -> str | None:
     if left_text is None or right_text is None:
         return None
     try:
-        if re.fullmatch(r"-?\d+(?:\.\d+)?", right_text.replace(" ", "")):
-            verdict = precision_verdict(right_text.replace(" ", ""), evaluate(left_text))
-        elif re.fullmatch(r"-?\d+(?:\.\d+)?", left_text.replace(" ", "")):
-            verdict = precision_verdict(left_text.replace(" ", ""), evaluate(right_text))
+        written_right, written_left = _written_number(right_text), _written_number(left_text)
+        if written_right is not None:
+            verdict = precision_verdict(written_right, evaluate(left_text))
+        elif written_left is not None:
+            verdict = precision_verdict(written_left, evaluate(right_text))
         else:
             first, second = evaluate(left_text), evaluate(right_text)
             verdict = "agrees" if abs(first - second) <= abs(second) * Fraction(1, 10**12) else "disagrees"
