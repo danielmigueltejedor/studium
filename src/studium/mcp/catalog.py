@@ -117,6 +117,17 @@ _TOOLS: tuple[dict[str, object], ...] = (
             "This does not touch the disk and does not start research."
         ),
     },
+    {
+        "name": "studium_source_page_image",
+        "class": "READ",
+        "description": (
+            "Render one page of a registered user PDF to a PNG so the client can look at equations and diagrams "
+            "that are images, not text. Needs the SRC- id, the same file path the user gave (its hash must match the "
+            "registered version), the page, and optionally dpi (50-200). The image goes to the system temporary "
+            "folder, never into the project, and stays private user material. It records nothing: read the image, "
+            "then record what you read with studium_excerpt_record and transcribed_from_image."
+        ),
+    },
     {"name": "studium_source_audit", "class": "WRITE"},
     {"name": "studium_source_remove", "class": "WRITE"},
     {"name": "studium_source_reject", "class": "WRITE"},
@@ -594,6 +605,9 @@ _TOOLS: tuple[dict[str, object], ...] = (
             "path the user gave, a locator (e.g. 'Tema 3, p. 12') and optionally page; the server re-reads "
             "the file, checks its hash, and stores the excerpt only if the quoted text is in the file. "
             "The file text is not stored. A quote found in the file is provenance, not verification. "
+            "For a page whose content is an image, view it with studium_source_page_image and record what you read "
+            "with transcribed_from_image and page: the server checks the file and page and hashes the rendered "
+            "page but cannot check the words, so it is a client transcription and grounds no equation. "
             "Does not mark the excerpt verified, accepted, or authoritative. "
             "Does not change local_sources and does not move the book to RELEASED. "
             "Store this before writing a longer draft sentence."
@@ -1709,8 +1723,32 @@ def _schema(tool: Mapping[str, object]) -> dict[str, object]:
                     "minimum": 1,
                     "description": "SRC- source only: PDF page or slide number; the quote must be on that page.",
                 },
+                "transcribed_from_image": {
+                    "type": "boolean",
+                    "description": (
+                        "SRC- PDF source only, with page: the text was read from the page image "
+                        "(studium_source_page_image), not found in the text layer. Stored as an unverified "
+                        "client transcription tied to the page and its rendered image hash."
+                    ),
+                },
             },
             "required": ["source_id", "text"],
+            "additionalProperties": True,
+        }
+    elif name == "studium_source_page_image":
+        input_schema = {
+            "type": "object",
+            "properties": {
+                "project": _project_property(),
+                "source_id": {"type": "string", "description": "SRC- id of a registered PDF."},
+                "path": {
+                    "type": "string",
+                    "description": "The file path the user gave for this source; it must hash to the registered version.",
+                },
+                "page": {"type": "integer", "minimum": 1, "description": "1-based page or slide number."},
+                "dpi": {"type": "integer", "minimum": 50, "maximum": 200, "description": "Resolution, default 110."},
+            },
+            "required": ["source_id", "path", "page"],
             "additionalProperties": True,
         }
     elif name == "studium_excerpt_list":

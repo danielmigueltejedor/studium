@@ -30,6 +30,7 @@ from studium.research.attachments import attachment_to_intake
 from studium.research.formats import ACCEPTED_FORMATS, sniff
 from studium.research.guidance import local_source_guidance
 from studium.research.impact import apply_impact, impact_report, record_support
+from studium.research.local_text import DEFAULT_DPI, MAX_DPI, MIN_DPI, pdf_page_count, png_size, render_pdf_page
 from studium.research.public_sources import public_bibliography_next_action, public_source_count
 from studium.storage.init_project import (
     book_kind,
@@ -229,6 +230,60 @@ def read_registered_file(
         )
     content = prepared.get("content")
     return record, content if isinstance(content, bytes) else None, None
+
+
+def source_page_image(
+    root: Path, source_id: str, raw_path: object, page: object, dpi: object = None
+) -> dict[str, object]:
+    """Render one page of a registered PDF to a PNG the client can look at.
+
+    For slides and scans whose equations and diagrams are images, not text.
+    The file is read again and must hash to the registered version. The image
+    goes to the system temporary folder, never into the project, and is
+    private user material like the source itself.
+    """
+
+    import hashlib
+    import tempfile
+
+    if isinstance(page, bool) or not isinstance(page, int) or page < 1:
+        return _error("mcp.invalid_input", "page must be a positive page number")
+    resolution = DEFAULT_DPI if dpi is None else dpi
+    if isinstance(resolution, bool) or not isinstance(resolution, int) or not MIN_DPI <= resolution <= MAX_DPI:
+        return _error("mcp.invalid_input", f"dpi must be an integer from {MIN_DPI} to {MAX_DPI}")
+    record, data, problem = read_registered_file(root, source_id, raw_path)
+    if problem is not None:
+        return problem
+    assert record is not None and data is not None
+    if record.get("media_type") != "application/pdf":
+        return _error("sources.page_image_unsupported", "only PDF sources can be rendered to a page image")
+    total = pdf_page_count(data)
+    if total is not None and page > total:
+        return _error("mcp.invalid_input", f"page {page} is past the end of the source ({total} pages)")
+    image, reason = render_pdf_page(data, page, resolution)
+    if image is None:
+        return _error("sources.page_image_failed", str(reason))
+    digest = hashlib.sha256(image).hexdigest()
+    folder = Path(tempfile.gettempdir()) / "studium-page-images" / str(record.get("sha256"))[:16]
+    folder.mkdir(parents=True, exist_ok=True)
+    target = folder / f"page-{page}-{resolution}dpi.png"
+    target.write_bytes(image)
+    size = png_size(image)
+    return {
+        "status": "ok",
+        "source_id": source_id,
+        "page": page,
+        "pages": total,
+        "dpi": resolution,
+        "image_path": str(target),
+        "image_sha256": digest,
+        "width": size[0] if size else None,
+        "height": size[1] if size else None,
+        "note": (
+            "Look at the image, then record what you read with studium_excerpt_record and transcribed_from_image. "
+            "The image is private user material in the temporary folder, not in the project."
+        ),
+    }
 
 
 def source_add(

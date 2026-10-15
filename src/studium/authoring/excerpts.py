@@ -9,7 +9,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from studium.policy.trust import contains_directive, directive_changes_policy
-from studium.research.local_text import extract_pages, find_quote
+from studium.research.local_text import DEFAULT_DPI, extract_pages, find_quote, pdf_page_count, render_pdf_page
 from studium.research.sources import live_local_source, read_registered_file
 from studium.storage.init_project import load_state_holding_lock
 from studium.storage.locking import ProjectLocked, project_lock
@@ -30,6 +30,7 @@ def record_excerpt(
     path: object = None,
     locator: object = None,
     page: object = None,
+    transcribed_from_image: object = None,
     actor: dict[str, object] | None = None,
 ) -> dict[str, object]:
     """Store one passage the client already opened. Does not change project state.
@@ -39,14 +40,27 @@ def record_excerpt(
     locator; the server reads that file again, checks its hash against the
     registered source, and stores the excerpt only when the quoted text is in
     the file (on ``page`` when given). The file text is not stored, and a quote
-    found in the file is provenance, not verification.
+    found in the file is provenance, not verification. For a PDF page whose
+    content is an image, ``transcribed_from_image`` with ``page`` records what
+    the client read on the page image; the server checks the file and page and
+    hashes the rendered page, but cannot check the words, so the excerpt is a
+    client transcription and grounds no equation.
     """
 
     identifier = _identifier(source_id)
     if identifier is None:
         return _error("mcp.invalid_input", "source_id is required")
     if live_local_source(root, identifier) is not None:
-        return _record_local_excerpt(root, identifier, text=text, path=path, locator=locator, page=page, actor=actor)
+        return _record_local_excerpt(
+            root,
+            identifier,
+            text=text,
+            path=path,
+            locator=locator,
+            page=page,
+            transcribed=transcribed_from_image is True,
+            actor=actor,
+        )
     opened = _http_url(url)
     if opened is None:
         return _error("mcp.invalid_input", "url must be an http or https URL the client already opened")
@@ -108,6 +122,7 @@ def _record_local_excerpt(
     path: object,
     locator: object,
     page: object,
+    transcribed: bool,
     actor: dict[str, object] | None,
 ) -> dict[str, object]:
     body, text_error = _text(text)
@@ -133,19 +148,53 @@ def _record_local_excerpt(
     assert record is not None and data is not None
     media_type = str(record.get("media_type") or "")
     pages, method, reason = extract_pages(data, media_type)
-    if pages is None:
-        return _error("excerpt.local_text_unavailable", f"the quote cannot be checked: {reason}")
-    if page_number is not None and page_number > len(pages):
-        return _error("mcp.invalid_input", f"page {page_number} is past the end of the source ({len(pages)} pages)")
-    found, pages_found = find_quote(pages, body, page_number)
-    if not found:
-        where = f" on page {page_number}" if page_number is not None else ""
-        hint = f" It appears on page(s) {', '.join(map(str, pages_found))}." if pages_found else ""
-        return _error(
-            "excerpt.not_in_source",
-            f"the quoted text is not in the registered file{where}. Quote it verbatim; formulas often do not "
-            f"survive text extraction, so quote the surrounding prose.{hint}",
-        )
+    quote_check: dict[str, object]
+    if transcribed:
+        if media_type != "application/pdf" or page_number is None:
+            return _error(
+                "mcp.invalid_input",
+                "transcribed_from_image needs a PDF source and the page whose image the client read",
+            )
+        total = len(pages) if pages is not None else pdf_page_count(data)
+        if total is not None and page_number > total:
+            return _error("mcp.invalid_input", f"page {page_number} is past the end of the source ({total} pages)")
+        found_in_text = pages is not None and find_quote(pages, body, page_number)[0]
+        if found_in_text:
+            quote_check = {"status": "found_in_file", "method": method, "page_checked": True, "pages": [page_number]}
+        else:
+            image, image_reason = render_pdf_page(data, page_number, DEFAULT_DPI)
+            if image is None:
+                return _error("excerpt.page_image_unavailable", f"the page cannot be rendered: {image_reason}")
+            quote_check = {
+                "status": "client_transcription",
+                "method": "page_image",
+                "page_checked": True,
+                "pages": [page_number],
+                "page_image_sha256": hashlib.sha256(image).hexdigest(),
+                "dpi": DEFAULT_DPI,
+                "verified": False,
+            }
+    else:
+        if pages is None:
+            return _error("excerpt.local_text_unavailable", f"the quote cannot be checked: {reason}")
+        if page_number is not None and page_number > len(pages):
+            return _error("mcp.invalid_input", f"page {page_number} is past the end of the source ({len(pages)} pages)")
+        found, pages_found = find_quote(pages, body, page_number)
+        if not found:
+            where = f" on page {page_number}" if page_number is not None else ""
+            hint = f" It appears on page(s) {', '.join(map(str, pages_found))}." if pages_found else ""
+            return _error(
+                "excerpt.not_in_source",
+                f"the quoted text is not in the registered file{where}. Quote it verbatim; formulas often do not "
+                f"survive text extraction, so quote the surrounding prose.{hint} If the page is an image, use "
+                "studium_source_page_image and record with transcribed_from_image.",
+            )
+        quote_check = {
+            "status": "found_in_file",
+            "method": method,
+            "page_checked": page_number is not None,
+            "pages": pages_found,
+        }
     try:
         with project_lock(root):
             state = load_state_holding_lock(root)
@@ -162,12 +211,7 @@ def _record_local_excerpt(
                 "locator": place,
                 "page": page_number,
                 "source_sha256": record.get("sha256"),
-                "quote_check": {
-                    "status": "found_in_file",
-                    "method": method,
-                    "page_checked": page_number is not None,
-                    "pages": pages_found,
-                },
+                "quote_check": quote_check,
                 "text": body,
                 "state": "DISCOVERED",
                 "classification": "PENDING",
