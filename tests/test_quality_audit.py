@@ -6,6 +6,7 @@ from copy import deepcopy
 import pytest
 from test_professional_math import _open_source, _setup, _structured_solution
 
+from studium.authoring.problems import problem_input_sha256
 from studium.authoring.publishing import report_markdown
 from studium.authoring.quality_audit import book_quality_audit, solution_gaps
 from studium.cli.app import main
@@ -105,6 +106,79 @@ def test_changed_problem_fingerprint_is_reported(tmp_path, monkeypatch):
     append_jsonl(root / PROBLEMS, record)
     report = book_quality_audit(root)
     assert any(issue["type"] == "problem_unchecked_or_stale" for issue in report["issues"])
+
+
+def test_unchecked_rust_and_numeric_results_are_reported(tmp_path, monkeypatch):
+    session, root, excerpts = _setup(tmp_path, monkeypatch)
+    numeric_id = _record(session, excerpts, _structured_solution())
+    rust_record = {
+        "id": "PRB-RUST-1",
+        "section": "hidrostatica",
+        "kind": "rust",
+        "status": "unchecked",
+        "prompt": "Run the Rust test.",
+        "invocation": ["cargo", "test"],
+        "source_text": "fn main() {}",
+    }
+    rust_record["input_sha256"] = problem_input_sha256(root, rust_record)
+    append_jsonl(root / PROBLEMS, rust_record)
+
+    report = book_quality_audit(root)
+    findings = [issue for issue in report["issues"] if issue["type"] == "problem_unchecked_or_stale"]
+    assert {issue["record"] for issue in findings} == {numeric_id, "PRB-RUST-1"}
+    assert next(issue for issue in findings if issue["record"] == numeric_id)["evidence"]["numeric_check_present"] is False
+
+
+def test_rejected_local_citation_is_reported_for_numeric_problem(tmp_path, monkeypatch):
+    session, root, excerpts = _setup(tmp_path, monkeypatch)
+    notes = tmp_path / "notes.md"
+    notes.write_text("The value is 97903.8 Pa.\n", encoding="utf-8")
+    source = dispatch("studium_source_intake", {"path": str(notes)}, session=session)
+    source_id = source["sources"][0]["id"]
+    local = dispatch(
+        "studium_excerpt_record",
+        {"source_id": source_id, "path": str(notes), "text": "The value is 97903.8 Pa.", "locator": "p. 1"},
+        session=session,
+    )
+    assert local["status"] == "recorded", local
+    problem = _record(session, [local["excerpt"]["id"], excerpts[0]], _structured_solution())
+    rejected = dispatch("studium_source_reject", {"source_id": source_id, "reason": "not an acceptable source"}, session=session)
+    assert rejected["status"] == "ok", rejected
+
+    report = book_quality_audit(root)
+    blocker = next(issue for issue in report["issues"] if issue["type"] == "problem_citation_blocked")
+    assert blocker["record"] == problem
+    assert blocker["evidence"][0]["code"] == "claim.source_rejected"
+
+
+def test_failed_solution_step_is_reported_even_when_final_answer_replays(tmp_path, monkeypatch):
+    session, root, excerpts = _setup(tmp_path, monkeypatch)
+    solution = _structured_solution()
+    solution["steps"][-1]["expected"] = "123.0"
+    problem = _record(session, excerpts, solution)
+    checked = dispatch("studium_problem_check", {"id": problem}, session=session)
+    assert checked["answer_check"]["result"] == "replayed"
+    assert checked["step_checks"][0]["reproduced"] is False
+
+    report = book_quality_audit(root)
+    failure = next(issue for issue in report["issues"] if issue["type"] == "step_check_failed")
+    assert failure["record"] == problem
+    assert failure["severity"] == "ERROR"
+
+
+def test_ambiguous_solution_step_precision_is_only_a_warning(tmp_path, monkeypatch):
+    session, root, excerpts = _setup(tmp_path, monkeypatch)
+    solution = _structured_solution()
+    solution["steps"][-1]["expression"] = "83333333.3"
+    solution["steps"][-1]["expected"] = "83300000"
+    problem = _record(session, excerpts, solution)
+    checked = dispatch("studium_problem_check", {"id": problem}, session=session)
+    assert checked["step_checks"][0]["precision"] == "ambiguous"
+
+    report = book_quality_audit(root)
+    failure = next(issue for issue in report["issues"] if issue["type"] == "step_check_failed")
+    assert failure["record"] == problem
+    assert failure["severity"] == "WARNING"
 
 
 def test_audit_cli_exports_json_and_markdown(tmp_path, monkeypatch, capsys):

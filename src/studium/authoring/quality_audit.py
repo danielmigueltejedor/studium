@@ -157,17 +157,38 @@ def _audit_paragraphs(root: Path, add: AddFinding) -> None:
 
 def _audit_problems(root: Path, add: AddFinding) -> None:
     for record in fold_by_id(root / PROBLEMS):
-        if not problem_result_current(root, record):
+        current = problem_result_current(root, record)
+        kind = record.get("kind")
+        status = record.get("status")
+        numeric_check_present = kind != "numeric" or isinstance(record.get("answer_check"), dict)
+        checked_status = status == ("checked" if kind == "rust" else "two_witnesses")
+        if not current or not checked_status or not numeric_check_present:
             add(
                 record,
                 "problem_unchecked_or_stale",
                 "WARNING",
-                record.get("status"),
-                "problem_fingerprint",
+                {
+                    "status": status,
+                    "fingerprint_current": current,
+                    "numeric_check_present": numeric_check_present,
+                },
+                "problem_result_state",
                 "Check this current problem revision before relying on its stored result.",
             )
-        if record.get("kind") != "numeric":
+        if kind != "numeric":
             continue
+        refs = record.get("excerpts")
+        refs = [ref for ref in refs if isinstance(ref, str)] if isinstance(refs, list) else []
+        blockers = paragraph_citation_blockers(root, refs)
+        if blockers:
+            add(
+                record,
+                "problem_citation_blocked",
+                "WARNING",
+                blockers,
+                "citation_policy",
+                "Resolve the citation policy blockers before relying on this problem's evidence.",
+            )
         solution = record.get("solution")
         solution = solution if isinstance(solution, dict) else {}
         gaps = solution_gaps(solution)
@@ -197,11 +218,7 @@ def _audit_problems(root: Path, add: AddFinding) -> None:
                         "Correct the model, data or units and rerun the check.",
                     )
         arithmetic = record.get("answer_check")
-        if (
-            problem_result_current(root, record)
-            and isinstance(arithmetic, dict)
-            and arithmetic.get("result") == "mismatch"
-        ):
+        if current and isinstance(arithmetic, dict) and arithmetic.get("result") == "mismatch":
             add(
                 record,
                 "answer_mismatch",
@@ -210,6 +227,24 @@ def _audit_problems(root: Path, add: AddFinding) -> None:
                 "arithmetic_replay",
                 "Reconcile the stated answer with the final replayed step.",
             )
+        step_checks = record.get("step_checks")
+        if current and isinstance(step_checks, list):
+            for check in step_checks:
+                if not isinstance(check, dict) or check.get("reproduced") is not False:
+                    continue
+                ambiguous = check.get("precision") == "ambiguous"
+                add(
+                    record,
+                    "step_check_failed",
+                    "WARNING" if ambiguous else "ERROR",
+                    check,
+                    "arithmetic_replay",
+                    (
+                        "Clarify the written precision and rerun the check."
+                        if ambiguous
+                        else "Correct the step's expected value or expression and rerun the check."
+                    ),
+                )
         add(
             record,
             "scientific_review_required",

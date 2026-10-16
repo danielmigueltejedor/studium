@@ -1234,9 +1234,7 @@ def _read_env(text: str, index: int) -> tuple[str, str, int] | None:
             return None
         end = close + len(end_token)
         raw = text[index:end]
-        if name in _MATH_ENVS:
-            return "display", _math_chars(raw), end
-        return "display", raw, end
+        return "environment", raw, end
     return None
 
 
