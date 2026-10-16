@@ -429,6 +429,13 @@ Automatic verification does not replace expert review.
 
 For details, see [Verification Model](./docs/verification-model.md).
 
+Run `studium quality-audit --project /path/to/book` for integrated JSON findings,
+or add `--format markdown`. The read-only MCP equivalent is
+`studium_book_quality_audit`. Rendering also writes `latex/draft.quality.json`
+and `.md` with final-pass compiler diagnostics and record/line mapping.
+See [Scientific quality and publishing](./docs/scientific-quality-and-publishing.md)
+for contracts, compatibility and explicitly deferred work.
+
 ## Project status
 
 Studium is currently in **alpha development**.
