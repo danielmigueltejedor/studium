@@ -195,6 +195,11 @@ def record_diagram(
         stage_name = stage.strip() if isinstance(stage, str) else (found.stages[0] if found.stages else None)
         if stage_name not in STAGES:
             return _error("mcp.invalid_input", f"stage must be one of {', '.join(STAGES)}")
+        if stage_name == "statement" and "statement" not in found.stages:
+            return _error(
+                "diagram.unsafe_statement",
+                f"{found.name} includes derived results and cannot be used in a statement; use a solution stage",
+            )
     built, error = run_generator(found.name, cleaned, options_dict, _options(root, options_dict), claims)
     if error is not None:
         return error
@@ -508,6 +513,21 @@ def inspect_diagram(
     return {"status": "inspected", "figure_id": record["id"], "verification": diagram_state(root, updated)}
 
 
+def statement_placement_issue(record: dict[str, object]) -> str | None:
+    """Detect a legacy result-bearing drawing labelled as a statement.
+
+    The generator contract is deterministic; arbitrary captions and custom
+    drawings still require human review. Never infer safety from compilation.
+    """
+    block = record.get("diagram")
+    if not isinstance(block, dict) or block.get("stage") != "statement":
+        return None
+    found = generator(str(block.get("generator")))
+    if found is None or "statement" not in found.stages:
+        return "The generator has no statement-safe contract; the drawing belongs with the solution."
+    return None
+
+
 def problem_figures(root: Path, problem_id: str) -> list[dict[str, object]]:
     """Live diagrams of one problem, in stage order, then in recording order."""
 
@@ -517,6 +537,12 @@ def problem_figures(root: Path, problem_id: str) -> list[dict[str, object]]:
             continue
         block = record.get("diagram")
         if isinstance(block, dict) and block.get("problem") == problem_id:
+            # Preserve legacy records and drawings. Only their placement in the
+            # draft changes: a result-bearing drawing follows the solution.
+            if statement_placement_issue(record):
+                record = {**record, "diagram": {**block, "stage": "solution"}}
+                block = record["diagram"]
+                assert isinstance(block, dict)
             stage = block.get("stage")
             order = STAGES.index(stage) if stage in STAGES else len(STAGES)
             found.append((order, index, record))
@@ -541,6 +567,7 @@ def diagram_report(root: Path) -> dict[str, object]:
                 "generator": block.get("generator"),
                 "problem": block.get("problem"),
                 "stage": block.get("stage"),
+                "placement_issue": statement_placement_issue(record),
                 "compiled": record.get("status") == "checked" and record.get("correct") is True,
                 "status": state["status"],
                 "flags": state.get("flags"),
