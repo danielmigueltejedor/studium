@@ -18,6 +18,7 @@ from studium.authoring.figures import unresolved_figure_references
 from studium.authoring.grounding import GroundingContext, equation_evidence
 from studium.authoring.problem_review import review_stored_problem
 from studium.authoring.problems import problem_result_current
+from studium.authoring.scientific_contracts import scientific_contract_report
 from studium.authoring.support import paragraph_citation_blockers
 from studium.storage.records import FIGURES, PARAGRAPHS, PROBLEMS, fold_by_id
 
@@ -77,6 +78,22 @@ def book_quality_audit(root: Path) -> dict[str, object]:
     _audit_problems(root, add)
     _audit_figures(root, add)
     _audit_editorial(root, issues, add)
+    science = scientific_contract_report(root)
+    for contract in science["contracts"]:
+        record = {"id": contract["claim"], "section": contract["section"]}
+        if contract["state"] != "current":
+            add(record, "scientific_contract_" + contract["state"], "WARNING", contract, "revision_fingerprint",
+                "Reconcile the contract with the current records before relying on its checks.")
+            continue
+        for check in contract["checks"]:
+            if check["status"] in ("FAILED", "UNVERIFIED"):
+                anchor = {"id": check["record"], "section": check["section"]}
+                add(anchor, "scientific_" + check["kind"] + ("_failed" if check["status"] == "FAILED" else "_undecided"),
+                    "ERROR" if check["status"] == "FAILED" else "REVIEW_REQUIRED",
+                    {"claim": contract["claim"], **check}, "explicit_scientific_contract",
+                    "Review the declared equation and its hypotheses across the linked book representations.")
+        add(record, "scientific_scope_review", "REVIEW_REQUIRED", contract, "explicit_scientific_contract",
+            "Review correspondence to prose, physical applicability and semantic source support; individual checks have limited scopes.")
     return {
         "status": "ok",
         "schema_version": "1.0",
@@ -84,12 +101,14 @@ def book_quality_audit(root: Path) -> dict[str, object]:
         "stored_content_modified": False,
         "scientific_validity": "not_established",
         "issues": issues,
+        "scientific_contracts": science,
         "counts": {
             level: sum(item["severity"] == level for item in issues)
             for level in ("ERROR", "WARNING", "REVIEW_REQUIRED", "INFO")
         },
         "limitations": [
             "Arbitrary prose claims, model applicability and source independence require expert review.",
+            "Scientific contracts check explicit annotations; unannotated book content has no inferred scientific clearance.",
             "Structural completeness is not a pedagogical or scientific quality score.",
             "Editorial reports bind to TeX bytes, not to later changes in unrendered book records.",
         ],

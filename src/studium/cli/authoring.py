@@ -19,13 +19,14 @@ from studium.authoring.problems import check_problem, list_problems, record_prob
 from studium.authoring.publishing import report_markdown
 from studium.authoring.quality_audit import book_quality_audit
 from studium.authoring.render import render_draft
+from studium.authoring.scientific_contracts import record_scientific_contract, scientific_contract_report
 from studium.authoring.verify import verify_book
 from studium.research.media import record_media
 from studium.research.student_notes import record_student_notes
 
 EXIT_GATE = 2
 EXIT_COMPILER = 4
-_OK = frozenset({"ok", "recorded", "rendered", "replayed", "replaced", "checked", "removed", "audit_passed"})
+_OK = frozenset({"ok", "recorded", "rendered", "replayed", "replaced", "checked", "removed", "audit_passed", "already_recorded"})
 
 
 def register(subparsers: argparse._SubParsersAction) -> None:
@@ -54,6 +55,17 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     mode.add_argument("--full", action="store_true")
     verify.add_argument("--entity")
     _project(verify)
+
+    science = subparsers.add_parser("scientific-contract", help=argparse.SUPPRESS)
+    science_commands = science.add_subparsers(dest="scientific_command")
+    attach = science_commands.add_parser("record")
+    attach.add_argument("--claim", required=True)
+    attach.add_argument("--file", required=True)
+    attach.add_argument("--expected-revision")
+    attach.add_argument("--origin", choices=("human", "generator"), default="human")
+    _project(attach)
+    report = science_commands.add_parser("report")
+    _project(report)
 
     quality = subparsers.add_parser("quality-audit", help=argparse.SUPPRESS)
     quality.add_argument("--format", choices=("json", "markdown"), default="json")
@@ -216,6 +228,23 @@ def run(args: argparse.Namespace, root: Path) -> int:
     if command == "verify":
         mode_name = "fast" if args.fast else "full"
         return _emit(verify_book(root, mode=mode_name, entity=args.entity), args.json)
+    if command == "scientific-contract":
+        if args.scientific_command == "report":
+            report = scientific_contract_report(root)
+            if not args.json:
+                print(json.dumps(report, ensure_ascii=False, indent=2))
+                return 0
+            return _emit(report, args.json)
+        if args.scientific_command == "record":
+            try:
+                data = json.loads(Path(args.file).read_text(encoding="utf-8"))
+            except (OSError, ValueError) as exc:
+                return _emit({"status": "mcp.invalid_input", "message": str(exc)}, args.json)
+            return _emit(record_scientific_contract(
+                root, claim_id=args.claim, contract=data, expected_revision=args.expected_revision, origin=args.origin,
+            ), args.json)
+        print("unknown command: scientific-contract", file=sys.stderr)
+        return 3
     if command == "quality-audit":
         report = book_quality_audit(root)
         print(report_markdown(report) if args.format == "markdown" else json.dumps(report, ensure_ascii=False, indent=2))
