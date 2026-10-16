@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import json
 import re
+import unicodedata
 from fractions import Fraction
 from functools import lru_cache
 from pathlib import Path
@@ -54,7 +55,7 @@ MAX_MATH_REFS = 20
 _MAX_STATEMENT = 500
 _MAX_REF = 128
 
-_MATH_OPS = set("+-×·*/^()=")
+_MATH_OPS = set("+-−–×·*/^()=")
 
 
 def sentences(text: str) -> list[str]:
@@ -107,6 +108,10 @@ def _expand_math(sentence: str, pos: int, direction: int) -> int:
                 toward = _nearest_nonspace(sentence, token_end, 1)
                 if toward is not None and sentence[toward] in _MATH_OPS:
                     continue
+                if _word_before(sentence, i).casefold() in _GREEK_NAMES:
+                    continue
+                if token.casefold() in _GREEK_NAMES and toward is not None and sentence[toward].isalnum():
+                    continue
             return token_end
         while i < limit and sentence[i].isspace():
             i += 1
@@ -123,6 +128,8 @@ def _expand_math(sentence: str, pos: int, direction: int) -> int:
             toward = _nearest_nonspace(sentence, token_start - 1, -1)
             if toward is not None and sentence[toward] in _MATH_OPS:
                 continue
+            if _word_before(sentence, token_start).casefold() in _GREEK_NAMES:
+                continue
         return token_start
 
 
@@ -136,7 +143,36 @@ def _nearest_nonspace(sentence: str, pos: int, direction: int) -> int | None:
 
 
 def _is_math_token(token: str) -> bool:
-    return bool(re.fullmatch(r"[A-Za-z]{1,3}", token))
+    return bool(re.fullmatch(r"[^\W\d_]{1,3}", token)) or token.casefold() in _GREEK_NAMES
+
+
+def _word_before(sentence: str, pos: int) -> str:
+    """The word that ends just before ``pos``, ignoring spaces."""
+
+    end = pos
+    while end > 0 and sentence[end - 1].isspace():
+        end -= 1
+    start = end
+    while start > 0 and (sentence[start - 1].isalnum() or sentence[start - 1] == "_"):
+        start -= 1
+    return sentence[start:end]
+
+
+_GREEK_NAMES = frozenset(
+    ["alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta", "theta", "iota", "kappa", "lambda", "mu", "nu", "xi", "omicron", "pi", "rho", "sigma", "tau", "upsilon", "phi", "chi", "psi", "omega"]
+)
+
+
+def _greek_name(character: str) -> str:
+    """Spell a Greek letter as its name, so ``ΔU`` and ``delta U`` compare equal."""
+
+    if "\u0370" <= character <= "\u03ff":
+        name = unicodedata.name(character, "").rsplit(" ", 1)[-1].lower()
+        if name in _GREEK_NAMES:
+            return name
+        if name == "sigma" or character == "ς":
+            return "sigma"
+    return character
 
 
 def normalize_math(text: str) -> str:
@@ -147,7 +183,7 @@ def normalize_math(text: str) -> str:
     equivalence (:func:`equivalent_math`) catches the cases this cannot.
     """
 
-    cleaned = text.casefold()
+    cleaned = "".join(_greek_name(ch) for ch in text.casefold())
     cleaned = (
         cleaned.replace("×", "*")
         .replace("·", "*")
