@@ -61,6 +61,20 @@ def _dependencies(claim_id: str, contract: dict[str, Any], records: dict[str, di
     return {identifier: _digest(records.get(identifier)) for identifier in sorted(refs)}
 
 
+def _referenced_excerpts(
+    claim_id: str, contract: dict[str, Any], records: dict[str, dict[str, Any]]
+) -> list[str]:
+    refs = {claim_id, *contract["derivations"], *(entry["record"] for entry in contract["representations"])}
+    excerpts: set[str] = set()
+    for identifier in refs:
+        record = records.get(identifier, {})
+        excerpts.update(record.get("excerpts", []))
+        references = record.get("references", {})
+        if isinstance(references, dict):
+            excerpts.update(references.get("excerpts", []))
+    return sorted(excerpts)
+
+
 def record_scientific_contract(
     root: Path,
     *,
@@ -156,7 +170,7 @@ def scientific_contract_report(root: Path) -> dict[str, Any]:
         assessment = assess_contract(data)
         for check in assessment["checks"]:
             check["section"] = records.get(check["record"], {}).get("section")
-        excerpts = sorted(set(dependencies) & context.excerpts.keys())
+        excerpts = _referenced_excerpts(claim_id, data, records)
         blockers = paragraph_citation_blockers(root, excerpts, context)
         assessment["verification"]["documentary"] = "EVIDENCE_LOCATED" if not blockers else "UNVERIFIED"
         reports.append(

@@ -230,7 +230,11 @@ def run(args: argparse.Namespace, root: Path) -> int:
         return _emit(verify_book(root, mode=mode_name, entity=args.entity), args.json)
     if command == "scientific-contract":
         if args.scientific_command == "report":
-            return _emit(scientific_contract_report(root), args.json)
+            report = scientific_contract_report(root)
+            if not args.json:
+                print(json.dumps(report, ensure_ascii=False, indent=2))
+                return 0
+            return _emit(report, args.json)
         if args.scientific_command == "record":
             try:
                 data = json.loads(Path(args.file).read_text(encoding="utf-8"))

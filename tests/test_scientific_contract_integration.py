@@ -233,6 +233,8 @@ def test_cli_json_markdown_and_catalog(tmp_path, monkeypatch, capsys):
     assert json.loads(capsys.readouterr().out)["status"] == "already_recorded"
     assert main(["scientific-contract", "report", "--project", str(root), "--json"]) == 0
     assert json.loads(capsys.readouterr().out)["contracts"][0]["state"] == "current"
+    assert main(["scientific-contract", "report", "--project", str(root)]) == 0
+    assert json.loads(capsys.readouterr().out)["contracts"][0]["state"] == "current"
     assert main(["quality-audit", "--project", str(root), "--format", "markdown"]) == 0
     markdown = capsys.readouterr().out
     assert "scientific_identity_failed" in markdown and claim_id in markdown
@@ -243,6 +245,32 @@ def test_cli_json_markdown_and_catalog(tmp_path, monkeypatch, capsys):
     assert (
         main(["scientific-contract", "record", "--project", str(root), "--claim", claim_id, "--file", str(file)]) != 0
     )
+
+
+def test_deleted_cited_excerpt_remains_a_documentary_blocker_after_reconciliation(tmp_path, monkeypatch):
+    session, root, claim_id, data, stored = setup_contract(tmp_path, monkeypatch)
+    excerpt_ids = set(fold_by_id(root / CLAIMS)[0]["excerpts"])
+    missing_id = sorted(excerpt_ids)[0]
+    retained = [item for item in read_jsonl(root / EXCERPTS) if item["id"] != missing_id]
+    (root / EXCERPTS).write_text("".join(json.dumps(item) + "\n" for item in retained), encoding="utf-8")
+
+    result = dispatch(
+        "studium_scientific_contract_record",
+        {
+            "claim_id": claim_id,
+            "contract": data,
+            "expected_revision": stored["revision_sha256"],
+        },
+        session=session,
+    )
+    assert result["status"] == "recorded"
+    report = dispatch("studium_scientific_contract_report", {}, session=session)["contracts"][0]
+    assert missing_id in report["evidence"]["excerpts"]
+    assert any(
+        blocker["code"] == "claim.excerpt_missing" and blocker["entity_id"] == missing_id
+        for blocker in report["evidence"]["blockers"]
+    )
+    assert report["verification"]["documentary"] == "UNVERIFIED"
 
 
 def test_invalid_contract_record_is_reported_without_trusting_its_result(tmp_path, monkeypatch):

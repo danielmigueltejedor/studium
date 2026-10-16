@@ -171,9 +171,9 @@ def _expanded(text: str, definitions: dict[str, str]) -> str:
 
     class Substitute(ast.NodeTransformer):
         def visit_Name(self, node: ast.Name) -> ast.AST:
-            return ast.parse(definitions[node.id], mode="eval").body if node.id in definitions else node
+            return ast.parse(definitions[node.id].strip(), mode="eval").body if node.id in definitions else node
 
-    tree = Substitute().visit(ast.parse(text, mode="eval"))
+    tree = Substitute().visit(ast.parse(text.strip(), mode="eval"))
     expanded = ast.unparse(tree)
     parse_expression(expanded)  # Enforce size, depth and numeric-power budgets.
     return expanded
@@ -212,8 +212,11 @@ def _identity(left: sympy.Expr, right: sympy.Expr) -> tuple[str, str]:
 def _point_status(text: str, bindings: dict[str, str], definitions: dict[str, str]) -> tuple[str, str]:
     """Check the original divisions before SymPy can cancel x/x to 1."""
     visited: set[str] = set()
+    undecided = False
 
     def guards(source: str) -> str | None:
+        nonlocal undecided
+        source = source.strip()
         tree = ast.parse(source, mode="eval")
         for node in reversed(list(ast.walk(tree))):
             denominator = None
@@ -223,8 +226,12 @@ def _point_status(text: str, bindings: dict[str, str], definitions: dict[str, st
                 power = _expr(ast.unparse(node.right), bindings)
                 if power.is_negative is True:
                     denominator = node.left
-            if denominator is not None and _expr(ast.unparse(denominator), bindings) == 0:
-                return "The original expression has a zero divisor at the declared point."
+            if denominator is not None:
+                value = _expr(ast.unparse(denominator), bindings)
+                if value == 0:
+                    return "The original expression has a zero divisor at the declared point."
+                if value.is_zero is not False:
+                    undecided = True
             if isinstance(node, (ast.BinOp, ast.UnaryOp, ast.Call)):
                 intermediate = _expr(ast.unparse(node), bindings)
                 if (
@@ -233,6 +240,8 @@ def _point_status(text: str, bindings: dict[str, str], definitions: dict[str, st
                     or intermediate.has(sympy.zoo, sympy.nan, sympy.oo, -sympy.oo)
                 ):
                     return "An original subexpression has no finite real value at the declared point."
+                if intermediate.is_finite is not True or intermediate.is_real is not True:
+                    undecided = True
             if isinstance(node, ast.Name) and node.id in definitions and node.id not in visited:
                 visited.add(node.id)
                 issue = guards(definitions[node.id])
@@ -246,7 +255,7 @@ def _point_status(text: str, bindings: dict[str, str], definitions: dict[str, st
     value = _expr(text, bindings)
     if value.is_finite is False or value.is_real is False or value.has(sympy.zoo, sympy.nan, sympy.oo, -sympy.oo):
         return "FAILED", f"The original expression has no finite real point value: {value}"
-    if value.is_finite is True and value.is_real is True:
+    if value.is_finite is True and value.is_real is True and not undecided:
         return "DOMAIN_POINT_CHECKED", f"Finite real value at the declared point: {value}"
     return "UNVERIFIED", "The declared point does not determine a finite real value."
 
@@ -284,9 +293,14 @@ def _check(check: dict[str, Any], data: dict[str, Any], bindings: dict[str, str]
     if kind == "limit":
         # The limiting variable must remain free, even when the point value is supplied.
         variable = sympy.Symbol(check["variable"])
+        definitions = {key: value for key, value in data["bindings"].items() if key != str(variable)}
         reduced = _bindings(
-            {"bindings": {key: value for key, value in data["bindings"].items() if key != str(variable)}}
+            {"bindings": definitions}
         )
+        for key in ("expression", "point", "claimed"):
+            status, detail = _point_status(check[key], reduced, definitions)
+            if status == "FAILED":
+                return status, detail
         expression = _expr(check["expression"], reduced)
         point = _expr(check["point"], reduced)
         if variable in point.free_symbols:
@@ -296,6 +310,10 @@ def _check(check: dict[str, Any], data: dict[str, Any], bindings: dict[str, str]
         return status, "Two-sided limit: " + detail
     if kind == "gradient":
         coords = [sympy.Symbol(name) for name in check["coordinates"]]
+        for value in check["components"]:
+            status, detail = _point_status(value, bindings, data["bindings"])
+            if status == "FAILED":
+                return status, detail
         components = [_expr(value, bindings) for value in check["components"]]
         for i, j in ((0, 1), (0, 2), (1, 2)):
             residual = _run_bounded(

@@ -71,6 +71,11 @@ def test_original_expression_is_undefined_even_after_cancellation(expression, bi
     assert outcomes(report) == ["FAILED"]
 
 
+def test_cancelled_divisor_with_unknown_point_domain_is_unverified():
+    report = assess(contract([{"kind": "defined", "expression": "x/x"}]))
+    assert outcomes(report) == ["UNVERIFIED"]
+
+
 def test_reynolds_similarity_retains_viscosity_ratio():
     data = contract(
         [{"kind": "identity", "left": "U1*(nu2/nu1)*(d1/d2)", "right": "U1*d1/d2"}],
@@ -136,6 +141,13 @@ def test_point_value_and_propulsion_limit_are_different_checks():
     assert outcomes(assess(data)) == ["FAILED", "SYMBOLICALLY_VERIFIED"]
 
 
+def test_limit_checks_original_expression_domain_before_simplification():
+    data = contract(
+        [{"kind": "limit", "expression": "1/(1/0)", "variable": "x", "point": "0", "claimed": "0"}]
+    )
+    assert outcomes(assess(data)) == ["FAILED"]
+
+
 def test_missing_assumptions_block_even_true_identities():
     data = contract([{"kind": "identity", "left": "x+x", "right": "2*x"}], requires=["steady"])
     assert outcomes(assess(data)) == ["UNVERIFIED"]
@@ -198,6 +210,21 @@ def test_pressure_gradient_differentiates_bound_field_not_only_bare_symbols():
         bindings={"q": "x"},
     )
     assert outcomes(assess(data)) == ["FAILED"]
+
+
+def test_pressure_gradient_rejects_an_identically_undefined_original_component():
+    data = contract(
+        [{"kind": "gradient", "coordinates": ["x", "y", "z"], "components": ["(1/0)**(-1)", "0", "0"]}]
+    )
+    assert outcomes(assess(data)) == ["FAILED"]
+
+
+def test_expression_and_binding_whitespace_is_normalized_before_ast_parsing():
+    data = contract(
+        [{"kind": "identity", "left": " x ", "right": "0"}],
+        bindings={"x": " 0"},
+    )
+    assert outcomes(assess(data)) == ["SYMBOLICALLY_VERIFIED"]
 
 
 def test_binding_expansion_cannot_bypass_parser_resource_limits():
