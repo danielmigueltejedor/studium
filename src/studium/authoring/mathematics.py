@@ -22,6 +22,7 @@ from studium.verification.parser import CONSTANTS, FUNCTIONS
 __all__ = [
     "DEFAULT_SYMBOL_NAMES",
     "MathError",
+    "numeric_latex",
     "substitution_latex",
     "symbol_names_of",
     "symbolic_latex",
@@ -298,3 +299,52 @@ def _escape_unit(base: str) -> str:
     if base in _UNIT_SYMBOLS:
         return base
     return base
+
+
+def numeric_latex(expression: str) -> str:
+    """Typeset the replay expression without evaluating away its operands.
+
+    Only the existing replay language is accepted. The AST preserves grouping,
+    operand order and written decimal precision; no symbolic steps are invented.
+    """
+    import ast
+
+    from studium.authoring.computation import ComputationError, evaluate, normalize_expression
+
+    try:
+        evaluate(expression)
+    except ComputationError as exc:
+        raise MathError(str(exc)) from exc
+    cleaned = normalize_expression(expression.strip())
+    tree = ast.parse(cleaned, mode='eval')
+
+    def render(node: ast.AST) -> str:
+        if isinstance(node, ast.Constant):
+            token = ast.get_source_segment(cleaned, node) or str(node.value)
+            match = re.fullmatch(r'(.+)[eE]([+-]?\d+)', token)
+            return match.group(1) + r'\times 10^{' + match.group(2) + '}' if match else token
+        if isinstance(node, ast.Name):
+            return r'\pi' if node.id == 'pi' else r'\mathrm{e}'
+        if isinstance(node, ast.UnaryOp):
+            return ('-' if isinstance(node.op, ast.USub) else '+') + r'\left(' + render(node.operand) + r'\right)'
+        if isinstance(node, ast.BinOp):
+            left, right = render(node.left), render(node.right)
+            if isinstance(node.op, ast.Div):
+                return r'\frac{' + left + '}{' + right + '}'
+            if isinstance(node.op, ast.Pow):
+                return r'\left(' + left + r'\right)^{' + right + '}'
+            operator = '+' if isinstance(node.op, ast.Add) else ('-' if isinstance(node.op, ast.Sub) else r'\cdot ')
+            return r'\left(' + left + operator + right + r'\right)'
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+            argument = render(node.args[0])
+            name = node.func.id
+            if name in ('sqrt', 'cbrt'):
+                return (r'\sqrt{' if name == 'sqrt' else r'\sqrt[3]{') + argument + '}'
+            if name == 'abs':
+                return r'\left|' + argument + r'\right|'
+            if name == 'factorial':
+                return r'\left(' + argument + r'\right)!'
+            return r'\operatorname{' + name + r'}\left(' + argument + r'\right)'
+        raise MathError('unsupported replay syntax')
+
+    return render(tree.body)
