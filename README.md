@@ -572,3 +572,16 @@ Users remain responsible for respecting the rights and license conditions of the
   </p>
 
 </div>
+
+### Explicit scientific claim contracts
+
+Scientific contracts connect an existing claim to equations, units, hypothesis
+predicates, derivations and occurrences across theory, examples, self-checks,
+problems, solutions and appendices. `studium scientific-contract` records and
+reports them; `studium quality-audit` includes their findings in JSON/Markdown.
+Checks distinguish algebra, dimensions, singular point values, limits, local
+pressure integrability and declared Bernoulli/Stokes hypotheses. Contracts keep
+revision fingerprints and reject generated replacements of human corrections.
+These are scoped checks of explicit annotations; prose interpretation, physical
+applicability and academic approval remain for expert review. See
+[the schema, examples and limitations](docs/scientific-contracts.md).

@@ -895,6 +895,25 @@ _TOOLS: tuple[dict[str, object], ...] = (
         ),
     },
     {
+        "name": "studium_scientific_contract_record",
+        "class": "WRITE",
+        "description": (
+            "Attach explicit equations, variables/units, predicates, derivations and checked representations to an existing claim. "
+            "Uses the schema in docs/scientific-contracts.md. Expressions use the safe Python math grammar, not LaTeX. "
+            "Requires expected_revision on updates. Generated proposals cannot overwrite human corrections. "
+            "No source, editorial record, publication state or verification status is promoted."
+        ),
+    },
+    {
+        "name": "studium_scientific_contract_report",
+        "class": "READ",
+        "description": (
+            "Recompute explicit claim contracts with separate symbolic, dimensional, domain, assumption, model, "
+            "documentary and pending expert review scopes. Stale dependencies invalidate the contract. "
+            "Returns annotated-claim coverage; unannotated prose is not checked. Does not execute external notebooks."
+        ),
+    },
+    {
         "name": "studium_book_quality_audit",
         "class": "READ",
         "description": (
@@ -2127,6 +2146,19 @@ def _schema(tool: Mapping[str, object]) -> dict[str, object]:
             },
             "additionalProperties": True,
         }
+    elif name == "studium_scientific_contract_record":
+        input_schema = {
+            "type": "object",
+            "properties": {
+                "project": _project_property(),
+                "claim_id": {"type": "string"},
+                "contract": _scientific_contract_schema(),
+                "expected_revision": {"type": ["string", "null"]},
+                "origin": {"type": "string", "enum": ["human", "generator"], "default": "generator"},
+            },
+            "required": ["claim_id", "contract"],
+            "additionalProperties": False,
+        }
     elif name == "studium_equation_report":
         input_schema = {
             "type": "object",
@@ -2166,3 +2198,46 @@ def _project_property() -> dict[str, object]:
         "type": "string",
         "description": "Book slug or path inside the workspace. Paths that leave the workspace are rejected.",
     }
+
+
+def _scientific_contract_schema() -> dict[str, object]:
+    """Describe explicit annotations to clients without requiring repository access."""
+    text = {"type": "string", "minLength": 1, "maxLength": 1000}
+
+    def array(items: dict[str, object]) -> dict[str, object]:
+        return {"type": "array", "items": items, "maxItems": 60}
+
+    def record(properties: dict[str, object], required: list[str]) -> dict[str, object]:
+        return {"type": "object", "properties": properties, "required": required, "additionalProperties": False}
+
+    check_fields: dict[str, dict[str, object]] = {
+        "identity": {"left": text, "right": text},
+        "dimensions": {"expression": text, "expected_unit": text},
+        "defined": {"expression": text},
+        "limit": {"expression": text, "variable": text, "point": text, "claimed": text},
+        "gradient": {
+            "coordinates": {"type": "array", "items": text, "minItems": 3, "maxItems": 3, "uniqueItems": True},
+            "components": {"type": "array", "items": text, "minItems": 3, "maxItems": 3},
+        },
+        "model": {"model": {"type": "string", "enum": ["bernoulli_simple", "steady_stokes"]}},
+    }
+    alternatives = [record({"kind": {"const": kind}, **fields}, ["kind", *fields])
+                    for kind, fields in check_fields.items()]
+    alternatives.append(record({"kind": {"const": "identity"}, "equation": text}, ["kind", "equation"]))
+    return record({
+        "variables": {"type": "object", "minProperties": 1, "maxProperties": 40, "additionalProperties": text,
+                      "description": "Symbol to Pint unit. Write dimensionless explicitly. Safe math grammar, not LaTeX."},
+        "bindings": {"type": "object", "additionalProperties": text,
+                     "description": "Acyclic symbol definitions/declared scenario values. Not empirical verification."},
+        "assumptions": array(record({"id": text, "left": text, "right": text,
+                                      "relation": {"enum": ["eq", "ne", "gt", "ge", "lt", "le"]}},
+                                     ["id", "left", "relation", "right"])),
+        "equations": array(record({"id": text, "left": text, "right": text}, ["id", "left", "right"])),
+        "derivations": array(text),
+        "representations": {**array(record({
+            "record": {**text, "description": "Existing claim, paragraph, problem or derivation id."},
+            "role": {"enum": ["theory", "derivation", "example", "self_check", "problem", "solution", "appendix"]},
+            "requires": array(text),
+            "checks": {**array({"oneOf": alternatives}), "minItems": 1},
+        }, ["record", "role", "checks"])), "minItems": 1},
+    }, ["variables", "representations"])

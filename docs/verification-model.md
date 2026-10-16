@@ -113,3 +113,15 @@ Draft, evidence audit, scientific verification, human approval and publication r
 When the scalar parser refuses a relation, `latex_calculus` reads it as SymPy with its own recursive-descent parser (nothing is evaluated by name): `\frac{d^n f}{dx^n}`, `\frac{\partial f}{\partial x}`, `\frac{d}{dx}(...)`, `f'(x)`, `\int_a^b f\,dx`, `bmatrix` and `pmatrix` literals with sums, products, transposes and inverses, `\frac12`, roots, functions, `\log_{10}`, degrees, `\Delta p` as one quantity. It refuses what it cannot read faithfully: `\nabla`, `\sum`, `\oint`, indefinite integrals, vector or tensor products, the derivative of a bare symbol that is not a function (`d(mv)/dt` with nothing saying `m` depends on `t`).
 
 A relation that is an identity is `symbolically_verified` (evidence `sympy`). A definition stated earlier in the same paragraph (`w(x) = ...`, `\mathbf{K} = ...`, a symbolic `name = expression`) is a premise: a later relation that is an identity once the premises are substituted is `follows_from_stated_premises` and lists them. A value or a condition (`x = 0`, `r = R`) is never a premise, because it holds at one place. A relation whose two exact sides differ by a nonzero constant is `contradicted`; a decimal literal never makes a contradiction, because it may be a rounded value. A relation that is not an identity stays `not_machine_checkable` or `unsupported`: failing to prove an equation is not a proof that it is wrong.
+
+## Explicit scientific contracts
+
+[Scientific contracts](scientific-contracts.md) attach multiple book
+representations to one existing claim and retain a separate verification vector.
+They check declared identities, units, point domains, two-sided limits, local
+pressure-gradient integrability and required model predicates. Missing
+hypotheses are review findings; a demonstrated failed predicate or algebraic
+identity is scoped to the declared inputs. No composite VERIFIED state is
+assigned, no PENDING evidence is promoted, and stale linked records invalidate
+the contract. Expert review of prose, model applicability and source meaning
+remains pending even when every implemented check passes.

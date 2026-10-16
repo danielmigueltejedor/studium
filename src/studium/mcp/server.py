@@ -56,6 +56,7 @@ from studium.authoring.quality import assess_book, chapter_quality
 from studium.authoring.quality_audit import book_quality_audit
 from studium.authoring.quality_report import quality_report
 from studium.authoring.render import render_draft
+from studium.authoring.scientific_contracts import record_scientific_contract, scientific_contract_report
 from studium.authoring.verify import verify_book
 from studium.config.resolve import is_project, resolve_project
 from studium.diagrams.registry import catalogue as diagram_catalogue
@@ -1191,6 +1192,13 @@ def _dispatch(session: McpSession, name: str, arguments: Mapping[str, object]) -
         return chapter_context(root, arguments.get("section") if "section" in arguments else None)
     if name == "studium_resume_packet":
         return resume_packet(root)
+    if name == "studium_scientific_contract_record":
+        return record_scientific_contract(
+            root, claim_id=arguments.get("claim_id"), contract=arguments.get("contract"),
+            expected_revision=arguments.get("expected_revision"), origin=arguments.get("origin", "generator"),
+        )
+    if name == "studium_scientific_contract_report":
+        return scientific_contract_report(root)
     if name == "studium_book_quality_audit":
         return book_quality_audit(root)
     if name == "studium_quality_report":
