@@ -314,3 +314,42 @@ def test_figures_follow_the_paragraph_that_cites_them(book):
     middle = tex.index("Un párrafo intermedio")
     second, first = tex.index(r"\label{fig:segunda}"), tex.index(r"\label{fig:primera}")
     assert middle < citing < second < first
+
+
+def test_result_generator_cannot_be_relabelled_as_statement(book):
+    session, root, excerpts = book
+    problem_id = _problem(session, excerpts)
+    before = (root / 'figures' / 'figures.jsonl').read_bytes() if (root / 'figures' / 'figures.jsonl').exists() else b''
+    result = dispatch('studium_diagram_record', {'generator': 'beam.internal_forces', 'caption': 'Results',
+        'problem': problem_id, 'stage': 'statement'}, session=session)
+    assert result['status'] == 'diagram.unsafe_statement'
+    assert result['stored'] is False
+    after = (root / 'figures' / 'figures.jsonl').read_bytes() if (root / 'figures' / 'figures.jsonl').exists() else b''
+    assert before == after
+
+
+def test_result_bearing_generators_do_not_advertise_statement_safety():
+    from studium.diagrams.registry import generator
+
+    for name in ('beam.internal_forces', 'beam.free_body', 'section.properties', 'thin_wall.geometry', 'stress_state.element'):
+        assert 'statement' not in generator(name).stages
+    assert 'statement' in generator('beam.statement').stages
+
+
+def test_legacy_statement_results_move_to_solution_without_record_mutation(book):
+    from copy import deepcopy
+
+    from studium.authoring.diagrams import problem_figures, statement_placement_issue
+    from studium.storage.records import FIGURES, append_jsonl
+
+    _, root, _ = book
+    record = {'id': 'FIG-legacy', 'section': 'vigas', 'source': 'preserved drawing',
+              'diagram': {'generator': 'beam.internal_forces', 'problem': 'PRB-legacy', 'stage': 'statement'}}
+    original = deepcopy(record)
+    append_jsonl(root / FIGURES, record)
+    before = (root / FIGURES).read_bytes()
+    assert statement_placement_issue(record)
+    placed = problem_figures(root, 'PRB-legacy')[0]
+    assert placed['diagram']['stage'] == 'solution'
+    assert placed['source'] == original['source']
+    assert record == original and (root / FIGURES).read_bytes() == before

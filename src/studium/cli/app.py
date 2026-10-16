@@ -65,6 +65,7 @@ Draft:
   studium contradiction [--json] [--project PATH]
   studium review [--json] [--project PATH]
   studium verify (--fast | --full) [--entity ID] [--json] [--project PATH]
+  studium quality-audit [--format json|markdown] [--project PATH]
   studium render [--json] [--project PATH]
   studium media --url URL [--json] [--project PATH]
   studium student-notes --title STR [--json] [--project PATH]
@@ -132,6 +133,7 @@ def main(argv: list[str] | None = None) -> int:
         "claim",
         "verify",
         "render",
+        "quality-audit",
         "excerpt",
         "paragraph",
         "completeness",

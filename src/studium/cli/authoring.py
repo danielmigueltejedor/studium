@@ -16,6 +16,8 @@ from studium.authoring.figures import check_figure, record_figure, remove_figure
 from studium.authoring.paragraphs import draft_completeness, list_paragraphs, record_paragraph, replace_paragraph
 from studium.authoring.problem_review import review_stored_problem
 from studium.authoring.problems import check_problem, list_problems, record_problem, remove_problem
+from studium.authoring.publishing import report_markdown
+from studium.authoring.quality_audit import book_quality_audit
 from studium.authoring.render import render_draft
 from studium.authoring.verify import verify_book
 from studium.research.media import record_media
@@ -52,6 +54,10 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     mode.add_argument("--full", action="store_true")
     verify.add_argument("--entity")
     _project(verify)
+
+    quality = subparsers.add_parser("quality-audit", help=argparse.SUPPRESS)
+    quality.add_argument("--format", choices=("json", "markdown"), default="json")
+    _project(quality)
 
     render = subparsers.add_parser("render", help=argparse.SUPPRESS)
     _project(render)
@@ -210,6 +216,10 @@ def run(args: argparse.Namespace, root: Path) -> int:
     if command == "verify":
         mode_name = "fast" if args.fast else "full"
         return _emit(verify_book(root, mode=mode_name, entity=args.entity), args.json)
+    if command == "quality-audit":
+        report = book_quality_audit(root)
+        print(report_markdown(report) if args.format == "markdown" else json.dumps(report, ensure_ascii=False, indent=2))
+        return 0
     if command == "render":
         return _emit(render_draft(root), args.json)
     if command == "excerpt":

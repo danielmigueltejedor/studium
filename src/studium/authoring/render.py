@@ -24,10 +24,11 @@ from studium.authoring.languages import (
     generic_section_titles,
     messages,
 )
-from studium.authoring.mathematics import DEFAULT_SYMBOL_NAMES, MathError, symbolic_latex, unit_latex
+from studium.authoring.mathematics import DEFAULT_SYMBOL_NAMES, MathError, numeric_latex, symbolic_latex, unit_latex
 from studium.authoring.notation import notation_registry
 from studium.authoring.paragraphs import supported_paragraphs
 from studium.authoring.problems import problem_result_current
+from studium.authoring.publishing import align_long_chain, editorial_report, record_lines, write_report
 from studium.authoring.support import corroboration_for_excerpts, supported_drafts
 from studium.diagrams.registry import Options as DiagramOptions
 from studium.diagrams.registry import family_laws
@@ -398,12 +399,20 @@ def render_draft(root: Path) -> dict[str, object]:
         ],
     }
     if engine is None:
+        _save_editorial_report(tex_path, document, "", False, None, body)
         message = (
             "no LaTeX engine on PATH (tectonic or pdflatex). "
             "Wrote the .tex draft. No PDF was created."
         )
         return _render_status(body, status="compiler_missing", message=message, unwritten=unwritten)
     compiled, detail = _compile(engine, tex_path, tex_path.parent)
+    process_log = tex_path.with_suffix(".compiler.log")
+    log_path = tex_path.with_suffix(".log")
+    log = log_path.read_text(encoding="utf-8", errors="replace") if log_path.is_file() else ""
+    if not compiled and not log:
+        log = detail
+    _save_editorial_report(tex_path, document, log, compiled and _is_pdf(pdf_path), engine, body)
+    body["compiler_log"] = _relative(root, process_log) if process_log.is_file() else None
     if compiled and _is_pdf(pdf_path):
         body["pdf"] = _relative(root, pdf_path)
         return _render_status(body, status="rendered", message="compiled a DRAFT PDF", unwritten=unwritten)
@@ -413,6 +422,16 @@ def render_draft(root: Path) -> dict[str, object]:
     if detail:
         message = f"{message} {detail}"
     return _render_status(body, status="render.compile_failed", message=message, unwritten=unwritten)
+
+
+def _save_editorial_report(
+    tex_path: Path, document: str, log: str, compiled: bool, engine: str | None, body: dict[str, object]
+) -> None:
+    report = editorial_report(document, log, filename=tex_path.name, compiled=compiled, compiler=engine)
+    path = tex_path.with_suffix('.quality.json')
+    write_report(path, report)
+    body['editorial_report'] = 'latex/' + path.name
+    body['editorial_counts'] = report['counts']
 
 
 def _render_status(
@@ -758,8 +777,17 @@ _FUNC_WORDS = frozenset(
 def render_text_run(value: str) -> str:
     """Escape prose, keep explicit math, and wrap Unicode formulas in math mode."""
 
-    text = _SPELLED_DELTA.sub("Δ", value.replace("\r\n", "\n").replace("\r", "\n"))
+    text = value.replace("\r\n", "\n").replace("\r", "\n")
+    # Code and explicit mathematics are opaque: prose normalization must not
+    # change a program, identifier, or an author-supplied equation.
+    opaque = _explicit_spans(text)
+    for match in reversed(list(_SPELLED_DELTA.finditer(text))):
+        if not any(start <= match.start() < end for start, end, _ in opaque):
+            text = text[:match.start()] + "Δ" + text[match.end():]
     explicit = _explicit_spans(text)
+    for match in _INTERNAL_IDENTIFIER.finditer(text):
+        if not any(match.start() < end and match.end() > start for start, end, _ in explicit):
+            explicit.append((match.start(), match.end(), latex_escape(match.group())))
     formulas = _formula_spans(text, explicit)
     events = [(start, end, tex) for start, end, tex in explicit]
     events.extend((start, end, _formula_tex(text[start:end])) for start, end in formulas)
@@ -815,7 +843,7 @@ def emit_prose(value: str, *, italic: bool = False, figure_ref: str = "") -> lis
         if kind == "code":
             lines.extend(_listing_lines(payload, extra))
         else:
-            lines.append(payload)
+            lines.extend(_display_math(payload) if kind == "display" else [payload])
     flush()
     return lines
 
@@ -933,6 +961,14 @@ def _formula_tex(span: str) -> str:
 
 #: ``delta U = ...`` spelled in words is a finite change, written as a Delta.
 _SPELLED_DELTA = re.compile(r"\b[Dd]elta (?=[A-Za-z](?:_[A-Za-z0-9]+)? ?=)")
+
+# Unbraced snake_case with multiple underscores is an identifier, not a
+# sequence of mathematical scripts. Explicit math delimiters override this.
+# Bracketed namespaced editorial keys are literal regardless of script count.
+_INTERNAL_IDENTIFIER = re.compile(
+    r"\[[A-Za-z0-9][A-Za-z0-9.-]*:[A-Za-z0-9_.:-]+\]"
+    r"|\b[A-Za-z][A-Za-z0-9]*(?:_[A-Za-z0-9]+){2,}\b"
+)
 
 
 def _formula_spans(text: str, blocked: list[tuple[int, int, str]]) -> list[tuple[int, int]]:
@@ -1198,9 +1234,7 @@ def _read_env(text: str, index: int) -> tuple[str, str, int] | None:
             return None
         end = close + len(end_token)
         raw = text[index:end]
-        if name in _MATH_ENVS:
-            return "display", _math_chars(raw), end
-        return "display", raw, end
+        return "environment", raw, end
     return None
 
 
@@ -1827,11 +1861,11 @@ def _chapter_lines(
     caller that renders several sections would otherwise repeat them.
     """
 
-    purpose: list[str] = []
-    consejo: list[str] = []
-    definitions: list[str] = []
-    self_check: list[str] = []
-    body: list[str] = []
+    purpose: list[tuple[dict[str, object], str]] = []
+    consejo: list[tuple[dict[str, object], str]] = []
+    definitions: list[tuple[dict[str, object], str]] = []
+    self_check: list[tuple[dict[str, object], str]] = []
+    body: list[tuple[dict[str, object], str]] = []
     for record in paragraphs:
         role = record.get("role")
         raw = _str_field(record, "text")
@@ -1840,27 +1874,27 @@ def _chapter_lines(
         label, rest = _split_box_lead(raw) if language.babel == "spanish" else (None, raw)
         kind = _box_kind(role, label, language)
         if kind == "consejo":
-            consejo.append(_box_body(raw, label, rest, kind, language))
+            consejo.append((record, _box_body(raw, label, rest, kind, language)))
         elif kind == "definition":
-            definitions.append(_box_body(raw, label, rest, kind, language))
+            definitions.append((record, _box_body(raw, label, rest, kind, language)))
         elif kind == "self_check":
-            self_check.append(_box_body(raw, label, rest, kind, language))
+            self_check.append((record, _box_body(raw, label, rest, kind, language)))
         elif role == "purpose":
-            purpose.append(raw)
+            purpose.append((record, raw))
         else:
-            body.append(raw)
+            body.append((record, raw))
     lines: list[str] = []
     figure_ref = copy.get("figure_ref", "")
-    lines.extend(_italic(purpose, figure_ref))
+    lines.extend(_record_prose(purpose, figure_ref, italic=True))
     lines.extend(_body_lines(root, section_id, body, copy, figures_shown))
-    lines.extend(_box(copy["consejo"], _plain(consejo, figure_ref), "consejo"))
-    for text in definitions:
-        lines.extend(_box(copy["definition"], _plain([text], figure_ref), "definition"))
-    boxed_keys = [key for text in (*consejo, *definitions, *self_check) for key in _cited_keys(text)]
+    lines.extend(_box(copy["consejo"], _record_prose(consejo, figure_ref), "consejo"))
+    for record, text in definitions:
+        lines.extend(_box(copy["definition"], record_lines(record, _plain([text], figure_ref)), "definition"))
+    boxed_keys = [key for _, text in (*consejo, *definitions, *self_check) for key in _cited_keys(text)]
     lines.extend(_figure_lines(root, section_id, copy, figures_shown, keys=boxed_keys))
     if chapter_boxes:
         lines.extend(_chapter_back_matter(root, section_id, copy, language))
-    lines.extend(_box(copy["self_check"], _plain(self_check, figure_ref), "self_check"))
+    lines.extend(_box(copy["self_check"], _record_prose(self_check, figure_ref), "self_check"))
     return lines
 
 
@@ -1881,7 +1915,7 @@ def _chapter_back_matter(root: Path, chapter_id: str, copy: dict[str, str], lang
 def _body_lines(
     root: Path,
     section_id: str,
-    body: list[str],
+    body: list[tuple[dict[str, object], str]],
     copy: dict[str, str],
     figures_shown: set[str] | None = None,
 ) -> list[str]:
@@ -1890,11 +1924,9 @@ def _body_lines(
     lines: list[str] = []
     placed = False
     figure_ref = copy.get("figure_ref", "")
-    for kind, value in _body_chunks(body):
-        if kind == "section":
-            lines.extend(["", r"\section{" + latex_escape(value) + "}"])
-            continue
-        lines.extend(_plain([value], figure_ref))
+    for record, raw in body:
+        lines.extend(record_lines(record, _body_record_lines(raw, figure_ref)))
+        value = raw
         # A cited figure follows the first paragraph that cites it; the rest follow the first paragraph.
         lines.extend(_figure_lines(root, section_id, copy, figures_shown, keys=_cited_keys(value)))
         if not placed:
@@ -1902,6 +1934,24 @@ def _body_lines(
             placed = True
     if not placed:
         lines.extend(_figure_lines(root, section_id, copy, figures_shown, uncited=True))
+    return lines
+
+
+def _body_record_lines(text: str, figure_ref: str) -> list[str]:
+    lines: list[str] = []
+    for kind, value in _body_chunks([text]):
+        if kind == 'section':
+            lines.extend(['', r'\section{' + latex_escape(value) + '}'])
+        else:
+            lines.extend(_plain([value], figure_ref))
+    return lines
+
+
+def _record_prose(chunks: list[tuple[dict[str, object], str]], figure_ref: str, *, italic: bool = False) -> list[str]:
+    lines: list[str] = []
+    for record, text in chunks:
+        emitted = _italic([text], figure_ref) if italic else _plain([text], figure_ref)
+        lines.extend(record_lines(record, emitted))
     return lines
 
 
@@ -2156,7 +2206,7 @@ def _solution_body(
     mistakes = solution.get("mistakes")
     if isinstance(mistakes, list):
         body.extend(_bullet_items(_extra_label(language, "mistakes"), [str(item) for item in mistakes], language))
-    return body
+    return record_lines(problem, body)
 
 
 def _structure_check_lines(
@@ -2308,9 +2358,24 @@ def _normalize_math_text(text: str) -> str:
 
 
 def _display_math(tex: str) -> list[str]:
+    lines = _display_math_unaligned(tex)
+    if not lines:
+        return lines
+    display = "\n".join(line for line in lines if line).strip()
+    if display.startswith(r"\[") and display.endswith(r"\]"):
+        inner = display[2:-2].strip()
+        aligned = align_long_chain(inner)
+        if aligned != inner:
+            return ["", r"\[", aligned, r"\]"]
+    return lines
+
+
+def _display_math_unaligned(tex: str) -> list[str]:
     stripped = tex.strip()
     if not stripped:
         return []
+    if stripped.startswith("$$") and stripped.endswith("$$") and len(stripped) > 4:
+        return ["", r"\[", _math_chars(stripped[2:-2]), r"\]"]
     if stripped.startswith(r"\[") and stripped.endswith(r"\]"):
         return ["", stripped]
     if stripped.startswith(r"\(") and stripped.endswith(r"\)"):
@@ -2456,6 +2521,18 @@ def _steps_lines(steps: list[object], language: BookLanguage) -> list[str]:
             rendered = _symbolic_display(symbolic)
             if rendered:
                 lines.extend(rendered)
+        expression = raw.get("expression")
+        if isinstance(expression, str) and expression.strip():
+            try:
+                numeric = numeric_latex(expression)
+            except MathError:
+                # Legacy malformed input stays visible for correction.
+                lines.extend(_listing_lines(expression, ""))
+            else:
+                unit = raw.get("unit")
+                if isinstance(unit, str) and unit.strip().lower() not in {"", "1", "dimensionless", "adimensional"}:
+                    numeric += r"\quad " + _unit_tex(unit)
+                lines.extend(_display_math(numeric))
     lines.append(r"\end{enumerate}")
     return lines
 
@@ -2733,7 +2810,7 @@ def _single_figure_lines(root: Path, record: dict[str, object], copy: dict[str, 
             r"\par\vspace{\baselineskip}",
         ]
     )
-    return lines
+    return record_lines(record, lines)
 
 
 def _diagram_report_lines(root: Path, language: BookLanguage) -> list[str]:
@@ -3409,21 +3486,30 @@ def _remove_stale_toc(tex_path: Path) -> None:
 
 def _compile(engine: str, tex_path: Path, out_dir: Path) -> tuple[bool, str]:
     _remove_stale_toc(tex_path)
+    tex_path.with_suffix(".compiler.log").write_text("", encoding="utf-8")
+    previous_log = tex_path.with_suffix(".log")
+    if previous_log.is_file():
+        previous_log.replace(tex_path.with_suffix(".previous.log"))
     # pdflatex reads the contents file from the previous pass. The second pass
     # puts the new headings on the contents page. Tectonic repeats internally.
-    passes = 1 if Path(engine).name.startswith("tectonic") else 2
+    passes = 1 if Path(engine).name.startswith("tectonic") else 4
     detail = ""
-    for _ in range(passes):
+    for pass_index in range(passes):
         compiled, detail = _run_latex(engine, tex_path, out_dir)
         if not compiled:
             return False, detail
+        if pass_index >= 1:
+            log_path = tex_path.with_suffix(".log")
+            log = log_path.read_text(encoding="utf-8", errors="replace") if log_path.is_file() else ""
+            if not re.search(r"Rerun to get|Label\(s\) may have changed|rerunfilecheck Warning", log, re.IGNORECASE):
+                break
     return True, ""
 
 
 def _run_latex(engine: str, tex_path: Path, out_dir: Path) -> tuple[bool, str]:
     name = Path(engine).name
     if name.startswith("tectonic"):
-        command = [engine, "--outdir", str(out_dir), str(tex_path)]
+        command = [engine, "--keep-logs", "--keep-intermediates", "--outdir", str(out_dir), str(tex_path)]
     else:
         command = [
             engine,
@@ -3444,7 +3530,14 @@ def _run_latex(engine: str, tex_path: Path, out_dir: Path) -> tuple[bool, str]:
             shell=False,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
+        partial = exc.stdout if isinstance(exc, subprocess.TimeoutExpired) else None
+        output = partial.decode("utf-8", errors="replace") if isinstance(partial, bytes) else str(partial or "")
+        with tex_path.with_suffix(".compiler.log").open("a", encoding="utf-8") as stream:
+            stream.write(output + "\n" + str(exc) + "\n")
         return False, str(exc)[:400]
+    output = completed.stdout.decode("utf-8", errors="replace") + completed.stderr.decode("utf-8", errors="replace")
+    with tex_path.with_suffix(".compiler.log").open("a", encoding="utf-8") as stream:
+        stream.write(output + "\n")
     if completed.returncode != 0:
         tail = completed.stdout.decode("utf-8", errors="replace")[-400:]
         return False, " ".join(tail.split())

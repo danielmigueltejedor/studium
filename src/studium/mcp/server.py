@@ -53,6 +53,7 @@ from studium.authoring.problems import (
     update_problem_structure,
 )
 from studium.authoring.quality import assess_book, chapter_quality
+from studium.authoring.quality_audit import book_quality_audit
 from studium.authoring.quality_report import quality_report
 from studium.authoring.render import render_draft
 from studium.authoring.verify import verify_book
@@ -1190,6 +1191,8 @@ def _dispatch(session: McpSession, name: str, arguments: Mapping[str, object]) -
         return chapter_context(root, arguments.get("section") if "section" in arguments else None)
     if name == "studium_resume_packet":
         return resume_packet(root)
+    if name == "studium_book_quality_audit":
+        return book_quality_audit(root)
     if name == "studium_quality_report":
         return quality_report(root)
     if name == "studium_equation_report":

@@ -895,6 +895,16 @@ _TOOLS: tuple[dict[str, object], ...] = (
         ),
     },
     {
+        "name": "studium_book_quality_audit",
+        "class": "READ",
+        "description": (
+            "Read-only integrated book quality findings with severity, chapter, record, evidence, "
+            "method, correction and verification scope. Combines equation grounding, current problem "
+            "checks, dimensions, pedagogical completeness, diagram leakage and final compiler diagnostics. "
+            "Source diversity is never treated as semantic corroboration; expert review remains required."
+        ),
+    },
+    {
         "name": "studium_quality_report",
         "class": "READ",
         "description": (

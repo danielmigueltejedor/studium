@@ -188,7 +188,7 @@ register_family(
     )
 )
 register_generator(
-    Generator("section.properties", "section", "Section with centroid, centroidal and principal axes and overall dimensions.", ("statement", "model", "solution"), _section_properties)
+    Generator("section.properties", "section", "Section with centroid, centroidal and principal axes and overall dimensions.", ("solution", "model"), _section_properties)
 )
 register_generator(
     Generator("section.stress", "section", "Normal-stress field: neutral axis, tension and compression zones, extreme stresses.", ("graphical", "solution"), _section_stress)
@@ -230,7 +230,7 @@ register_family(
     )
 )
 register_generator(
-    Generator("thin_wall.geometry", "thin_wall", "Walls with thickness, nodes, booms, cells, centroid G and shear centre C, applied shear.", ("statement", "model"), _thin_wall_geometry)
+    Generator("thin_wall.geometry", "thin_wall", "Walls with thickness, nodes, booms, cells, centroid G and shear centre C, applied shear.", ("model", "solution"), _thin_wall_geometry)
 )
 register_generator(
     Generator("thin_wall.shear_flow", "thin_wall", "Shear-flow distribution q(s) drawn on every wall with its direction and nodal values.", ("graphical", "solution"), _thin_wall_flow)
@@ -273,5 +273,5 @@ register_generator(
     Generator("stress_state.mohr", "stress_state", "Mohr's circle (and the three circles of the 3D state) with face points, principal stresses, tau_max and 2 theta_p.", ("graphical", "solution"), _stress_mohr)
 )
 register_generator(
-    Generator("stress_state.element", "stress_state", "Stress element on the x, y faces and the principal element rotated by theta_p.", ("statement", "solution"), _stress_element)
+    Generator("stress_state.element", "stress_state", "Stress element on the x, y faces and the principal element rotated by theta_p.", ("solution",), _stress_element)
 )

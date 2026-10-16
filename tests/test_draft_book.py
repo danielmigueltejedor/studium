@@ -4,6 +4,8 @@ import json
 import re
 import subprocess
 
+import pytest
+
 from studium.authoring.render import emit_prose, find_engine, render_text_run
 from studium.mcp.server import dispatch, open_workspace
 
@@ -72,6 +74,17 @@ def test_fenced_code_becomes_a_listing_and_display_math_stays_display():
     assert r"\[" in standalone
     assert r"\rho = m/V" in standalone
     assert "ρ" not in standalone
+
+
+@pytest.mark.parametrize(
+    "environment",
+    [
+        "\\begin{equation}\nE = mc^{2}\n\\end{equation}",
+        "\\begin{lstlisting}\nprint('hello')\n\\end{lstlisting}",
+    ],
+)
+def test_complete_latex_environments_pass_through_unchanged(environment):
+    assert emit_prose(environment) == [environment]
 
 
 def test_draft_tex_has_the_book_skeleton_and_escapes_greek(tmp_path, monkeypatch):
