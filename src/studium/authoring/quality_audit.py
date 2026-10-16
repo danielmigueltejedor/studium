@@ -21,7 +21,6 @@ from studium.authoring.problems import problem_result_current
 from studium.authoring.support import paragraph_citation_blockers
 from studium.storage.records import FIGURES, PARAGRAPHS, PROBLEMS, fold_by_id
 
-
 AddFinding = Callable[[dict[str, object], str, str, object, str, str], None]
 
 
