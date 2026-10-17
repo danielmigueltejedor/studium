@@ -200,5 +200,7 @@ def test_dollar_spans_with_comparisons_and_digit_led_variables_are_math():
     assert _dollar_ok("x > a")
     assert _dollar_ok("2L/3")
     assert _dollar_ok("0 < x < L")
-    assert not _dollar_ok("5")
+    assert _dollar_ok("5")  # A tightly paired $5$ is explicit numeric math.
+    assert not _dollar_ok("5, ")  # Adjacent currency amounts stay literal.
+    assert not _dollar_ok("5 ")
     assert not _dollar_ok("5 and 10")

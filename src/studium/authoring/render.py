@@ -931,7 +931,11 @@ def _match_explicit(text: str, index: int) -> tuple[int, int, str] | None:
 def _dollar_ok(inner: str) -> bool:
     if not inner.strip() or "\n" in inner or len(inner) > 300:
         return False
-    # A span that starts with a digit and has no letter ("$5$", "$5, $") is money, not math;
+    # A tightly paired numeric literal is explicit math too. Rejecting it
+    # leaves its closing dollar available to swallow a later formula.
+    if re.fullmatch(r"[+-]?\d+(?:[.,]\d+)?", inner):
+        return True
+    # Keep ambiguous price separators ("$5, $10", "$5 $10") literal;
     # "$2L/3$" names a variable and is math.
     if (
         inner.lstrip()[:1].isdigit()

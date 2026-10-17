@@ -68,6 +68,21 @@ def test_render_text_run_spanish_decimal_dollar_math():
     assert "\\$" not in result
 
 
+@pytest.mark.parametrize("number", ["1.08", "5", "0,25"])
+def test_numeric_dollar_math_does_not_steal_the_next_formula_delimiter(number):
+    text = f"El factor es ${number}$ y $F=ma$."
+    result = render_text_run(text)
+    assert rf"\({number}\)" in result
+    assert r"\(F=ma\)" in result
+    assert r"\$" not in result
+
+
+def test_unpaired_prices_and_comma_separated_prices_remain_literal():
+    assert render_text_run("Cuesta $5.") == r"Cuesta \$5."
+    assert render_text_run("Precios: $5, $10.") == r"Precios: \$5, \$10."
+    assert render_text_run("Precios: $5 $10.") == r"Precios: \$5 \$10."
+
+
 def test_render_text_run_escapes_special():
     result = render_text_run("100% done & ready")
     assert r"\%" in result

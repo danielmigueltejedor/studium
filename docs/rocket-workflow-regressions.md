@@ -1,4 +1,6 @@
-# Conservative parsing of thermodynamic function values
+# Rocket textbook workflow regressions
+
+## Conservative parsing of thermodynamic function values
 
 While drafting a thermodynamics chapter, the equation report labelled
 
@@ -35,3 +37,25 @@ review and publication state are unchanged.
 
 The tests use synthetic prose and equations. No private book materials or
 third-party pages are part of the fix.
+
+## Numeric inline math
+
+The native renderer treated every digit-leading dollar span without letters
+or LaTeX commands as a currency amount. Consequently `$1.08$` was printed
+literally, and its closing delimiter could start a spurious formula at the
+next dollar. The book importer worked around this by converting every inline
+math delimiter to `\(` and `\)`.
+
+Tightly paired numeric literals, including decimal points and decimal commas,
+are now explicit math. Unpaired prices and adjacent amounts such as
+`$5, $10` or `$5 $10` retain their literal currency rendering. This changes the
+previous heuristic for `$5$`: use escaped dollars for a literal currency sign.
+The rest of the math and prose detection is unchanged.
+
+## Other observations
+
+The importing adapter's stripped `aligned` wrappers were corrected in that
+adapter; they do not require a framework change. Public document intake does
+not automatically establish source authority. Pending source audits, complete
+physical review and experimental validation remain scientific review work,
+not failures to hide by changing publication or evidence statuses.
