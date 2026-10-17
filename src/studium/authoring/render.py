@@ -635,6 +635,9 @@ _BOX_STYLE = {
 _EXTRA_BOX_LABELS: dict[str, dict[str, str]] = {
     "spanish": {
         "exercises": "Ejercicios",
+        "exercise": "Ejercicio",
+        "computations": "Cálculos reproducidos",
+        "unassigned": "Sin capítulo asignado",
         "derivations": "Derivaciones",
         "symbol": "Símbolo",
         "meaning": "Significado",
@@ -693,6 +696,9 @@ _EXTRA_BOX_LABELS: dict[str, dict[str, str]] = {
 _EXTRA_BOX_DEFAULTS = {
     "user_material": "User-provided material (private; not verified).",
     "exercises": "Exercises",
+    "exercise": "Exercise",
+    "computations": "Replayed calculations",
+    "unassigned": "No assigned chapter",
     "derivations": "Derivations",
     "symbol": "Symbol",
     "meaning": "Meaning",
@@ -1982,6 +1988,10 @@ def _heading_from_paragraph(text: str) -> tuple[str | None, str]:
         return None, text
     if title.casefold() in _GENERIC_SECTION:
         return None, body
+    # Short mathematical lead-ins are body prose, not implicit headings. Do
+    # not escape their delimiters into a title and destroy the following math.
+    if title[-1] in ",:;" or re.search(r"[\\$=<>≤≥]", title):
+        return None, text
     return title, body
 
 
@@ -2332,9 +2342,8 @@ def _symbol_tex(name: str) -> str:
 
 
 def _unit_tex(unit: str) -> str:
-    normalized = _normalize_math_text(unit)
     try:
-        return unit_latex(normalized)
+        return unit_latex(unit)
     except MathError:
         return r"\mathrm{" + _normalize_math_text(unit.strip()) + "}"
 
@@ -2679,6 +2688,34 @@ def _derivation_box(root: Path, section_id: str, language: BookLanguage) -> list
     return _box(label, body, "derivation")
 
 
+_PROBLEM_TAG_LABELS = {
+    "spanish": {
+        "FOUNDATIONAL": "Básico", "INTERMEDIATE": "Intermedio", "ADVANCED": "Avanzado",
+        "EXAM_LEVEL": "Nivel de examen", "CHALLENGE": "Reto",
+        "CONCEPTUAL": "Conceptual", "NUMERICAL": "Numérico", "SYMBOLIC": "Simbólico",
+        "PROOF": "Demostración", "DIMENSIONAL": "Análisis dimensional", "MULTI_STEP": "Desarrollo por pasos",
+        "DESIGN": "Diseño", "PARAMETER_STUDY": "Estudio de parámetros", "OPTIMIZATION": "Optimización",
+        "INTERPRETATION": "Interpretación", "ERROR_IDENTIFICATION": "Identificación de errores",
+        "ASSUMPTION_VALIDATION": "Comprobación de hipótesis", "APPLICATION": "Aplicación", "COMPARATIVE": "Comparación",
+    },
+    "english": {
+        "FOUNDATIONAL": "Foundational", "INTERMEDIATE": "Intermediate", "ADVANCED": "Advanced",
+        "EXAM_LEVEL": "Exam level", "CHALLENGE": "Challenge",
+        "CONCEPTUAL": "Conceptual", "NUMERICAL": "Numerical", "SYMBOLIC": "Symbolic",
+        "PROOF": "Proof", "DIMENSIONAL": "Dimensional analysis", "MULTI_STEP": "Multi-step",
+        "DESIGN": "Design", "PARAMETER_STUDY": "Parameter study", "OPTIMIZATION": "Optimization",
+        "INTERPRETATION": "Interpretation", "ERROR_IDENTIFICATION": "Error identification",
+        "ASSUMPTION_VALIDATION": "Assumption check", "APPLICATION": "Application", "COMPARATIVE": "Comparison",
+    },
+}
+
+
+def _problem_tag(tag: str, language: BookLanguage) -> str:
+    """Translate display labels only, with the existing English chrome fallback."""
+    catalog = _PROBLEM_TAG_LABELS.get(language.babel, _PROBLEM_TAG_LABELS["english"])
+    return catalog.get(tag, tag)
+
+
 def _exercise_box(root: Path, section_id: str, language: BookLanguage) -> list[str]:
     """The practice set of this chapter. Solutions live in the appendix."""
 
@@ -2691,8 +2728,9 @@ def _exercise_box(root: Path, section_id: str, language: BookLanguage) -> list[s
         prompt = _str_field(record, "prompt")
         difficulty = _str_field(record, "difficulty")
         problem_type = _str_field(record, "problem_type")
-        tags = [tag for tag in (difficulty.strip(), problem_type.strip()) if tag]
-        head = str(index)
+        tags = [_problem_tag(tag, language) for tag in (difficulty.strip(), problem_type.strip()) if tag]
+        identifier = record.get("id")
+        head = f"{index} [{identifier}]" if isinstance(identifier, str) else str(index)
         if tags:
             head += " (" + ", ".join(tags) + ")"
         body.extend(["", r"\noindent\textbf{" + latex_escape(head) + "}"])
@@ -3009,22 +3047,7 @@ def _format_units(raw: str) -> str:
         return ""
     if "$" in text or r"\(" in text or r"\mathrm" in text:
         return text
-    parts = text.replace("·", r"\cdot ").split("/")
-    formatted: list[str] = []
-    for idx, part in enumerate(parts):
-        part = part.strip()
-        if not part:
-            continue
-        part = re.sub(r"\^(\d+)", r"^{\1}", part)
-        if idx > 0:
-            if "^{" in part:
-                part = re.sub(r"\^{(\d+)}", lambda m: "^{-" + m.group(1) + "}", part)
-            else:
-                part += "^{-1}"
-            part = r"\," + part
-        formatted.append(part)
-    body = "".join(formatted)
-    return r"$\mathrm{" + body + "}$"
+    return "$" + _unit_tex(text) + "$"
 
 
 def _notation_lines(root: Path, copy: dict[str, str], language: BookLanguage) -> list[str]:
@@ -3089,12 +3112,12 @@ def _formula_sheet_lines(root: Path, copy: dict[str, str]) -> list[str]:
 def _solution_lines(root: Path, copy: dict[str, str], language: BookLanguage) -> list[str]:
     """Checked solutions only. Exercises without a checked solution are named, not invented."""
 
-    lines: list[str] = []
+    groups: dict[str, list[str]] = {}
     profile = _domain_profile(root)
     numbering = _practice_numbering(root)
     seen_practice: set[str] = set()
     solved_practice: set[str] = set()
-    exercise_label = _extra_label(language, "exercises")
+    exercise_label = _extra_label(language, "exercise")
     for record in fold_by_id(root / PROBLEMS):
         if record.get("kind") == "rust" and profile != "COMPUTER_SCIENCE":
             continue
@@ -3117,10 +3140,14 @@ def _solution_lines(root: Path, copy: dict[str, str], language: BookLanguage) ->
         prompt = _str_field(record, "prompt")
         if not prompt.strip():
             continue
+        section = _str_field(record, "section")
+        lines = groups.setdefault(section, [])
         if is_practice and isinstance(identifier, str):
             solved_practice.add(identifier)
             number = numbering.get(identifier, 0)
-            lines.extend(["", r"\noindent\textbf{" + latex_escape(f"{exercise_label} {number}") + "}"])
+            lines.extend(["", r"\noindent\textbf{" + latex_escape(f"{exercise_label} {number} [{identifier}]") + "}"])
+        elif isinstance(identifier, str):
+            lines.extend(["", r"\noindent\textbf{" + latex_escape(f"{copy['worked']} [{identifier}]") + "}"])
         solution = record.get("solution")
         if is_practice and isinstance(solution, dict) and solution:
             # A practice problem with a stored solution gets the same full
@@ -3146,12 +3173,26 @@ def _solution_lines(root: Path, copy: dict[str, str], language: BookLanguage) ->
                             r"\noindent\textbf{" + latex_escape(copy["respuesta"]) + "} " + latex_escape(expected.strip()),
                         ]
                     )
+    computation_sections: set[str] = set()
     for record in fold_by_id(root / COMPUTATIONS):
         if record.get("status") != "replayed" or record.get("correct") is not True:
             continue
+        section = _str_field(record, "section")
+        lines = groups.setdefault(section, [])
+        if section not in computation_sections:
+            lines.extend(["", r"\subsection*{" + latex_escape(_extra_label(language, "computations")) + "}"])
+            computation_sections.add(section)
         expression = _str_field(record, "expression")
         result = _computation_result(record)
         lines.extend(["", _formula_line(f"{expression} = {result}")])
+    titles = {section["id"]: section["title"] for section in current_sections(root)}
+    lines: list[str] = []
+    # Follow blueprint order even when records were authored out of order.
+    for section in dict.fromkeys([*titles, *groups]):
+        if section not in groups:
+            continue
+        title = titles.get(section, section or _extra_label(language, "unassigned"))
+        lines.extend(["", r"\section{" + latex_escape(_display_title(title)) + "}", *groups[section]])
     unsolved = len(seen_practice - solved_practice)
     if unsolved:
         if language.babel == "spanish":

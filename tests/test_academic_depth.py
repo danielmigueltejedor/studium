@@ -701,7 +701,7 @@ def test_render_fills_the_notation_sheet_exercises_and_derivations(tmp_path, mon
     assert r"\usepackage[hyphens]{url}" in tex
     assert r"\url{https://open.example/fluidos-a}" in tex
     assert "Símbolo" in tex and "presión estática" in tex
-    assert "Ejercicios" in tex and "INTERMEDIATE" in tex
+    assert "Ejercicios" in tex and "Intermedio" in tex
     assert "Derivaciones" in tex and "Torricelli" in tex
     assert "Notation" not in tex
     assert "PAR-" not in tex
