@@ -11,7 +11,7 @@ import re
 from pathlib import Path
 
 from studium.authoring.blueprint import current_sections, is_support_section
-from studium.authoring.computation import computation_fingerprint
+from studium.authoring.computation import computation_fingerprint, current_computations
 from studium.authoring.contradictions import (
     _canon_number,
     _quantities,
@@ -37,7 +37,6 @@ from studium.storage.locking import ProjectLocked, project_lock
 from studium.storage.migrate import utc_now
 from studium.storage.records import (
     AUDITS,
-    COMPUTATIONS,
     DERIVATIONS,
     FIGURES,
     PROBLEMS,
@@ -405,7 +404,7 @@ def _cited_numbers(root: Path, target_id: str, target_kind: str) -> set[str]:
         for body in _record_excerpt_texts(record, stored_excerpts):
             for match in re.finditer(r"-?\d+(?:\.\d+)?", body):
                 found.add(_canon_number(match.group(0)))
-    for record in fold_by_id(root / COMPUTATIONS):
+    for record in current_computations(root):
         if record.get("status") != "replayed" or record.get("correct") is not True:
             continue
         result = record.get("server_result")
@@ -439,7 +438,7 @@ def _evidence_numbers(root: Path, evidence: dict[str, object]) -> tuple[dict[str
                 absorb(body)
     computation = evidence.get("computation")
     if isinstance(computation, str):
-        for record in fold_by_id(root / COMPUTATIONS):
+        for record in current_computations(root):
             if record.get("id") != computation:
                 continue
             expression = record.get("expression") if isinstance(record.get("expression"), str) else ""
@@ -529,7 +528,7 @@ def _two_excerpts(root: Path, value: object) -> tuple[list[str] | None, dict[str
 
 
 def _computation_passed(root: Path, identifier: str) -> bool:
-    for record in fold_by_id(root / COMPUTATIONS):
+    for record in current_computations(root):
         if record.get("id") != identifier:
             continue
         return record.get("status") == "replayed" and record.get("correct") is True
@@ -587,7 +586,7 @@ def _dependency_entries(
 
     computation = evidence.get("computation")
     if isinstance(computation, str):
-        record = next((item for item in fold_by_id(root / COMPUTATIONS) if item.get("id") == computation), None)
+        record = next((item for item in current_computations(root) if item.get("id") == computation), None)
         if isinstance(record, dict):
             add("computation", computation, computation_fingerprint(record))
     problem = evidence.get("problem")
@@ -648,7 +647,7 @@ class _DependencyView:
 
 def _current_dependency(root: Path, kind: str, identifier: str) -> str | None:
     if kind == "computation":
-        record = next((item for item in fold_by_id(root / COMPUTATIONS) if item.get("id") == identifier), None)
+        record = next((item for item in current_computations(root) if item.get("id") == identifier), None)
         return computation_fingerprint(record) if isinstance(record, dict) else None
     if kind == "derivation":
         record = next((item for item in fold_by_id(root / DERIVATIONS) if item.get("id") == identifier), None)
@@ -717,7 +716,7 @@ def _math_dependency_entries(root: Path, paragraph: dict[str, object]) -> list[d
                 if isinstance(record, dict):
                     entries.append({"kind": "derivation", "id": ref, "sha256": derivation_fingerprint(record)})
             elif kind == "example":
-                record = next((item for item in fold_by_id(root / COMPUTATIONS) if item.get("id") == ref), None)
+                record = next((item for item in current_computations(root) if item.get("id") == ref), None)
                 if isinstance(record, dict):
                     entries.append({"kind": "computation", "id": ref, "sha256": computation_fingerprint(record)})
     return entries

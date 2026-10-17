@@ -195,6 +195,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     computation.add_argument("--result")
     computation.add_argument("--id")
     computation.add_argument("--section")
+    computation.add_argument("--problem-id")
     _project(computation)
 
 
@@ -416,6 +417,7 @@ def run(args: argparse.Namespace, root: Path) -> int:
                 expression=args.expression,
                 result=args.result,
                 computation_id=args.id,
+                problem_id=args.problem_id,
                 section=args.section,
                 actor={"kind": "cli"},
             ),

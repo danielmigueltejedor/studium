@@ -89,7 +89,7 @@ def test_passing_rerun_checks_the_figure(tmp_path, monkeypatch):
     assert "studium_figure_check" in tool_names()
     instructions = handle({"jsonrpc": "2.0", "id": 1, "method": "initialize"})["result"]["instructions"]
     assert "A figure does not prove the science." in instructions
-    source = Path("src/studium/authoring/figures.py").read_text(encoding="utf-8")
+    source = (Path(__file__).resolve().parents[1] / "src/studium/authoring/figures.py").read_text(encoding="utf-8")
     assert "import urllib" not in source
     assert "urlopen(" not in source
 

@@ -15,12 +15,12 @@ from pathlib import Path
 
 from studium.authoring.blueprint import current_sections
 from studium.authoring.excerpts import excerpts_by_id
-from studium.authoring.paragraphs import supported_paragraphs
+from studium.authoring.support import paragraph_citation_blockers
 from studium.policy.trust import directive_changes_policy
 from studium.storage.init_project import load_state, load_state_holding_lock
 from studium.storage.locking import ProjectLocked, project_lock
 from studium.storage.migrate import utc_now
-from studium.storage.records import COMPUTATIONS, allocate_id, append_jsonl, fold_by_id
+from studium.storage.records import COMPUTATIONS, PROBLEMS, allocate_id, append_jsonl, fold_by_id
 
 _AUDIT = "audit/audit.jsonl"
 _MAX_EXPRESSION = 500
@@ -249,6 +249,7 @@ def check_computation(
     result: object = None,
     computation_id: object = None,
     section: object = None,
+    problem_id: object = None,
     actor: dict[str, object] | None = None,
 ) -> dict[str, object]:
     """Store a calculation and accept it only after the server evaluates it again.
@@ -260,7 +261,7 @@ def check_computation(
     if computation_id is not None and identifier is None:
         return _error("mcp.invalid_input", "id is required")
     if identifier is not None:
-        return _replay(root, identifier, expression, actor)
+        return _replay(root, identifier, expression, actor, problem_id)
     parsed, claimed, section_id, error = _new_inputs(root, expression, result, section)
     if error is not None:
         return error
@@ -269,7 +270,12 @@ def check_computation(
         server_result = evaluate(parsed)
     except ComputationError as exc:
         return _error("computation.invalid", str(exc))
-    refusal = _small_integer_refusal(root, parsed, section_id)
+    context, context_error = _problem_context(root, problem_id, parsed, section_id)
+    if context_error is not None:
+        return context_error
+    if context is not None:
+        section_id = str(context["section"])
+    refusal = _small_integer_refusal(root, parsed, section_id) if context is None else None
     if refusal is not None:
         return refusal
     return _store(
@@ -280,6 +286,7 @@ def check_computation(
         claimed_text=claimed_text_of(result),
         server_result=server_result,
         section_id=section_id,
+        problem_context=context,
         actor=actor,
     )
 
@@ -287,7 +294,7 @@ def check_computation(
 def list_computations(root: Path) -> list[dict[str, object]]:
     """Stored calculations. A matching report is replayed, not verified."""
 
-    return [_public(record) for record in fold_by_id(root / COMPUTATIONS)]
+    return [_public(record) for record in current_computations(root)]
 
 
 def _replay(
@@ -295,6 +302,7 @@ def _replay(
     identifier: str,
     expression: object,
     actor: dict[str, object] | None,
+    problem_id: object = None,
 ) -> dict[str, object]:
     current = next((item for item in fold_by_id(root / COMPUTATIONS) if item.get("id") == identifier), None)
     if current is None:
@@ -316,7 +324,12 @@ def _replay(
         return _error("computation.invalid", str(exc))
     section_value = current.get("section")
     section = section_value if isinstance(section_value, str) else None
-    refusal = _small_integer_refusal(root, stored_expression, section)
+    binding = current.get("problem_context")
+    if problem_id is not None and (not isinstance(binding, dict) or problem_id != binding.get("id")):
+        return _error("computation.context_changed", "Replay uses the stored problem context; it cannot be replaced.")
+    if not computation_context_current(root, current):
+        return _error("computation.context_changed", "The linked problem or its evidence changed; record a new computation.")
+    refusal = _small_integer_refusal(root, stored_expression, section) if binding is None else None
     if refusal is not None:
         return refusal
     written = current.get("claimed_text")
@@ -329,6 +342,7 @@ def _replay(
         claimed_text=written if isinstance(written, str) else None,
         server_result=server_result,
         section_id=section,
+        problem_context=binding if isinstance(binding, dict) else None,
         actor=actor,
     )
 
@@ -342,6 +356,7 @@ def _store(
     claimed_text: str | None,
     server_result: Fraction,
     section_id: str | None,
+    problem_context: dict[str, object] | None,
     actor: dict[str, object] | None,
 ) -> dict[str, object]:
     verdict = precision_verdict(claimed_text if claimed_text is not None else claimed, server_result)
@@ -349,6 +364,10 @@ def _store(
     status = "replayed" if matched else ("ambiguous_precision" if verdict == "ambiguous" else "mismatch")
     try:
         with project_lock(root):
+            if problem_context is not None:
+                current, error = _problem_context(root, problem_context.get("id"), expression, section_id)
+                if error is not None or current != problem_context:
+                    return _error("computation.context_changed", "The linked problem or evidence changed before storage.")
             record_id = identifier if identifier is not None else allocate_id(root, "PRB")
             record: dict[str, object] = {
                 "schema_version": "1.0.0",
@@ -362,6 +381,8 @@ def _store(
                 "classification": "PENDING",
                 "recorded_at": utc_now(),
             }
+            if problem_context is not None:
+                record["problem_context"] = problem_context
             if claimed_text is not None:
                 record["claimed_text"] = claimed_text
             if matched:
@@ -385,6 +406,75 @@ def _store(
     return body
 
 
+def _problem_context(
+    root: Path, problem_id: object, expression: str, section: str | None
+) -> tuple[dict[str, object] | None, dict[str, object] | None]:
+    """Bind generated exercise data to an exact stored solution step, not a source claim."""
+
+    if problem_id is None:
+        return None, None
+    identifier = _identifier(problem_id)
+    if identifier is None:
+        return None, _error("mcp.invalid_input", "problem_id must be a stored problem id")
+    problem = next((row for row in fold_by_id(root / PROBLEMS) if row.get("id") == identifier), None)
+    if problem is None or problem.get("kind") != "numeric":
+        return None, _error("computation.problem_missing", "No live numeric problem with that id.")
+    if section is not None and problem.get("section") != section:
+        return None, _error("computation.problem_section", "The problem belongs to a different section.")
+    solution = problem.get("solution")
+    steps = solution.get("steps") if isinstance(solution, dict) else None
+    if not isinstance(steps, list) or not any(
+        isinstance(step, dict) and _same_expression(step.get("expression"), expression) for step in steps
+    ):
+        return None, _error("computation.problem_step", "The expression is not an exact stored solution step.")
+    raw = problem.get("excerpts")
+    excerpts = [x for x in raw if isinstance(x, str)] if isinstance(raw, list) else []
+    if paragraph_citation_blockers(root, excerpts):
+        return None, _error("computation.problem_evidence", "The problem's cited evidence is no longer usable.")
+    # A local import avoids the problems -> computation replay dependency cycle.
+    from studium.authoring.problems import problem_input_sha256
+
+    return {"id": identifier, "section": problem.get("section"), "sha256": problem_input_sha256(root, problem)}, None
+
+
+def _same_expression(left: object, right: str) -> bool:
+    if not isinstance(left, str):
+        return False
+    try:
+        return ast.dump(ast.parse(normalize_expression(left), mode="eval")) == ast.dump(
+            ast.parse(normalize_expression(right), mode="eval")
+        )
+    except (SyntaxError, ValueError, RecursionError):
+        return False
+
+
+def computation_context_current(root: Path, record: dict[str, object]) -> bool:
+    """Legacy arithmetic remains usable; a linked exercise must still match its binding."""
+
+    binding = record.get("problem_context")
+    if binding is None:
+        return True
+    if not isinstance(binding, dict) or not isinstance(record.get("expression"), str):
+        return False
+    section = record.get("section")
+    current, error = _problem_context(
+        root, binding.get("id"), str(record["expression"]), section if isinstance(section, str) else None
+    )
+    return error is None and current == binding
+
+
+def current_computations(root: Path) -> list[dict[str, object]]:
+    """Read-only view: stale exercise bindings never supply replayed evidence."""
+
+    rows = []
+    for record in fold_by_id(root / COMPUTATIONS):
+        if not computation_context_current(root, record):
+            record = {**record, "status": "stale", "correct": False}
+            record.pop("corroboration", None)
+        rows.append(record)
+    return rows
+
+
 def _small_integer_refusal(root: Path, expression: str, section_id: str | None) -> dict[str, object] | None:
     """Reject toy arithmetic unless one cited excerpt contains every number."""
 
@@ -394,7 +484,7 @@ def _small_integer_refusal(root: Path, expression: str, section_id: str | None) 
     state = load_state(root)
     return {
         "status": "computation.ungrounded",
-        "message": "The expression is only small-integer arithmetic and its numbers are not in a cited excerpt.",
+        "message": "Integer arithmetic needs its numbers in one cited excerpt, or problem_id linking this exact step of a stored structured problem.",
         "accepted": False,
         "correct": False,
         "released": state.get("state") == "RELEASED",
@@ -436,6 +526,8 @@ def _walk_small(node: ast.AST, numbers: set[str], binary: bool) -> tuple[bool, b
 
 
 def _cited_excerpt_has_numbers(root: Path, section_id: str | None, numbers: set[str]) -> bool:
+    from studium.authoring.paragraphs import supported_paragraphs
+
     stored = excerpts_by_id(root)
     for paragraph in supported_paragraphs(root):
         if section_id is not None and paragraph.get("section") != section_id:
@@ -633,6 +725,9 @@ def computation_fingerprint(record: dict[str, object]) -> str:
             str(record.get("correct")),
         ]
     )
+    context = record.get("problem_context")
+    if context is not None:
+        payload += "\n" + (repr(sorted(context.items())) if isinstance(context, dict) else "invalid-context")
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
@@ -683,6 +778,8 @@ def _public(record: dict[str, object]) -> dict[str, object]:
         "correct": record.get("correct") is True,
         "classification": "PENDING",
     }
+    if isinstance(record.get("problem_context"), dict):
+        visible["problem_context"] = record["problem_context"]
     if isinstance(record.get("claimed_text"), str):
         visible["claimed_text"] = record["claimed_text"]
     approximate = _approximate(record.get("server_result"))
@@ -698,8 +795,8 @@ def _public(record: dict[str, object]) -> dict[str, object]:
 def _visible_status(record: dict[str, object]) -> str:
     if record.get("status") == "replayed" and record.get("correct") is True:
         return "replayed"
-    if record.get("status") == "ambiguous_precision":
-        return "ambiguous_precision"
+    if record.get("status") in {"ambiguous_precision", "stale"}:
+        return str(record["status"])
     return "mismatch"
 
 

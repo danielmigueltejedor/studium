@@ -963,6 +963,7 @@ def _dispatch(session: McpSession, name: str, arguments: Mapping[str, object]) -
             expression=arguments.get("expression") if "expression" in arguments else None,
             result=arguments.get("result") if "result" in arguments else None,
             computation_id=arguments.get("id") if "id" in arguments else None,
+            problem_id=arguments.get("problem_id"),
             section=arguments.get("section") if "section" in arguments else None,
             actor=actor if isinstance(actor, dict) else None,
         )
