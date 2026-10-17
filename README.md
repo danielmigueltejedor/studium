@@ -498,6 +498,7 @@ Detailed technical documentation is available in the `docs/` directory.
 | [Evidence Model](./docs/evidence-model.md) | Provenance, authority, and source versioning |
 | [AI Orchestration](./docs/ai-orchestration.md) | Agent interaction and workflow coordination |
 | [Verification Model](./docs/verification-model.md) | Mathematical checks and verification states |
+| [Authoring regressions](./docs/turbomachinery-authoring-fixes.md) | Unit powers, equation lead-ins, exercise identity and compatibility |
 | [Release Model](./docs/release-model.md) | Review requirements and publication limitations |
 | [Security](./docs/security.md) | Source isolation and security boundaries |
 | [Copyright](./docs/copyright.md) | Source licensing and copyright considerations |

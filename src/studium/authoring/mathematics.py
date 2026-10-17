@@ -16,6 +16,7 @@ caller receives the validation result next to the LaTeX.
 from __future__ import annotations
 
 import re
+from fractions import Fraction
 
 from studium.verification.parser import CONSTANTS, FUNCTIONS
 
@@ -235,64 +236,105 @@ def unit_latex(unit: str) -> str:
     if not isinstance(unit, str):
         raise MathError("unit must be a string")
     text = unit.strip().replace("·", "*").replace("⋅", "*").replace("\\cdot", "*")
+    superscripts = str.maketrans("⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻", "0123456789+-")
+    text = re.sub(r"[⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻]+", lambda match: "^" + match.group().translate(superscripts), text)
     if not text or text.lower() in {"dimensionless", "adimensional", "1", "none"}:
         return "1"
+    if len(text) > 200:
+        raise MathError("unit is too long")
+    text = text.replace("**", "^")
     factors, index = _parse_unit_product(text, 0)
-    if index != len(text) or not factors:
+    if index != len(text):
         raise MathError(f"cannot read the unit {unit!r}")
     parts: list[str] = []
     for base, exponent in factors.items():
         piece = rf"\mathrm{{{_escape_unit(base)}}}"
         if exponent != 1:
-            piece += f"^{{{exponent}}}"
+            power = str(exponent.numerator) if exponent.denominator == 1 else rf"\frac{{{exponent.numerator}}}{{{exponent.denominator}}}"
+            piece += f"^{{{power}}}"
         parts.append(piece)
-    return r"\,".join(parts)
+    return r"\,".join(parts) or "1"
 
 
-def _parse_unit_product(text: str, index: int) -> tuple[dict[str, int], int]:
-    factors: dict[str, int] = {}
+def _parse_unit_product(text: str, index: int, *, depth: int = 0) -> tuple[dict[str, Fraction], int]:
+    """Read a bounded product without evaluating names or executable input.
+
+    Multiplication and division associate left to right, like Pint. Grouped
+    denominators and powers preserve their scope; ``1`` is the unit identity.
+    """
+    if depth > 24:
+        raise MathError("unit nests too deeply")
+    factors: dict[str, Fraction] = {}
     sign = 1
+    needs_factor = True
     while index < len(text):
+        if text[index].isspace():
+            index += 1
+            continue
         character = text[index]
-        if character in "* " or character == "\n":
-            index += 1
-            continue
-        if character == "/":
-            sign = -1
-            index += 1
-            continue
         if character == ")":
             break
-        if character == "(":
-            inner, index = _parse_unit_product(text, index + 1)
-            if index < len(text) and text[index] == ")":
-                index += 1
-            for base, exponent in inner.items():
-                factors[base] = factors.get(base, 0) + sign * exponent
-            continue
-        match = re.match(r"[A-Za-z]+", text[index:])
-        if match is None:
-            raise MathError("a unit factor must start with a letter")
-        base = match.group(0)
-        index += len(base)
-        exponent = 1
-        if index < len(text) and text[index] == "^":
+        if character in "*/":
+            if needs_factor:
+                raise MathError("a unit operator needs a preceding factor")
+            sign = -1 if character == "/" else 1
+            needs_factor = True
             index += 1
-            if index < len(text) and text[index] == "(":
-                close = text.find(")", index)
-                if close < 0:
-                    raise MathError("an unbalanced exponent in a unit")
-                exponent_text = text[index + 1 : close]
-                index = close + 1
-            else:
-                exp_match = re.match(r"-?\d+", text[index:])
-                if exp_match is None:
-                    raise MathError("an exponent must be a number")
-                exponent_text = exp_match.group(0)
-                index += len(exponent_text)
-            exponent = int(exponent_text)
-        factors[base] = factors.get(base, 0) + sign * exponent
-    return {base: exponent for base, exponent in factors.items() if exponent != 0}, index
+            continue
+        if not needs_factor:
+            # Adjacent unit factors (including whitespace-separated ones)
+            # multiply. A previous division does not swallow this product.
+            sign = 1
+        if character == "(":
+            inner, index = _parse_unit_product(text, index + 1, depth=depth + 1)
+            if index >= len(text) or text[index] != ")":
+                raise MathError("an unbalanced group in a unit")
+            index += 1
+        elif character == "1":
+            if not needs_factor or (index + 1 < len(text) and text[index + 1] in "0123456789."):
+                raise MathError("only the literal 1 is allowed as a unit factor")
+            inner = {}
+            index += 1
+        else:
+            match = re.match(r"[A-Za-z]+", text[index:])
+            if match is None:
+                raise MathError("a unit factor must be a name, group, or 1")
+            inner = {match.group(0): Fraction(1)}
+            index += len(match.group(0))
+        while index < len(text) and text[index].isspace():
+            index += 1
+        exponent = Fraction(1)
+        if index < len(text) and text[index] == "^":
+            exponent, index = _parse_unit_exponent(text, index + 1)
+        for base, power in inner.items():
+            factors[base] = factors.get(base, Fraction(0)) + sign * exponent * power
+        needs_factor = False
+    if needs_factor:
+        raise MathError("a unit product needs a factor")
+    return {base: power for base, power in factors.items() if power != 0}, index
+
+
+def _parse_unit_exponent(text: str, index: int) -> tuple[Fraction, int]:
+    while index < len(text) and text[index].isspace():
+        index += 1
+    if index < len(text) and text[index] == "(":
+        close = text.find(")", index + 1)
+        if close < 0:
+            raise MathError("an unbalanced exponent in a unit")
+        raw = text[index + 1 : close].strip()
+        index = close + 1
+        if not re.fullmatch(r"[+-]?(?:\d+(?:\.\d*)?|\.\d+|\d+/\d+)", raw):
+            raise MathError("a unit exponent must be a decimal or rational number")
+    else:
+        match = re.match(r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)", text[index:])
+        if match is None:
+            raise MathError("a unit exponent must be a number")
+        raw = match.group(0)
+        index += len(raw)
+    try:
+        return Fraction(raw), index
+    except (ValueError, ZeroDivisionError) as exc:
+        raise MathError("invalid numeric exponent in a unit") from exc
 
 
 def _escape_unit(base: str) -> str:

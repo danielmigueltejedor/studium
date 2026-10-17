@@ -519,7 +519,7 @@ class TestExercisesAndProblems:
         assert "Ejercicios" in self.tex or "Exercises" in self.tex
 
     def test_exercise_difficulty_shown(self):
-        assert "INTERMEDIATE" in self.tex
+        assert "Intermedio" in self.tex
 
     def test_worked_problem_box(self):
         assert "4.905" in self.tex
@@ -1574,3 +1574,103 @@ def test_plain_ascii_subscript_remains_unchanged():
     rendered = render_text_run("p_man = ρ g h")
 
     assert "p_man" in rendered
+
+
+def _chapter_problem_setup(tmp_path, monkeypatch):
+    """Synthetic data only: two chapters both start their exercise count at one."""
+    monkeypatch.setattr("urllib.request.urlopen", _explode)
+    monkeypatch.setattr("studium.authoring.render.find_engine", lambda: None)
+    session, root = _project(tmp_path)
+    dispatch("studium_blueprint_store", {"sections": [{"id": "presion", "title": "Presión"}, {"id": "energia", "title": "Energía"}]}, session=session)
+    excerpts = _excerpts(session)
+    ids = []
+    # Author the second chapter first, to exercise blueprint ordering.
+    for section in ("energia", "presion"):
+        result = dispatch(
+            "studium_problem_record",
+            {"section": section, "prompt": f"Synthetic practice fixture for {section}.", "expected": "6", "excerpts": excerpts, "role": "practice", "difficulty": "FOUNDATIONAL", "problem_type": "MULTI_STEP"},
+            session=session,
+        )
+        assert result["status"] == "recorded", result
+        ids.append(result["problem"]["id"])
+    return session, root, ids
+
+
+def test_solution_appendix_matches_statements_by_chapter_and_stable_identifier(tmp_path, monkeypatch):
+    from studium.authoring.languages import active_language, messages
+    from studium.authoring.render import _exercise_box, _solution_lines
+
+    _session, root, ids = _chapter_problem_setup(tmp_path, monkeypatch)
+    language = active_language(root)
+    appendix = "\n".join(_solution_lines(root, messages(language), language))
+    assert appendix.index(r"\section{Presión}") < appendix.index(r"\section{Energía}")
+    for section, identifier in zip(("energia", "presion"), ids, strict=True):
+        statement = "\n".join(_exercise_box(root, section, language))
+        assert f"1 [{identifier}]" in statement
+        assert f"Ejercicio 1 [{identifier}]" in appendix
+        assert "Básico" in statement and "Desarrollo por pasos" in statement
+        assert "FOUNDATIONAL" not in statement and "MULTI" not in statement
+
+
+def test_solution_appendix_omits_stale_problem_and_keeps_unsolved_count(tmp_path, monkeypatch):
+    from studium.authoring.languages import active_language, messages
+    from studium.authoring.render import _solution_lines
+
+    _session, root, ids = _chapter_problem_setup(tmp_path, monkeypatch)
+    from studium.authoring.render import problem_result_current
+
+    original = problem_result_current
+    monkeypatch.setattr("studium.authoring.render.problem_result_current", lambda path, record: record.get("id") != ids[0] and original(path, record))
+    language = active_language(root)
+    appendix = "\n".join(_solution_lines(root, messages(language), language))
+    assert ids[0] not in appendix
+    assert ids[1] in appendix
+    assert "1 ejercicio todavía sin solución comprobada" in appendix
+    assert r"\section{Energía}" not in appendix
+
+
+def test_replayed_calculations_stay_in_their_own_chapter(tmp_path, monkeypatch):
+    from studium.authoring.languages import active_language, messages
+    from studium.authoring.render import _solution_lines
+
+    session, root, _ids = _chapter_problem_setup(tmp_path, monkeypatch)
+    first_check = dispatch("studium_computation_check", {"expression": "7.1*8", "result": "56.8", "section": "presion"}, session=session)
+    assert first_check["status"] == "replayed", first_check
+    second_check = dispatch("studium_computation_check", {"expression": "8.1*9", "result": "72.9", "section": "energia"}, session=session)
+    assert second_check["status"] == "replayed", second_check
+    language = active_language(root)
+    appendix = "\n".join(_solution_lines(root, messages(language), language))
+    first, second = appendix.split(r"\section{Energía}")
+    assert "56" in first and "72" not in first
+    assert "72" in second and "56" not in second
+    assert appendix.count(r"\subsection*{Cálculos reproducidos}") == 2
+
+
+def test_native_draft_with_fractional_units_and_equation_leadins_compiles(tmp_path, monkeypatch):
+    import shutil
+    import subprocess
+
+    engine = shutil.which("pdflatex")
+    if engine is None:
+        pytest.skip("no pdflatex engine")
+    from studium.authoring.excerpts import excerpts_by_id
+
+    session, root, ids = _chapter_problem_setup(tmp_path, monkeypatch)
+    excerpts = list(excerpts_by_id(root))[:2]
+    for section in ("presion", "energia"):
+        result = dispatch("studium_paragraph_record", {"section": section, "text": "Aplicando el balance:\n" + r"\[F=ma\]", "excerpts": excerpts}, session=session)
+        assert result["status"] == "recorded", result
+    for symbol, units in (("f", "1/s"), ("q", "kg/(s*K^0.5)")):
+        result = dispatch("studium_notation_record", {"section": "presion", "symbol": symbol, "meaning": "Synthetic unit fixture", "units": units}, session=session)
+        assert result["status"] == "recorded", result
+    before = {path: path.read_bytes() for path in root.rglob("*.jsonl")}
+    render_draft(root)
+    assert before == {path: path.read_bytes() for path in before}
+    tex = (root / "latex/draft.tex").read_text()
+    assert r"\section{Aplicando el balance:}" not in tex
+    assert r"\mathrm{K}^{\frac{-1}{2}}" in tex
+    assert all(f"Ejercicio 1 [{identifier}]" in tex for identifier in ids)
+    for _ in range(2):
+        compiled = subprocess.run([engine, "-interaction=nonstopmode", "-halt-on-error", "-no-shell-escape", "draft.tex"], cwd=root / "latex", capture_output=True, text=True, errors="replace")
+        assert compiled.returncode == 0, compiled.stdout[-4000:]
+    assert (root / "latex/draft.pdf").read_bytes().startswith(b"%PDF-")

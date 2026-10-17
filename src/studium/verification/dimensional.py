@@ -155,6 +155,8 @@ def check_dimensions(
 
     Addition of two different dimensions is inconsistent. A transcendental
     function needs a dimensionless argument. ``sqrt`` halves the exponents.
+    A dimensionless base accepts a dimensionless symbolic exponent; a base
+    with dimensions still requires a numeric constant exponent.
     """
 
     declared: dict[str, BaseDims] = {}
@@ -219,9 +221,13 @@ def _walk(node: ast.AST, declared: dict[str, BaseDims], *, depth: int) -> BaseDi
         if isinstance(node.op, _DIV):
             return _add(left, right, -1)
         if isinstance(node.op, ast.Pow):
+            if right:
+                raise DimensionError("exponent must be dimensionless")
             exponent = _exponent(node.right, declared)
             if exponent is None:
-                raise DimensionError("exponent must be a numeric constant")
+                if not left:
+                    return _zero()
+                raise DimensionError("a dimensional base needs a numeric constant exponent")
             return _scale(left, exponent)
         raise DimensionError("operator is not allowed in a dimension check")
 
@@ -256,17 +262,28 @@ def _exponent(node: ast.AST, declared: dict[str, BaseDims]) -> Fraction | None:
     if isinstance(node, ast.Constant):
         if isinstance(node.value, bool) or not isinstance(node.value, (int, float)):
             return None
-        return Fraction(str(node.value))
+        try:
+            return Fraction(str(node.value))
+        except ValueError as exc:
+            raise DimensionError("exponent must be finite") from exc
     if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub)):
         inner = _exponent(node.operand, declared)
         if inner is None:
             return None
         return inner if isinstance(node.op, ast.UAdd) else -inner
-    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+    if isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Add, ast.Sub, ast.Mult, ast.Div)):
         left = _exponent(node.left, declared)
         right = _exponent(node.right, declared)
-        if left is None or right is None or right == 0:
+        if isinstance(node.op, ast.Div) and right == 0:
+            raise DimensionError("division by zero in exponent")
+        if left is None or right is None:
             return None
+        if isinstance(node.op, ast.Add):
+            return left + right
+        if isinstance(node.op, ast.Sub):
+            return left - right
+        if isinstance(node.op, ast.Mult):
+            return left * right
         return left / right
     return None
 
