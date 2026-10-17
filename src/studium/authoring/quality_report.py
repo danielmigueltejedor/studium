@@ -14,6 +14,7 @@ from studium.authoring.academic_blueprint import academic_sections_for_chapter
 from studium.authoring.audit import audited_paragraph_ids
 from studium.authoring.blueprint import current_sections
 from studium.authoring.completeness import chapter_completeness
+from studium.authoring.computation import current_computations
 from studium.authoring.consistency import consistency_report
 from studium.authoring.contradictions import open_contradictions
 from studium.authoring.coverage import source_coverage
@@ -30,7 +31,6 @@ from studium.storage.init_project import domain_profile as _domain_profile
 from studium.storage.init_project import load_state_holding_lock
 from studium.storage.records import (
     AUDITS,
-    COMPUTATIONS,
     DERIVATIONS,
     FIGURES,
     NOTATION,
@@ -56,7 +56,7 @@ def quality_report(root: Path) -> dict[str, object]:
     contradictions = open_contradictions(root)
     problems = fold_by_id(root / PROBLEMS)
     checked_problems = [row for row in problems if problem_result_current(root, row)]
-    computations = fold_by_id(root / COMPUTATIONS)
+    computations = current_computations(root)
     replayed = [row for row in computations if row.get("status") == "replayed" and row.get("correct") is True]
     derivations = fold_by_id(root / DERIVATIONS)
     derivation_statuses: dict[str, int] = {}

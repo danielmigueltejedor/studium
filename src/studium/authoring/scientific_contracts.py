@@ -38,7 +38,7 @@ def _digest(value: object) -> str:
 def _records(root: Path) -> dict[str, dict[str, Any]]:
     return {
         str(record["id"]): record
-        for path in (CLAIMS, PARAGRAPHS, PROBLEMS, DERIVATIONS, EXCERPTS, PUBLIC_BIBLIOGRAPHY)
+        for path in (CLAIMS, PARAGRAPHS, PROBLEMS, DERIVATIONS, EXCERPTS, PUBLIC_BIBLIOGRAPHY, "sources/registry.jsonl")
         for record in fold_by_id(root / path)
     }
 

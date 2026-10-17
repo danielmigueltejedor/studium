@@ -12,6 +12,7 @@ from pathlib import Path
 
 from studium.authoring.academic_blueprint import current_academic_blueprint
 from studium.authoring.blueprint import current_sections
+from studium.authoring.computation import current_computations
 from studium.authoring.derivations import derivations_for_section
 from studium.authoring.diagrams import diagram_state, problem_figures, renderable
 from studium.authoring.excerpts import excerpts_by_id
@@ -39,7 +40,6 @@ from studium.storage.init_project import domain_profile as _domain_profile
 from studium.storage.locking import ProjectLocked, project_lock
 from studium.storage.records import (
     AUDITS,
-    COMPUTATIONS,
     DERIVATIONS,
     EXCERPTS,
     FIGURES,
@@ -2078,7 +2078,7 @@ def _worked_box(root: Path, section_id: str, copy: dict[str, str], language: Boo
     problems = _worked_problem_records(root, section_id)
     computations = [
         record
-        for record in fold_by_id(root / COMPUTATIONS)
+        for record in current_computations(root)
         if record.get("section") == section_id and record.get("status") == "replayed" and record.get("correct") is True
     ]
     if not problems and not computations:
@@ -3034,7 +3034,7 @@ def _section_has_replay(root: Path, section_id: str) -> bool:
             and problem_result_current(root, record)
         ):
             return True
-    for record in fold_by_id(root / COMPUTATIONS):
+    for record in current_computations(root):
         if record.get("section") == section_id and record.get("status") == "replayed" and record.get("correct") is True:
             return True
     return False
@@ -3174,7 +3174,7 @@ def _solution_lines(root: Path, copy: dict[str, str], language: BookLanguage) ->
                         ]
                     )
     computation_sections: set[str] = set()
-    for record in fold_by_id(root / COMPUTATIONS):
+    for record in current_computations(root):
         if record.get("status") != "replayed" or record.get("correct") is not True:
             continue
         section = _str_field(record, "section")

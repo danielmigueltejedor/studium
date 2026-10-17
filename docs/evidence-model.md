@@ -21,3 +21,20 @@ A quote found in the file is provenance, not verification: the excerpt stays `PE
 ### Pages that are images
 
 Slides and scans keep equations and diagrams as images, so the text layer has nothing to quote. `studium_source_page_image` renders one page of a registered PDF to a PNG (poppler `pdftoppm`, 50–200 dpi) in the system temporary folder, after checking that the file hashes to the registered version; nothing is written to the project. The client looks at the image and records what it read with `studium_excerpt_record` and `transcribed_from_image` with `page`. When the text layer already holds the words the excerpt is a normal checked quote; otherwise it is stored as `quote_check.status = client_transcription` with `verified = false`, the page and the SHA-256 of the rendered page. The server never saw those words, so such an excerpt can be cited by a paragraph but never makes an equation `source_supported`; the equation stays for human review.
+
+## Draft claims and supplemental evidence
+
+Draft claims use the same citation eligibility as paragraphs: a course book
+may cite a public source explicitly flagged as an `open_supplement`, without
+claiming that the course guide cites it. Unflagged and conflicting public
+sources remain blocked. A claim can also cite a stored local excerpt while
+its registered source version is live and non-rejected. Local files still
+count together as one witness, and their quotes retain their existing
+provenance and authority classifications.
+
+These rules allow scientific contracts to attach to claims grounded in the
+material actually used to develop the chapter. A successful registration
+establishes neither semantic support nor scientific authority. Claim and
+source classifications remain `PENDING`; scientific contracts continue to
+report expert review separately. Source or excerpt changes invalidate the
+linked contract instead of silently reusing its checks.

@@ -125,3 +125,24 @@ identity is scoped to the declared inputs. No composite VERIFIED state is
 assigned, no PENDING evidence is promoted, and stale linked records invalidate
 the contract. Expert review of prose, model applicability and source meaning
 remains pending even when every implemented check passes.
+
+### Generated exercise inputs
+
+Small-integer arithmetic normally needs every input number in one cited
+excerpt. Original exercises can instead pass `problem_id` to
+`studium_computation_check` (CLI: `computation --problem-id PRB-…`). The id must
+refer to a live structured numeric problem, in the same section, with usable
+citations and an exact matching arithmetic step. Whitespace and documented
+numeric notation are normalized; unrelated expressions are refused.
+
+The computation stores the exercise id, section and input revision. Replay
+uses that binding; it cannot be reassigned to another problem. A change to the
+problem, its cited excerpt text, its section, source usability, or deletion
+makes the evidence `stale` in read-only views. Stale computations cannot ground
+equations, satisfy audits, supply worked examples, or corroborate captions.
+Their append-only history is retained. Re-record the computation against the
+new exercise revision after reviewing the change.
+
+Generated exercise values remain author-provided data. They do not become
+independent source evidence, scientific verification, or academic approval.
+The result remains a scoped arithmetic replay, with classification `PENDING`.

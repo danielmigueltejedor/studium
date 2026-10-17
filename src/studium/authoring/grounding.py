@@ -32,9 +32,10 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, cast
 
+from studium.authoring.computation import current_computations
 from studium.authoring.excerpts import excerpts_by_id
 from studium.authoring.latex_calculus import Definition, as_definition, check_with_premises
-from studium.storage.records import COMPUTATIONS, DERIVATIONS, fold_by_id
+from studium.storage.records import DERIVATIONS, fold_by_id
 
 MATH_KINDS = frozenset({"source", "derivation", "example"})
 
@@ -636,7 +637,7 @@ def record_excerpt_texts(record: dict[str, object], stored: dict[str, dict[str, 
 def replayed_computations(root: Path) -> list[dict[str, object]]:
     return [
         record
-        for record in fold_by_id(root / COMPUTATIONS)
+        for record in current_computations(root)
         if record.get("status") == "replayed" and record.get("correct") is True
     ]
 
@@ -1706,7 +1707,7 @@ def _derivation(root: Path, identifier: str) -> dict[str, object] | None:
 
 
 def _computation(root: Path, identifier: str) -> dict[str, object] | None:
-    return next((record for record in fold_by_id(root / COMPUTATIONS) if record.get("id") == identifier), None)
+    return next((record for record in current_computations(root) if record.get("id") == identifier), None)
 
 
 def derivation_fingerprint(record: dict[str, object]) -> str:

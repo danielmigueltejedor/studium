@@ -1,8 +1,8 @@
 """Which public sources may support a draft claim.
 
 The model is not a source. A stored year, title, or ISBN conflict cannot
-support a claim. On a course book, a source that is not marked as cited by
-the stored guide cannot support a claim. A topic book does not require a
+support a claim. On a course book, public sources must be cited by
+the stored guide or explicitly registered as open supplements. A topic book does not require a
 university guide.
 """
 
@@ -38,12 +38,12 @@ def support_blockers(root: Path, source_ids: list[str]) -> list[dict[str, object
         conflict = _conflict_blocker(record)
         if conflict is not None:
             blockers.append(conflict)
-        if course_book and record.get("course_guide_cited") is not True:
+        if course_book and record.get("course_guide_cited") is not True and record.get("open_supplement") is not True:
             blockers.append(
                 {
                     "code": "claim.not_cited",
                     "entity_id": source_id,
-                    "message": "not marked as cited by the stored course guide",
+                    "message": "not marked as cited by the stored course guide and not flagged as an open supplement",
                 }
             )
     return blockers
@@ -211,36 +211,8 @@ def citation_blockers(
     """Support blockers for public source ids and for stored excerpts."""
 
     blockers = support_blockers(root, source_ids)
-    excerpts = excerpts_by_id(root)
-    for excerpt_id in excerpt_ids or []:
-        excerpt = excerpts.get(excerpt_id)
-        if excerpt is None:
-            blockers.append(
-                {
-                    "code": "claim.excerpt_missing",
-                    "entity_id": excerpt_id,
-                    "message": "no stored excerpt with that id",
-                }
-            )
-            continue
-        source_id = excerpt.get("source_id")
-        if not isinstance(source_id, str):
-            blockers.append(
-                {
-                    "code": "claim.source_missing",
-                    "entity_id": excerpt_id,
-                    "message": "excerpt has no public source id",
-                }
-            )
-            continue
-        for blocker in support_blockers(root, [source_id]):
-            blockers.append(
-                {
-                    "code": blocker["code"],
-                    "entity_id": blocker.get("entity_id"),
-                    "message": f"excerpt {excerpt_id}: {blocker['message']}",
-                }
-            )
+    if excerpt_ids:
+        blockers.extend(paragraph_citation_blockers(root, excerpt_ids))
     return blockers
 
 
@@ -287,12 +259,12 @@ def evidence_blockers(root: Path) -> list[dict[str, object]]:
         conflict = _conflict_blocker(record)
         if conflict is not None:
             blockers.append(conflict)
-        if course_book and record.get("course_guide_cited") is not True:
+        if course_book and record.get("course_guide_cited") is not True and record.get("open_supplement") is not True:
             blockers.append(
                 {
                     "code": "claim.not_cited",
                     "entity_id": record.get("id") if isinstance(record.get("id"), str) else None,
-                    "message": "not marked as cited by the stored course guide",
+                    "message": "not marked as cited by the stored course guide and not flagged as an open supplement",
                 }
             )
     if pending:

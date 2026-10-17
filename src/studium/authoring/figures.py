@@ -11,15 +11,17 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 from studium.authoring.blueprint import current_sections
+from studium.authoring.computation import current_computations
 from studium.authoring.support import corroboration_for_excerpts, paragraph_citation_blockers
 from studium.policy.trust import contains_directive, directive_changes_policy
 from studium.storage.init_project import load_state_holding_lock
 from studium.storage.locking import ProjectLocked, project_lock
 from studium.storage.migrate import utc_now
-from studium.storage.records import COMPUTATIONS, FIGURES, PROBLEMS, allocate_id, append_jsonl, fold_by_id
+from studium.storage.records import FIGURES, PROBLEMS, allocate_id, append_jsonl, fold_by_id
 
 _AUDIT = "audit/audit.jsonl"
 _MAX_CAPTION = 2_000
@@ -69,8 +71,11 @@ _SCIENCE = (
     "A numeric claim in the caption needs two excerpts or a replayed computation."
 )
 _PRELUDE = r"""
+import ast
 import builtins
 import io
+import json
+import math
 import os
 import pathlib
 import socket
@@ -99,7 +104,46 @@ subprocess.call = _deny
 subprocess.check_call = _deny
 subprocess.check_output = _deny
 
-def _contained(file):
+# Load trusted plotting dependencies before closing the import/exec boundary.
+# A user program cannot name an arbitrary module for this bootstrap.
+_requested = {
+    alias.name.split(".", 1)[0]
+    for node in ast.walk(ast.parse(program))
+    if isinstance(node, ast.Import)
+    for alias in node.names
+}
+_requested.update(
+    node.module.split(".", 1)[0]
+    for node in ast.walk(ast.parse(program))
+    if isinstance(node, ast.ImportFrom) and node.module
+)
+_read_files = set()
+_read_trees = []
+if _requested & {"matplotlib", "numpy"}:
+    try:
+        import numpy
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot
+        import matplotlib.patches
+        from matplotlib import font_manager
+        # Exercise lazy font/mathtext and backend imports while only trusted
+        # library code is running. No submitted source executes in this phase.
+        _warm, _axes = matplotlib.pyplot.subplots(layout="constrained")
+        _axes.plot([0, 1], [0, 1])
+        _axes.set_title(r"$\rho V^2 / 2$")
+        _warm.savefig(io.BytesIO(), format="png")
+        for _font_type in (3, 42):
+            with matplotlib.rc_context({"pdf.fonttype": _font_type}):
+                _warm.savefig(io.BytesIO(), format="pdf")
+        matplotlib.pyplot.close(_warm)
+        _read_trees.append(pathlib.Path(matplotlib.get_data_path()).resolve())
+        _read_files.update(pathlib.Path(font.fname).resolve() for font in font_manager.fontManager.ttflist)
+        _read_files.update(pathlib.Path(font.fname).resolve() for font in font_manager.fontManager.afmlist)
+    except ImportError as exc:
+        raise SystemExit("Plotting dependencies unavailable; install studium[plots] in the server's Python environment: " + str(exc)) from None
+
+def _contained(file, *, read_only=False):
     path = pathlib.Path(file)
     if not path.is_absolute():
         path = work / path
@@ -107,6 +151,8 @@ def _contained(file):
     try:
         resolved.relative_to(work)
     except ValueError:
+        if read_only and (resolved in _read_files or any(resolved.is_relative_to(tree) for tree in _read_trees)):
+            return resolved
         raise OSError("path leaves the book") from None
     return resolved
 
@@ -115,7 +161,7 @@ _io_open = io.open
 def _open(file, mode="r", *args, **kwargs):
     if isinstance(file, int):
         raise OSError("path leaves the book")
-    return _io_open(_contained(file), mode, *args, **kwargs)
+    return _io_open(_contained(file, read_only=not any(flag in mode for flag in "wax+")), mode, *args, **kwargs)
 
 io.open = _open
 builtins.open = _open
@@ -124,7 +170,8 @@ _os_open = os.open
 def _open_os(path, flags, mode=0o777, *, dir_fd=None):
     if dir_fd is not None:
         raise OSError("path leaves the book")
-    return _os_open(_contained(path), flags, mode)
+    write_flags = os.O_WRONLY | os.O_RDWR | os.O_CREAT | os.O_TRUNC | os.O_APPEND
+    return _os_open(_contained(path, read_only=not flags & write_flags), flags, mode)
 
 os.open = _open_os
 _blocked_imports = {
@@ -136,13 +183,33 @@ _real_import = builtins.__import__
 def _import(name, globals=None, locals=None, fromlist=(), level=0):
     root_name = name.split(".", 1)[0]
     if root_name in _blocked_imports:
-        raise ImportError("import is disabled")
+        raise ImportError("import is disabled: " + name)
     return _real_import(name, globals, locals, fromlist, level)
+
+# FontTools evaluates fixed table predicates while subsetting an installed
+# font. Keep eval unavailable to submitted code; only these already-loaded
+# library globals may use it. Do not whitelist by a caller-controlled name.
+_eval = builtins.eval
+_eval_globals = tuple(
+    sys.modules[name].__dict__
+    for name in ("fontTools.ttLib.tables.otBase", "fontTools.ttLib.tables.otConverters")
+    if name in sys.modules
+)
+
+def _font_predicate(expression, globals=None, locals=None):
+    caller = sys._getframe(1)
+    if not any(caller.f_globals is namespace for namespace in _eval_globals):
+        return _deny()
+    return _eval(
+        expression,
+        caller.f_globals if globals is None else globals,
+        caller.f_locals if locals is None else locals,
+    )
 
 _compile = builtins.compile
 _exec = builtins.exec
 builtins.__import__ = _import
-builtins.eval = _deny
+builtins.eval = _font_predicate
 builtins.exec = _deny
 builtins.compile = _deny
 builtins.breakpoint = _deny
@@ -259,7 +326,7 @@ def check_figure(root: Path, figure_id: object) -> dict[str, object]:
     source = current.get("source")
     if kind not in _KINDS or not isinstance(source, str) or not source.strip():
         return _error("figure.source_missing", "a figure needs executable source")
-    engine_name = "pdflatex" if kind == "tikz" else "python3"
+    engine_name = "pdflatex" if kind == "tikz" else sys.executable
     engine = shutil.which(engine_name)
     state = _read_state(root)
     if engine is None:
@@ -660,7 +727,7 @@ def _section_has_replay(root: Path, section_id: str) -> bool:
             continue
         if record.get("kind") == "rust" and record.get("status") == "checked" and record.get("correct") is True:
             return True
-    for record in fold_by_id(root / COMPUTATIONS):
+    for record in current_computations(root):
         if record.get("section") == section_id and record.get("status") == "replayed" and record.get("correct") is True:
             return True
     return False

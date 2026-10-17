@@ -26,7 +26,7 @@ from studium.authoring.audit import (
 )
 from studium.authoring.blueprint import current_sections, is_support_section
 from studium.authoring.completeness import chapter_completeness
-from studium.authoring.computation import list_computations
+from studium.authoring.computation import current_computations, list_computations
 from studium.authoring.derivations import derivations_for_section
 from studium.authoring.excerpts import excerpts_by_id
 from studium.authoring.figures import figure_reference_map, uncited_figures, unresolved_figure_references
@@ -1321,7 +1321,7 @@ def _resolution_texts(root: Path, section_id: str) -> list[str]:
         text = source.strip() or prompt.strip()
         if text:
             found.append(text)
-    for record in fold_by_id(root / COMPUTATIONS):
+    for record in current_computations(root):
         if record.get("section") != section_id:
             continue
         expression_value = record.get("expression")
@@ -1389,7 +1389,7 @@ def _worked_ok(root: Path, section_id: str) -> bool:
         return False
     if section_has_strong_verification(root, section_id):
         return True
-    for record in fold_by_id(root / COMPUTATIONS):
+    for record in current_computations(root):
         if record.get("section") != section_id or record.get("status") != "replayed" or record.get("correct") is not True:
             continue
         expression_value = record.get("expression")

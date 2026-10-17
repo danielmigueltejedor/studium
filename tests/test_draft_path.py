@@ -220,7 +220,7 @@ def test_missing_compiler_does_not_pretend_a_pdf_exists(tmp_path, monkeypatch, c
     )
     assert called["result"]["isError"] is True
     assert "studium_render" in tool_names()
-    assert "urlopen" not in Path("src/studium/authoring/render.py").read_text(encoding="utf-8")
+    assert "urlopen" not in (Path(__file__).resolve().parents[1] / "src/studium/authoring/render.py").read_text(encoding="utf-8")
 
 
 def test_topic_book_cites_public_sources_without_a_guide(tmp_path, monkeypatch):
