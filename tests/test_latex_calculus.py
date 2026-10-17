@@ -243,3 +243,68 @@ def test_thin_space_ends_an_unparenthesised_function_argument():
     x, r = sympy.symbols("x R")
     assert sympy.simplify(_parse_side(r"\sin x\,R", _Context()) - sympy.sin(x) * r) == 0
     assert sympy.simplify(_parse_side(r"\sin x R", _Context()) - sympy.sin(x * r)) == 0
+
+
+@pytest.mark.parametrize("quotient", ["dh/dT", "dh / dT", "dh/(dT)", "d^2h/dT^2", r"dh/\mathrm{d}T"])
+def test_inline_differential_quotients_never_become_algebraic_premises(quotient):
+    assert check_relation("c_p=" + quotient) is None
+    assert as_definition("c_p=" + quotient, {}) is None
+
+
+@pytest.mark.parametrize("argument", ["T", "T_r", r"\vartheta", "0", "-1"])
+def test_opaque_function_values_keep_their_arguments(argument):
+    assert _kind(f"h({argument})=h*({argument})") == "unknown"
+    scalar = as_definition(r"h=e+p/\rho", {})
+    assert scalar is not None
+    # A scalar definition does not establish a temperature-dependent function.
+    assert check_relation(f"h({argument})=h*({argument})", {scalar.name: scalar}) is None
+
+
+@pytest.mark.parametrize("variable", ["x", r"\vartheta"])
+def test_an_integrand_with_unknown_functional_dependence_is_not_a_product(variable):
+    statement = rf"\int_0^T c_p({variable})\,d{variable}=c_p*T^2/2"
+    assert check_relation(statement) is None
+    constant = as_definition(r"c_p=\gamma R/(\gamma-1)", {})
+    assert constant is not None
+    assert check_relation(statement, {constant.name: constant}) is None
+
+
+def test_variable_heat_capacity_paragraph_does_not_create_a_false_contradiction(tmp_path, monkeypatch):
+    monkeypatch.setattr("urllib.request.urlopen", _explode)
+    session, _root = _book(tmp_path)
+    excerpt = _excerpt(session, "Contexto sintético de una relación termodinámica.")
+    paragraph = _paragraph(
+        session,
+        r"La entalpía específica es \(h=e+p/\rho\). Para el modelo térmico "
+        r"\(e=e(T)\) y \(h=h(T)\). Se escriben \(c_v=de/dT\), \(c_p=dh/dT\) "
+        r"y \(c_p-c_v=R\). Sólo si los calores específicos son constantes, "
+        r"\(h(T)-h(T_r)=c_p(T-T_r)\), \(c_p=\gamma R/(\gamma-1)\) "
+        r"y \(\gamma=c_p/c_v\). Con capacidad calorífica variable se usa "
+        r"\[h(T)-h(T_r)=\int_{T_r}^{T}c_p(\vartheta)\,d\vartheta\].",
+        [excerpt],
+    )
+    report = dispatch("studium_equation_report", {}, session=session)
+    integral = next(item for item in report["equations"] if r"\int" in item["statement"])
+    assert integral["paragraph"] == paragraph["id"]
+    assert integral["status"] == "not_machine_checkable"
+    assert integral["human_review"] == "required"
+    assert integral["evidence"] == []
+    assert not any(item["status"] == "contradicted" for item in report["equations"])
+
+
+def test_explicit_function_definitions_still_allow_integral_checks():
+    definition = as_definition("c_p(x)=a+b*x", {})
+    assert definition is not None
+    good = check_relation(r"\int_0^T c_p(x)\,dx=a*T+b*T^2/2", {definition.name: definition})
+    bad = check_relation(r"\int_0^T c_p(x)\,dx=a*T+b*T^2/3", {definition.name: definition})
+    assert good is not None and good.kind == "identity"
+    assert bad is not None and bad.kind == "contradiction"
+
+
+def test_scalar_products_can_still_be_written_unambiguously():
+    definition = as_definition("a=b+c", {})
+    assert definition is not None
+    defs = {definition.name: definition}
+    assert _kind(r"a\cdot(x)=(b+c)*x", defs) == "identity"
+    assert _kind(r"a(x+1)=(b+c)*(x+1)", defs) == "identity"
+    assert _kind(r"\int_0^T c_p*x\,dx=c_p*T^2/2") == "identity"

@@ -75,6 +75,10 @@ _MATRIX_ENVS = frozenset({"bmatrix", "pmatrix", "matrix", "vmatrix", "Bmatrix", 
 _TOKEN = re.compile(
     r"(?P<num>\d+(?:\.\d+)?)|(?P<cmd>\\[A-Za-z]+)|(?P<esc>\\[^A-Za-z])|(?P<name>[A-Za-z])|(?P<op>[-+*/^_=<>(){}\[\]|&',!:;.])|(?P<space>\s+)"
 )
+# The fraction reader handles explicit derivative notation. A slash followed
+# by a differential must not fall through to ordinary left-associative
+# multiplication (which would turn dh/dT into h*T).
+_SLASH_DIFFERENTIAL = re.compile(r"/\s*(?:[{(]\s*)?d(?:\s*\^\s*(?:\{\s*\d+\s*\}|\d+))?\s*(?=[A-Za-z]|\\)")
 
 
 @dataclass(frozen=True)
@@ -125,6 +129,8 @@ def tokenize(text: str) -> list[Token]:
     cleaned = re.sub(r"\\[,;:]", "\u2009", cleaned)
     cleaned = re.sub(r"\\!|~|\\q?quad(?![A-Za-z])", " ", cleaned)
     cleaned = re.sub(r"\\mathrm\s*\{\s*d\s*\}", "d", cleaned)
+    if _SLASH_DIFFERENTIAL.search(cleaned):
+        raise Unsupported("a slash differential requires explicit derivative fraction notation")
     cleaned = re.sub(r"\^\s*\{?\s*((?:\\prime\s*)+)\}?", lambda match: "'" * match.group(1).count("\\prime"), cleaned)
     tokens: list[Token] = []
     spaced = False
@@ -388,24 +394,53 @@ class _Parser:
         defined = self.context.defs.get(key)
         if self.at_op("'"):
             return self.primed(key)
-        # A name applied to an argument: a defined function of one variable, a discovered function, or
-        # a function value such as u(0). A name defined without variables followed by '(' is a product.
+        # Explicit functions retain their variables. An atomic argument such
+        # as h(T_r) or c_p(theta) is a function value, never an implicit product.
         if self.at_op("(") and ((defined is not None and defined.variables) or (defined is None and key in self.context.functions)):
             return self.apply(key)
+        if self.atomic_function_argument():
+            if defined is not None:
+                raise Unsupported("a scalar definition does not establish a function of this argument")
+            self.take()
+            argument = self.parse_sum()
+            self.expect_op(")")
+            return sympy.Function(key)(argument)
         if defined is not None:
             self.context.used.add(defined.statement)
             return defined.expr
         if key in self.context.functions:
             return sympy.Function(key)(sympy.Symbol(self.context.functions[key]))
-        if self.at_op("("):
-            inside, after = self.peek(1), self.peek(2)
-            if inside is not None and inside.kind in {"name", "num"} and after is not None and after.kind == "op" and after.text == ")":
-                # u(0), w(L), M(x): a value of a function, not the product of u and 0. Opaque, never evaluated.
-                self.take()
-                argument = self.parse_sum()
-                self.expect_op(")")
-                return sympy.Function(key)(argument)
         return sympy.Symbol(key)
+
+    def atomic_function_argument(self) -> bool:
+        """Whether the next parentheses contain one name or signed number.
+
+        Subscripts and Greek names count as one argument. Compound groups
+        such as q*x*(L-x) still allow the usual implicit multiplication; a
+        previously defined function is handled by apply before this probe.
+        """
+
+        if not self.at_op("("):
+            return False
+        end = self.index + 1
+        while end < len(self.tokens) and self.tokens[end].text != ")":
+            if self.tokens[end].text == "(":
+                return False
+            end += 1
+        if end == len(self.tokens):
+            return False
+        argument = self.tokens[self.index + 1 : end]
+        if len(argument) == 1 and argument[0].kind == "num":
+            return True
+        if len(argument) == 2 and argument[0].text in {"+", "-"} and argument[1].kind == "num":
+            return True
+        if not argument:
+            return False
+        try:
+            _name, variables = _definition_target(argument)
+        except Unsupported:
+            return False
+        return not variables
 
     def primed(self, key: str) -> Any:
         """``w'``, ``w''(x)``: the derivative of a defined or discovered function of one variable."""
