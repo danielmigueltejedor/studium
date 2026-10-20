@@ -196,3 +196,168 @@ def test_invalid_reader_section_selection_fails_explicitly(tmp_path, monkeypatch
     config.write_text(config.read_text() + "\n[render]\n" + setting + "\n")
     with pytest.raises(ValueError, match="render\\."):
         _document(root)
+
+
+def test_unsupported_literal_fails_instead_of_silently_substituting_code():
+    with pytest.raises(ValueError, match='Unsupported literal character U\\+1F980'):
+        emit_prose('```python\nprint("🦀")\n```')
+    with pytest.raises(ValueError, match='Unsupported literal character'):
+        render_text_run('`🦀`')
+    escaped = '\n'.join(emit_prose('```python\nprint("\\U0001f980")\n```'))
+    assert '\\U0001f980' in escaped
+
+
+def test_programming_answers_and_long_code_banks_flow_without_physics(tmp_path, monkeypatch):
+    from test_professional_math import _setup
+
+    from studium.authoring.render import _document
+    from studium.storage.records import PARAGRAPHS, PROBLEMS, append_jsonl
+    _, root, _ = _setup(tmp_path, monkeypatch)
+    config = root/'project.toml'
+    config.write_text(config.read_text().replace('FLUID_MECHANICS','COMPUTER_SCIENCE'))
+    # Existing fixture may carry its domain in .studium state as well.
+    monkeypatch.setattr('studium.authoring.render._domain_profile', lambda _: 'COMPUTER_SCIENCE')
+    append_jsonl(root/PARAGRAPHS, {'id':'PAR-lesson','section':'hidrostatica','status':'draft','text':'Original lesson.','excerpts':['missing']})
+    append_jsonl(root/PROBLEMS, {'id':'PRB-code','section':'hidrostatica','role':'practice','kind':'programming',
+        'status':'unchecked','prompt':'Implement a function.\n```python\ndef solve():\n    pass\n```',
+        'solution':{'text':'Reason about the boundary.\n```python\ndef solve():\n    return 42\n```'}})
+    reviewed = _document(root, include_unsupported=True)
+    assert 'return 42' in reviewed and 'Reason about the boundary' in reviewed
+    assert 'Reference solution for review' in reviewed or 'Solución de referencia para revisión' in reviewed
+    assert 'return 42' not in _document(root)
+    start = reviewed.index('Implement a function')
+    assert reviewed.rfind('\\begin{tcolorbox}',0,start) <= reviewed.rfind('\\end{tcolorbox}',0,start)
+
+
+def test_programming_contract_persists_through_mcp_without_numeric_witnesses(tmp_path, monkeypatch):
+    from test_professional_math import _setup
+
+    from studium.authoring.problems import check_problem, problem_input_sha256, problem_result_current
+    from studium.mcp.server import dispatch
+    from studium.storage.records import PROBLEMS, fold_by_id
+    session, root, _ = _setup(tmp_path, monkeypatch)
+    result = dispatch('studium_problem_record', {'section':'hidrostatica','prompt':'Implement a boundary-aware search.',
+        'programming':{'kind':'implementation','language':'python','solution':'Return None when absent.',
+                       'tests':['empty input -> None','first position -> 0']}}, session=session)
+    assert result['status'] == 'recorded', result
+    record = fold_by_id(root/PROBLEMS)[-1]
+    assert record['kind'] == 'programming' and record['role'] == 'practice'
+    assert not record['correct'] and record['status'] == 'unchecked'
+    assert problem_result_current(root,record)
+    changed = {**record,'tests':['different contract']}
+    assert problem_input_sha256(root,changed) != record['input_sha256']
+    assert not problem_result_current(root,changed)
+    checked = check_problem(root,record['id'])
+    assert checked['status'] == 'unchecked' and checked['correct'] is False
+
+
+@pytest.mark.parametrize('contract', [
+    {'kind':'debugging','language':'python','solution':'fix'},
+    {'kind':'conceptual','language':'python','solution':'answer'},
+    {'kind':[],'language':'python','solution':'answer'},
+    {'kind':'implementation','language':'python','solution':'answer','tests':['']},
+    {'kind':'implementation','language':'python\n```','solution':'answer','tests':['case']},
+])
+def test_invalid_programming_contract_never_writes_partial_records(tmp_path, monkeypatch, contract):
+    from test_professional_math import _setup
+
+    from studium.authoring.problems import record_problem
+    from studium.storage.records import PROBLEMS, fold_by_id
+    _, root, _ = _setup(tmp_path, monkeypatch)
+    result = record_problem(root,section='hidrostatica',prompt='Explain this program.',programming=contract)
+    assert result['status'] == 'mcp.invalid_input'
+    assert fold_by_id(root/PROBLEMS) == []
+
+
+def test_unsupported_glyph_returns_diagnostic_and_preserves_previous_artifacts(tmp_path, monkeypatch):
+    from test_professional_math import _setup
+
+    from studium.authoring.render import render_draft
+    from studium.storage.records import PARAGRAPHS, append_jsonl
+    _, root, _ = _setup(tmp_path, monkeypatch)
+    output = root/'latex'
+    output.mkdir(exist_ok=True)
+    (output/'draft.pdf').write_bytes(b'previous artifact')
+    (output/'draft.tex').write_text('previous source')
+    append_jsonl(root/PARAGRAPHS, {'id':'PAR-unsupported','section':'hidrostatica','status':'draft',
+                                 'text':'```python\nprint("🦀")\n```','excerpts':['missing']})
+    result = render_draft(root,include_unsupported=True)
+    assert result['status'] == 'render.unsupported_literal_character'
+    assert 'U+1F980' in result['message']
+    assert (output/'draft.pdf').read_bytes() == b'previous artifact'
+    assert (output/'draft.tex').read_text() == 'previous source'
+
+
+@pytest.mark.parametrize('source', ['```python\nprint("hello")\n```','~~~c\nint main(void) { return 0; }\n~~~','Usa `value`\nExplica su resultado.'])
+def test_code_on_first_line_is_never_consumed_as_a_section_title(source):
+    from studium.authoring.render import _heading_from_paragraph
+    title, body = _heading_from_paragraph(source)
+    assert title is None and body == source
+
+
+def test_programming_contract_rejects_numeric_mix_and_accepts_reasoning_rubric(tmp_path, monkeypatch):
+    from test_professional_math import _setup
+
+    from studium.authoring.problems import record_problem
+    _, root, _ = _setup(tmp_path, monkeypatch)
+    contract = {'kind':'conceptual','language':'python','solution':'A name can refer to a mutable list.',
+                'rubric':['Distinguish rebinding a name from mutating a list.']}
+    rejected = record_problem(root,section='hidrostatica',prompt='Explain aliasing.',programming=contract,expected='3')
+    assert rejected['status'] == 'mcp.invalid_input'
+    accepted = record_problem(root,section='hidrostatica',prompt='Explain aliasing.',programming=contract)
+    assert accepted['status'] == 'recorded'
+
+
+def test_programming_contract_rejects_nonpractice_role_without_crashing(tmp_path, monkeypatch):
+    from test_professional_math import _setup
+
+    from studium.authoring.problems import record_problem
+    _, root, _ = _setup(tmp_path, monkeypatch)
+    contract = {'kind':'implementation','language':'python','solution':'Return an empty list.','tests':['empty input']}
+    for role in ['worked', []]:
+        result = record_problem(root,section='hidrostatica',prompt='Implement a filter.',programming=contract,role=role)
+        assert result['status'] == 'mcp.invalid_input'
+
+
+def test_solution_appendix_uses_same_current_titles_as_chapters(tmp_path, monkeypatch):
+    from test_professional_math import _setup
+
+    from studium.authoring.render import _document
+    from studium.storage.records import PARAGRAPHS, PROBLEMS, append_jsonl, fold_by_id
+    _, root, _ = _setup(tmp_path, monkeypatch)
+    academic_path = root/'blueprint/academic.jsonl'
+    academic = fold_by_id(academic_path)[0]
+    academic['parts'][0]['chapters'][0]['title'] = 'Current chapter name'
+    append_jsonl(academic_path,academic)
+    append_jsonl(root/PROBLEMS,{'id':'PRB-0001','section':'hidrostatica','role':'practice','kind':'numeric',
+                              'status':'unchecked','prompt':'Estimate the result.','expected':'42'})
+    append_jsonl(root/PARAGRAPHS,{'id':'PAR-0001','section':'hidrostatica','status':'draft','text':'An introductory paragraph.','excerpts':[]})
+    text = _document(root,include_unsupported=True)
+    assert r'\chapter{Current chapter name}' in text
+    assert r'\section{Current chapter name}' in text
+    assert r'\section{Presión hidrostática}' not in text
+
+
+def test_long_code_inside_a_callout_really_compiles_across_pages(tmp_path, monkeypatch):
+    import re
+
+    from test_professional_math import _setup
+
+    from studium.authoring.languages import book_language, messages
+    from studium.authoring.render import _box, _compile, _preamble, find_engine
+    engine = find_engine()
+    if engine is None:
+        pytest.skip('LaTeX compiler unavailable')
+    _, root, _ = _setup(tmp_path, monkeypatch)
+    language = book_language(root)
+    source = '\n'.join(f'# line {i:03d}: preserve source and indentation' for i in range(1,183))
+    body = emit_prose('```python\n'+source+'\n```')
+    tex = tmp_path/'long.tex'
+    tex.write_text('\n'.join([*_preamble('Long code',language,messages(language)),r'\begin{document}',
+                              *_box('Worked code',body,'worked'),r'\end{document}']))
+    ok, detail = _compile(engine,tex,tmp_path)
+    assert ok, detail
+    log = tex.with_suffix('.log').read_text(errors='replace')
+    assert 'Overfull' not in log and 'Missing character:' not in log
+    pages = re.search(r'\((\d+) pages?,\s*\d+ bytes\)', ' '.join(log.split()))
+    assert pages and int(pages[1]) >= 2

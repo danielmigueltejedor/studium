@@ -383,6 +383,8 @@ def render_draft(root: Path, *, include_unsupported: bool = False) -> dict[str, 
                 pdf_path.unlink()
             local = _local(state)
             project_state = state.get("state")
+    except UnsupportedLiteralCharacter as error:
+        return _error("render.unsupported_literal_character", str(error))
     except ProjectLocked:
         return _error("storage.locked", "project is locked")
     except OSError:
@@ -1284,19 +1286,23 @@ def _inline_code(code: str) -> str:
     return r"\texttt{" + escaped + "}"
 
 
+class UnsupportedLiteralCharacter(ValueError):
+    """The selected literal font cannot represent the source faithfully."""
+
+
 def _texttt(code: str) -> str:
     parts: list[str] = []
     for character in code:
         if character in _LATEX:
             parts.append(_LATEX[character])
         elif character in _ACCENTS:
-            parts.append("{" + _ACCENTS[character] + "}")
+            parts.append(_literal_actual_text(character, "{" + _ACCENTS[character] + "}"))
         elif character in _MATH:
-            parts.append(r"\ensuremath{" + _MATH[character] + "}")
+            parts.append(_literal_actual_text(character, r"\ensuremath{" + _MATH[character] + "}"))
         elif ord(character) < 32 and character != "\t":
             continue
         elif ord(character) > 255:
-            parts.append(f"{{U+{ord(character):04X}}}")
+            raise UnsupportedLiteralCharacter(f"Unsupported literal character U+{ord(character):04X}; use a language escape or a supported font")
         else:
             parts.append(character)
     return "".join(parts)
@@ -1359,14 +1365,20 @@ def _escape_delimiters(code: str) -> tuple[str, str]:
         index += 1
 
 
+def _literal_actual_text(character: str, visual: str) -> str:
+    """Preserve literal Unicode when a TeX math glyph uses multiple PDF characters."""
+    encoded = character.encode("utf-16-be").hex().upper()
+    return r"\BeginAccSupp{method=hex,ActualText=FEFF" + encoded + "}" + visual + r"\EndAccSupp{}"
+
+
 def _listing_token(character: str) -> str:
     accent = _ACCENTS.get(character)
     if accent is not None:
-        return "{" + accent + "}"
+        return _literal_actual_text(character, "{" + accent + "}")
     mapped = _MATH.get(character)
     if mapped is not None:
-        return r"\ensuremath{" + mapped + "}"
-    return f"{{U+{ord(character):04X}}}"
+        return _literal_actual_text(character, r"\ensuremath{" + mapped + "}")
+    raise UnsupportedLiteralCharacter(f"Unsupported literal character U+{ord(character):04X}; use a language escape or a supported font")
 
 
 def _formula_line(text: str) -> str:
@@ -1571,6 +1583,8 @@ def _preamble(footer: str, language: BookLanguage, copy: dict[str, str], *, tikz
         r"\usepackage[utf8]{inputenc}",
         r"\usepackage[T1]{fontenc}",
         r"\usepackage{lmodern}",
+        r"\usepackage{upquote}",
+        r"\usepackage{accsupp}",
     ]
     if language.loader == "polyglossia":
         lines.extend(
@@ -2095,6 +2109,9 @@ def _heading_from_paragraph(text: str) -> tuple[str | None, str]:
     if "\n" not in text:
         return None, text
     first, rest = text.split("\n", 1)
+    if any(region.start < len(first) for region in code_regions(text)):
+        # Fences and inline code are opaque source, never implicit headings.
+        return None, text
     title = first.strip()
     body = rest.strip()
     if not title or not body or len(title) > 80 or title[-1] in ".!?":
@@ -2155,7 +2172,11 @@ def _box(title: str, body: list[str], kind: str) -> list[str]:
         return []
     style = _BOX_STYLE.get(kind, "studiumdef")
     holds_listing = any(r"\begin{lstlisting}" in line or r"\begin{verbatim}" in line for line in body)
-    breaking = "" if holds_listing else ", breakable"
+    if holds_listing:
+        # Listings already draw their own frame. A surrounding indivisible
+        # box would overflow for source longer than a page.
+        return ["", r"\par\medskip\noindent\textbf{" + latex_escape(title) + r"}\par\nobreak", *body]
+    breaking = ", breakable"
     return [
         "",
         r"\begin{tcolorbox}[title={" + latex_escape(title) + "}, " + style + breaking + "]",
@@ -2177,7 +2198,7 @@ def _worked_problem_records(root: Path, section_id: str) -> list[dict[str, objec
     for record in fold_by_id(root / PROBLEMS):
         if record.get("section") != section_id:
             continue
-        if record.get("kind") == "rust" and profile != "COMPUTER_SCIENCE":
+        if record.get("kind") in {"rust", "programming"} and profile != "COMPUTER_SCIENCE":
             continue
         if record.get("role") == "practice":
             continue
@@ -2878,6 +2899,10 @@ def _exercise_box(root: Path, section_id: str, language: BookLanguage) -> list[s
                 block = figure.get("diagram")
                 if isinstance(block, dict) and block.get("stage") == "statement":
                     body.extend(_single_figure_lines(root, figure, messages(language)))
+    if any(record.get("kind") == "programming" for record in records):
+        # Code banks must flow across pages, without trapping listings in an
+        # indivisible box. Solutions remain in the selected appendix.
+        return ["", r"\section*{" + latex_escape(label) + "}", *body]
     return _box(label, body, "exercise")
 
 
@@ -3294,6 +3319,14 @@ def _solution_lines(root: Path, copy: dict[str, str], language: BookLanguage) ->
         elif isinstance(identifier, str):
             lines.extend(["", r"\noindent\textbf{" + latex_escape(f"{copy['worked']} [{identifier}]") + "}"])
         solution = record.get("solution")
+        if record.get("kind") == "programming":
+            # Behavioral evidence belongs to the external test report. It does
+            # not promote an authored solution to academic approval.
+            note = "Solución de referencia para revisión; las pruebas cubren los casos indicados, no todos los programas posibles." if language.babel == "spanish" else "Reference solution for review; tests cover only the stated cases."
+            lines.extend(["", *emit_prose(note)])
+            if isinstance(solution, dict) and isinstance(solution.get("text"), str):
+                lines.extend(emit_prose(solution["text"]))
+            continue
         if review_only:
             warning = "Solución propuesta; verificación pendiente." if language.babel == "spanish" else "Proposed solution; verification pending."
             lines.extend(["", r"\noindent\textbf{" + warning + "}", "", *emit_prose(prompt)])
@@ -3356,6 +3389,13 @@ def _solution_lines(root: Path, copy: dict[str, str], language: BookLanguage) ->
         except MathError:
             lines.extend(["", _formula_line(f"{expression} = {result}")])
     titles = {section["id"]: section["title"] for section in current_sections(root)}
+    academic = current_academic_blueprint(root)
+    if academic is not None:
+        for part in _iter_list(academic.get("parts")):
+            for chapter in _iter_list(part.get("chapters")):
+                identifier, title = _str_field(chapter, "id"), _str_field(chapter, "title")
+                if identifier and title:
+                    titles[identifier] = title
     lines: list[str] = []
     # Follow blueprint order even when records were authored out of order.
     for section in dict.fromkeys([*titles, *groups]):

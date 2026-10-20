@@ -14,12 +14,14 @@ import shutil
 import subprocess
 from fractions import Fraction
 from pathlib import Path
+from typing import cast
 
 from studium.authoring.academic_blueprint import academic_concept_ids
 from studium.authoring.blueprint import current_sections
 from studium.authoring.computation import ComputationError, evaluate, precision_verdict
 from studium.authoring.excerpts import excerpts_by_id
 from studium.authoring.mathematics import MathError, substitution_latex, symbol_names_of, validate_latex
+from studium.authoring.programming import ExerciseContract, ExerciseKind
 from studium.authoring.support import corroboration_for_excerpts, paragraph_citation_blockers
 from studium.policy.trust import contains_directive, directive_changes_policy
 from studium.storage.init_project import domain_profile as _domain_profile
@@ -99,6 +101,7 @@ def record_problem(
     solution: object = None,
     structure: object = None,
     actor: dict[str, object] | None = None,
+    programming: object = None,
 ) -> dict[str, object]:
     """Store one problem. Does not run it and does not change project state.
 
@@ -114,9 +117,20 @@ def record_problem(
     cleaned_prompt, prompt_error = _prompt(prompt)
     if prompt_error is not None:
         return prompt_error
-    rust, numeric, mode_error = _mode(source_text, invocation, expected, excerpts)
-    if mode_error is not None:
-        return mode_error
+    contract, contract_error = _programming_contract(programming, cleaned_prompt)
+    if contract_error is not None:
+        return contract_error
+    if contract is not None:
+        if any(value is not None for value in (source_text, invocation, expected, excerpts, solution, structure)):
+            return _error("mcp.invalid_input", "programming contracts cannot be mixed with Rust or numeric inputs")
+        if role is not None and role != "practice":
+            return _error("mcp.invalid_input", "programming contracts currently support practice problems")
+        role = "practice"
+        rust, numeric = None, None
+    else:
+        rust, numeric, mode_error = _mode(source_text, invocation, expected, excerpts)
+        if mode_error is not None:
+            return mode_error
     problem_role, role_error = _role(role)
     if role_error is not None:
         return role_error
@@ -197,7 +211,10 @@ def record_problem(
             if structure_value is not None:
                 record["structure"] = structure_value
                 record["structure_check"] = structure_check
-            if rust is not None:
+            if contract is not None:
+                record.update(contract)
+                record["kind"] = "programming"
+            elif rust is not None:
                 relative = f"problems/{identifier}/main.rs"
                 assert rust_source is not None and rust_invocation is not None
                 command, command_error = _command(root, identifier, rust_invocation, relative)
@@ -227,6 +244,35 @@ def record_problem(
         return _error("storage.locked", "project is locked")
 
 
+def _programming_contract(value: object, prompt: str | None) -> tuple[dict[str, object] | None, dict[str, object] | None]:
+    """Persist non-physical practice contracts without running client code."""
+    if value is None:
+        return None, None
+    if not isinstance(value, dict) or set(value) - {"kind", "language", "solution", "tests", "rubric"}:
+        return None, _error("mcp.invalid_input", "invalid programming contract fields")
+    kind = value.get("kind")
+    language = value.get("language")
+    solution = value.get("solution")
+    tests, rubric = value.get("tests", []), value.get("rubric", [])
+    if not isinstance(kind, str) or kind not in {"conceptual", "implementation", "debugging", "architecture", "project"}:
+        return None, _error("mcp.invalid_input", "invalid programming exercise kind")
+    if not isinstance(language, str) or not re.fullmatch(r"[A-Za-z0-9_+#.-]{1,32}", language):
+        return None, _error("mcp.invalid_input", "programming language is required")
+    if not isinstance(solution, str) or not solution.strip() or len(solution) > _MAX_SOLUTION_TEXT:
+        return None, _error("mcp.invalid_input", "programming solution text is required")
+    for field in (tests, rubric):
+        if not isinstance(field, list) or len(field) > 40 or any(not isinstance(item, str) or not item.strip() or len(item) > 1000 for item in field):
+            return None, _error("mcp.invalid_input", "tests and rubric must contain bounded nonempty text items")
+    checked = ExerciseContract(cast(ExerciseKind, kind), prompt or "", solution, tuple(tests), tuple(rubric))
+    gaps = checked.gaps()
+    if gaps:
+        return None, _error("mcp.invalid_input", "missing programming contract fields: " + ", ".join(gaps))
+    if any(directive_changes_policy(item) for item in [solution, *tests, *rubric]):
+        return None, _error("policy.overridden", "programming contract changed policy")
+    return {"exercise_kind": kind, "language": language, "solution": {"text": solution},
+            "tests": tests, "rubric": rubric}, None
+
+
 def list_problems(root: Path) -> dict[str, object]:
     """List stored problems. Text is untrusted data. Nothing here is verified."""
 
@@ -245,6 +291,9 @@ def check_problem(root: Path, problem_id: object) -> dict[str, object]:
     current = _find(root, identifier)
     if current is None:
         return _error("problem.not_found", "no stored problem with that id")
+    if current.get("kind") == "programming":
+        return {"status": "unchecked", "id": identifier, "correct": False,
+                "message": "A stored programming contract is not an execution result. Use an explicitly trusted verifier and retain its source hashes, test cases and tool versions. Finite tests are not academic approval."}
     if current.get("kind") == "numeric":
         return _check_numeric(root, current)
     if current.get("kind") != "rust":
@@ -833,6 +882,8 @@ def problem_input_sha256(root: Path, record: dict[str, object]) -> str:
         str(record.get("expected") or ""),
         str(record.get("source_text") or ""),
     ]
+    if record.get("kind") == "programming":
+        parts.append(json.dumps({key: record.get(key) for key in ("exercise_kind", "language", "tests", "rubric")}, sort_keys=True, ensure_ascii=False))
     solution = record.get("solution")
     if solution:
         parts.append(json.dumps(solution, sort_keys=True, ensure_ascii=False))
@@ -877,6 +928,9 @@ def _public(record: dict[str, object], root: Path | None = None) -> dict[str, ob
         "classification": "PENDING",
         "correct": record.get("correct") is True,
     }
+    if record.get("kind") == "programming":
+        for key in ("exercise_kind", "language", "tests", "rubric"):
+            visible[key] = record.get(key)
     if record.get("role") in PROBLEM_ROLES:
         visible["role"] = record["role"]
     if record.get("difficulty") in EXERCISE_DIFFICULTIES:
