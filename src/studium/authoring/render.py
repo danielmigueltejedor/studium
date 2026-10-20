@@ -1697,8 +1697,23 @@ def _document(root: Path, *, include_unsupported: bool = False) -> str:
         _REVIEW_RENDERING.reset(token)
 
 
+def _render_sections(root: Path, key: str, defaults: tuple[str, ...]) -> tuple[str, ...]:
+    """Explicit reader editions may select sections without changing authoring data."""
+    config = load_project_toml(root).get("render", {})
+    if not isinstance(config, dict):
+        raise ValueError("render must be a TOML table")
+    sections = config.get(key, list(defaults))
+    if not isinstance(sections, list) or any(not isinstance(s, str) or s not in defaults for s in sections):
+        raise ValueError(f"render.{key} must be a list drawn from {defaults}")
+    if len(set(sections)) != len(sections):
+        raise ValueError(f"render.{key} cannot contain duplicate sections")
+    return tuple(sections)
+
+
 def _document_body(root: Path, *, include_unsupported: bool = False) -> str:
     kind = book_kind(root)
+    frontmatter = _render_sections(root, "frontmatter", ("preface", "reader_guide"))
+    appendices = _render_sections(root, "appendices", ("notation", "formulas", "solutions", "diagram_report", "audit", "study"))
     language = _require_language(root)
     copy = messages(language)
     sections = current_sections(root)
@@ -1726,16 +1741,36 @@ def _document_body(root: Path, *, include_unsupported: bool = False) -> str:
         r"\else",
         *_title_page(root, book, copy),
         r"\fi",
-        r"\chapter{" + latex_escape(copy["preface"]) + "}",
-        r"\noindent " + latex_escape(copy["note"]),
-        *([r"\par\medskip\noindent\textbf{EVIDENCE REVIEW REQUIRED. This review copy includes unsupported drafts. Compilation does not establish source integrity or technical correctness.}"] if include_unsupported else []),
-        r"\chapter{" + latex_escape(copy["how"]) + "}",
-        r"\noindent " + latex_escape(copy["how_a"]),
-        "",
-        r"\noindent " + latex_escape(copy["how_b"]),
-        r"\tableofcontents",
-        r"\mainmatter",
     ]
+    if "preface" in frontmatter:
+        lines.extend([
+            r"\chapter{" + latex_escape(copy["preface"]) + "}",
+            r"\noindent " + latex_escape(copy["note"]),
+        ])
+    if include_unsupported:
+        # Keep the warning even when a reader edition omits the generic preface.
+        # An unnumbered paragraph after the TOC avoids an otherwise empty page.
+        warning_text = (
+            "REVISIÓN DE FUENTES PENDIENTE. Esta copia incluye borradores sin respaldo suficiente. "
+            "Compilar no demuestra la integridad de las fuentes ni la corrección técnica."
+            if language.babel == "spanish" else
+            "EVIDENCE REVIEW REQUIRED. This review copy includes unsupported drafts. "
+            "Compilation does not establish source integrity or technical correctness."
+        )
+        warning = r"\par\medskip\noindent\textbf{" + latex_escape(warning_text) + "}"
+        if "preface" in frontmatter:
+            lines.append(warning)
+    if "reader_guide" in frontmatter:
+        lines.extend([
+            r"\chapter{" + latex_escape(copy["how"]) + "}",
+            r"\noindent " + latex_escape(copy["how_a"]),
+            "",
+            r"\noindent " + latex_escape(copy["how_b"]),
+        ])
+    lines.append(r"\tableofcontents")
+    if include_unsupported and "preface" not in frontmatter:
+        lines.append(warning)
+    lines.append(r"\mainmatter")
     unwritten: list[str] = []
     academic = current_academic_blueprint(root)
     if academic is not None:
@@ -1757,27 +1792,23 @@ def _document_body(root: Path, *, include_unsupported: bool = False) -> str:
                 continue
             lines.extend(["", r"\chapter{" + latex_escape(title) + "}", _label("chap", section["id"])])
             lines.extend(_chapter_lines(root, section["id"], section_paragraphs, copy, language))
-    lines.extend(
-        [
-            r"\appendix",
-            r"\chapter{" + latex_escape(copy["notation"]) + "}",
-        ]
-    )
-    lines.extend(_notation_lines(root, copy, language))
-    lines.extend([r"\chapter{" + latex_escape(copy["formulas"]) + "}"])
-    lines.extend(_formula_sheet_lines(root, copy))
-    lines.extend([r"\chapter{" + latex_escape(copy["solutions"]) + "}"])
-    lines.extend(_solution_lines(root, copy, language))
-    lines.extend(_diagram_report_lines(root, language))
-    lines.extend([r"\chapter{" + latex_escape(copy["audit"]) + "}"])
-    lines.extend(_audit_lines(root, paragraphs, claims, titles, excerpts, sources, copy, kind, counts, language))
-    lines.extend(
-        [
-            r"\chapter{" + latex_escape(copy["study"]) + "}",
-        ]
-    )
-    written_ids = set(by_section)
-    lines.extend(_study_plan_lines(root, unwritten, written_ids, copy, language))
+    if appendices:
+        lines.append(r"\appendix")
+    for appendix in appendices:
+        if appendix == "diagram_report":
+            lines.extend(_diagram_report_lines(root, language))
+            continue
+        lines.append(r"\chapter{" + latex_escape(copy[appendix]) + "}")
+        if appendix == "notation":
+            lines.extend(_notation_lines(root, copy, language))
+        elif appendix == "formulas":
+            lines.extend(_formula_sheet_lines(root, copy))
+        elif appendix == "solutions":
+            lines.extend(_solution_lines(root, copy, language))
+        elif appendix == "audit":
+            lines.extend(_audit_lines(root, paragraphs, claims, titles, excerpts, sources, copy, kind, counts, language))
+        elif appendix == "study":
+            lines.extend(_study_plan_lines(root, unwritten, set(by_section), copy, language))
     lines.extend(
         [
             r"\backmatter",
