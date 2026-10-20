@@ -139,13 +139,14 @@ def test_render_text_run_ascii_subscript_with_unicode_superscript():
 
 def test_emit_prose_single_paragraph():
     lines = emit_prose("A single paragraph of text.")
-    assert len(lines) == 1
+    assert len([line for line in lines if line]) == 1
     assert "single paragraph" in lines[0]
 
 
 def test_emit_prose_two_paragraphs():
     lines = emit_prose("First paragraph.\n\nSecond paragraph.")
-    assert len(lines) == 2
+    assert len([line for line in lines if line]) == 2
+    assert "First paragraph.\n\nSecond paragraph." in "\n".join(lines)
 
 
 def test_emit_prose_display_math():

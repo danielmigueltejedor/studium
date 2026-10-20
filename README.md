@@ -586,3 +586,9 @@ revision fingerprints and reject generated replacements of human corrections.
 These are scoped checks of explicit annotations; prose interpretation, physical
 applicability and academic approval remain for expert review. See
 [the schema, examples and limitations](docs/scientific-contracts.md).
+
+Programming-book literal regions, bounded language adapters, exercise contracts
+and explicit evidence-review copies are documented in
+[`docs/programming-books.md`](docs/programming-books.md). The additive Python
+APIs do not replace the existing mathematical contracts or introduce automatic
+academic approval.

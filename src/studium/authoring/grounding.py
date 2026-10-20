@@ -35,6 +35,7 @@ from typing import Any, cast
 from studium.authoring.computation import current_computations
 from studium.authoring.excerpts import excerpts_by_id
 from studium.authoring.latex_calculus import Definition, as_definition, check_with_premises
+from studium.authoring.literals import mask_code
 from studium.storage.records import DERIVATIONS, fold_by_id
 
 MATH_KINDS = frozenset({"source", "derivation", "example"})
@@ -886,6 +887,7 @@ def _math_statements(text: str) -> tuple[tuple[str, str], ...]:
     No fragment such as ``= -p`` is ever returned.
     """
 
+    text = mask_code(text)
     found: list[tuple[str, str]] = []
     outside: list[str] = []
     last = 0

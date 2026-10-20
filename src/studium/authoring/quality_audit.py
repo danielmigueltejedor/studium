@@ -18,6 +18,7 @@ from studium.authoring.figures import unresolved_figure_references
 from studium.authoring.grounding import GroundingContext, equation_evidence
 from studium.authoring.problem_review import review_stored_problem
 from studium.authoring.problems import problem_result_current
+from studium.authoring.programming import listing_findings
 from studium.authoring.scientific_contracts import scientific_contract_report
 from studium.authoring.support import paragraph_citation_blockers
 from studium.storage.records import FIGURES, PARAGRAPHS, PROBLEMS, fold_by_id
@@ -120,6 +121,9 @@ def _audit_paragraphs(root: Path, add: AddFinding) -> None:
     audited = audited_paragraph_ids(root)
     context = GroundingContext(root)
     for record in fold_by_id(root / PARAGRAPHS):
+        for finding in listing_findings(str(record.get("text", ""))):
+            add(record, str(finding["type"]), str(finding["severity"]), finding, "code_region_parser",
+                "Review the declared language, fence boundaries and PDF character fidelity; source code must stay opaque to mathematics.")
         refs = record.get("excerpts")
         refs = [ref for ref in refs if isinstance(ref, str)] if isinstance(refs, list) else []
         absent = [ref for ref in refs if ref not in excerpts]
