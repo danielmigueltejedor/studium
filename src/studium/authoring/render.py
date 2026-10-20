@@ -1358,7 +1358,13 @@ def _require_language(root: Path) -> BookLanguage:
     return language
 
 
-def _study_plan_lines(root: Path, unwritten: list[str], written_ids: set[str], copy: dict[str, str]) -> list[str]:
+def _study_plan_lines(
+    root: Path,
+    unwritten: list[str],
+    written_ids: set[str],
+    copy: dict[str, str],
+    language: BookLanguage | None = None,
+) -> list[str]:
     """Study plan appendix: academic blueprint structure + progress when available."""
     blueprint = current_academic_blueprint(root)
     if blueprint is None:
@@ -1414,7 +1420,11 @@ def _study_plan_lines(root: Path, unwritten: list[str], written_ids: set[str], c
                     if isinstance(concepts, list):
                         concept_count += len(concepts)
             if concept_count:
-                lines.append(r"\noindent " + latex_escape(f"{concept_count} concepts planned."))
+                if language is not None and language.babel == "spanish":
+                    phrase = "1 concepto planificado." if concept_count == 1 else f"{concept_count} conceptos planificados."
+                else:
+                    phrase = "1 concept planned." if concept_count == 1 else f"{concept_count} concepts planned."
+                lines.append(r"\noindent " + latex_escape(phrase))
 
     if unwritten:
         lines.extend(["", r"\medskip"])
@@ -1704,7 +1714,7 @@ def _document(root: Path) -> str:
         ]
     )
     written_ids = set(by_section)
-    lines.extend(_study_plan_lines(root, unwritten, written_ids, copy))
+    lines.extend(_study_plan_lines(root, unwritten, written_ids, copy, language))
     lines.extend(
         [
             r"\backmatter",
@@ -2477,6 +2487,19 @@ def _variables_lines(variables: dict[str, object], language: BookLanguage) -> li
     return lines
 
 
+_SCI_NOTATION = re.compile(r"^([+-]?\d+(?:\.\d*)?)[eE]([+-]?\d+)$")
+
+
+def _number_tex(value: str) -> str:
+    stripped = value.strip()
+    match = _SCI_NOTATION.fullmatch(stripped)
+    if match:
+        mantissa, exp = match.groups()
+        exp_int = int(exp)
+        return f"{mantissa}\\times 10^{{{exp_int}}}"
+    return render_text_run(stripped)
+
+
 def _given_lines(given: list[object], language: BookLanguage) -> list[str]:
     if not given:
         return []
@@ -2487,7 +2510,7 @@ def _given_lines(given: list[object], language: BookLanguage) -> list[str]:
         symbol = _symbol_tex(str(raw.get("symbol") or ""))
         value = str(raw.get("value") or "")
         unit = str(raw.get("unit") or "")
-        item = "$" + symbol + r" = " + latex_escape(value)
+        item = "$" + symbol + r" = " + (_number_tex(value) if _SCI_NOTATION.fullmatch(value.strip()) else latex_escape(value))
         if unit and unit.strip() and unit.strip().lower() not in {"dimensionless", "adimensional", "1"}:
             item += r"\," + _unit_tex(unit)
         item += "$"
@@ -2567,7 +2590,7 @@ def _step_check_lines(step_checks: list[object], language: BookLanguage) -> list
             phrase = _extra_label(language, "not_reproduced")
         item = latex_escape(_extra_label(language, "step_word")) + " " + latex_escape(number)
         if value:
-            item += r": $" + render_text_run(value) + "$"
+            item += r": $" + _number_tex(value) + "$"
         item += " — " + latex_escape(phrase)
         lines.append(r"\item " + item)
     lines.append(r"\end{itemize}")
@@ -3044,11 +3067,13 @@ def _section_has_replay(root: Path, section_id: str) -> bool:
     return False
 
 
-def _format_units(raw: str) -> str:
+def _format_units(raw: str, language: BookLanguage | None = None) -> str:
     """Wrap a plain-text unit string in math-mode ``\\mathrm``."""
     text = raw.strip()
     if not text:
         return ""
+    if text.lower() in {"dimensionless", "adimensional", "1"}:
+        return "adimensional" if (language is not None and language.babel == "spanish") else "dimensionless"
     if "$" in text or r"\(" in text or r"\mathrm" in text:
         return text
     return "$" + _unit_tex(text) + "$"
@@ -3085,7 +3110,7 @@ def _notation_lines(root: Path, copy: dict[str, str], language: BookLanguage) ->
     ]
     for symbol, entry in sorted(registry.items()):
         meaning = latex_escape(str(entry.get("meaning") or ""))
-        units = _format_units(str(entry.get("units") or ""))
+        units = _format_units(str(entry.get("units") or ""), language)
         sym_tex = _symbol_tex(symbol)
         sym_col = f"${sym_tex}$" if sym_tex else render_text_run(symbol)
         lines.append(rf"{sym_col} & {meaning} & {units} \\")
@@ -3188,7 +3213,12 @@ def _solution_lines(root: Path, copy: dict[str, str], language: BookLanguage) ->
             computation_sections.add(section)
         expression = _str_field(record, "expression")
         result = _computation_result(record)
-        lines.extend(["", _formula_line(f"{expression} = {result}")])
+        try:
+            expr_tex = numeric_latex(expression)
+            res_tex = _number_tex(result) if _SCI_NOTATION.fullmatch(result.strip()) else numeric_latex(result)
+            lines.extend(["", rf"\({expr_tex} = {res_tex}\)"])
+        except MathError:
+            lines.extend(["", _formula_line(f"{expression} = {result}")])
     titles = {section["id"]: section["title"] for section in current_sections(root)}
     lines: list[str] = []
     # Follow blueprint order even when records were authored out of order.
@@ -3297,7 +3327,7 @@ def _audit_lines(
         label = _audit_label(root, paragraph)
         visible = _visible_label(copy, label)
         equations = _equation_status_note(root, paragraph, grounding, language)
-        lines.append(r"\noindent " + latex_escape(f"¶{idx}: {visible}.{equations}"))
+        lines.extend(["", r"\noindent " + latex_escape(f"¶{idx}: {visible}.{equations}")])
 
     # --- evidence grouped by source ---
     source_paragraphs: dict[str, list[int]] = {}
@@ -3325,7 +3355,7 @@ def _audit_lines(
                     status_parts.append(latex_escape(copy["not_guide"]))
             refs = ", ".join(f"\\P{n}" for n in sorted(set(par_nums)))
             status_parts.append(refs)
-            lines.append(r"\noindent " + " --- ".join(status_parts) + ".")
+            lines.extend(["", r"\noindent " + " --- ".join(status_parts) + "."])
 
     # --- leftover claims ---
     for claim in claims:

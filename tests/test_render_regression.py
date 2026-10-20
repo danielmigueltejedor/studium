@@ -1185,7 +1185,8 @@ class TestStudyPlan:
         assert "learn pressure" in self.tex or "itemize" in self.tex
 
     def test_study_plan_shows_concept_count(self):
-        assert "concepts planned" in self.tex or "1 concepts planned" in self.tex
+        assert "1 concepto planificado." in self.tex or "conceptos planificados." in self.tex
+        assert "concepts planned" not in self.tex
 
     def test_amssymb_loaded(self):
         assert r"\usepackage{amssymb}" in self.tex
@@ -1689,3 +1690,31 @@ def test_native_draft_with_fractional_units_and_equation_leadins_compiles(tmp_pa
         compiled = subprocess.run([engine, "-interaction=nonstopmode", "-halt-on-error", "-no-shell-escape", "draft.tex"], cwd=root / "latex", capture_output=True, text=True, errors="replace")
         assert compiled.returncode == 0, compiled.stdout[-4000:]
     assert (root / "latex/draft.pdf").read_bytes().startswith(b"%PDF-")
+
+
+def test_replayed_computation_in_solutions_uses_typeset_math_not_raw_python(tmp_path, monkeypatch):
+    session, root, _ids = _chapter_problem_setup(tmp_path, monkeypatch)
+    from studium.authoring.computation import evaluate
+    expr = "101325*(1 - 0.0065*11000/288.15)**5.25588"
+    expected = f"{float(evaluate(expr)):.12g}"
+    check = dispatch(
+        "studium_computation_check",
+        {"expression": expr, "result": expected, "section": "presion"},
+        session=session,
+    )
+    assert check["status"] == "replayed", check
+    from studium.authoring.languages import book_language, messages
+    from studium.authoring.render import _solution_lines
+    lang = book_language(root)
+    assert lang is not None
+    appendix = "\n".join(_solution_lines(root, messages(lang), lang))
+    assert "**" not in appendix
+    assert r"\cdot" in appendix
+
+
+def test_audit_lines_separate_paragraphs_with_blank_lines(tmp_path, monkeypatch):
+    _session, root = _full_setup(tmp_path, monkeypatch)
+    render_draft(root)
+    tex = (root / "latex" / "draft.tex").read_text(encoding="utf-8")
+    assert "\n\n\\noindent ¶1:" in tex
+    assert "\n\n\\noindent ¶2:" in tex
