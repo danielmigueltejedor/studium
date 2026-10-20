@@ -308,3 +308,19 @@ def test_scalar_products_can_still_be_written_unambiguously():
     assert _kind(r"a\cdot(x)=(b+c)*x", defs) == "identity"
     assert _kind(r"a(x+1)=(b+c)*(x+1)", defs) == "identity"
     assert _kind(r"\int_0^T c_p*x\,dx=c_p*T^2/2") == "identity"
+
+
+def test_matrix_times_symbolic_rotation_or_vector_is_not_false_contradiction():
+    # Regression for MATH-001: a 3x1 vector on the left and a 3x3 matrix
+    # multiplied by an undeclared rotation matrix / bold vector on the right
+    # must not be flagged as a shape contradiction.
+    eq_vec = r"\begin{bmatrix}\dot x_N\\\dot x_E\\\dot h\end{bmatrix}=\begin{bmatrix}1&0&0\\0&1&0\\0&0&-1\end{bmatrix}C_{nb}\boldsymbol{v}_g^b"
+    assert check_relation(eq_vec, {}) is None
+
+    eq_sym = r"\begin{bmatrix}\dot x_N\\\dot x_E\\\dot h\end{bmatrix}=\begin{bmatrix}1&0&0\\0&1&0\\0&0&-1\end{bmatrix}C_{nb}v_g"
+    assert check_relation(eq_sym, {}) is None
+
+    # Explicit mismatched concrete matrices without symbolic factors still report contradiction:
+    eq_bad = r"\begin{bmatrix}1\\2\\3\end{bmatrix}=\begin{bmatrix}1&0&0\\0&1&0\\0&0&-1\end{bmatrix}"
+    outcome = check_relation(eq_bad, {})
+    assert outcome is not None and outcome.kind == "contradiction"

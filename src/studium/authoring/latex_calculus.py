@@ -118,6 +118,7 @@ class _Context:
     ops: int = 0
     decimals: bool = False
     calculus: bool = False
+    matrix_symbol_product: bool = False
 
 
 def tokenize(text: str) -> list[Token]:
@@ -266,6 +267,10 @@ class _Parser:
 
     def multiply(self, left: Any, right: Any) -> Any:
         self.count()
+        if isinstance(left, sympy.MatrixBase) != isinstance(right, sympy.MatrixBase):
+            other = right if isinstance(left, sympy.MatrixBase) else left
+            if getattr(other, "free_symbols", set()):
+                self.context.matrix_symbol_product = True
         return left * right
 
     def parse_unary(self) -> Any:
@@ -389,9 +394,9 @@ class _Parser:
 
     def symbol_or_function(self, name: str, *, vector: bool = False) -> Any:
         key = name + ("_vec" if vector else "")
-        if vector:
-            self.context.vectors.add(key)
         defined = self.context.defs.get(key)
+        if vector and (defined is None or not isinstance(defined.expr, sympy.MatrixBase)):
+            self.context.vectors.add(key)
         if self.at_op("'"):
             return self.primed(key)
         # Explicit functions retain their variables. An atomic argument such
@@ -932,7 +937,7 @@ def _prepare(statement: str, defs: dict[str, Definition]) -> tuple[Any, Any, _Co
         left = _parse_side(left_text, context)
         right = _parse_side(right_text, context)
         if not context.discovered:
-            _check_vectors([left, right] if not isinstance(left, sympy.MatrixBase) else [], context.vectors)
+            _check_vectors([left, right], context.vectors)
             return left, right, context
         functions = dict(context.functions)
     raise Unsupported("the functions of this relation could not be settled")
@@ -976,6 +981,8 @@ def check_relation(statement: str, defs: dict[str, Definition] | None = None) ->
             return Outcome("unknown", premises, "a matrix against a scalar")
         if isinstance(left, sympy.MatrixBase):
             if left.shape != right.shape:
+                if context.matrix_symbol_product:
+                    return None
                 return Outcome("contradiction", premises, "the shapes differ")
             difference = left - right
         else:
