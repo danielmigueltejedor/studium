@@ -115,7 +115,7 @@ def test_editorial_hook_and_unsupported_review_copy_are_explicit(tmp_path, monke
     assert 'Uncorroborated manuscript' not in _document(root)
     assert _first_unwritten_title(root) is not None
     reviewed = _document(root, include_unsupported=True)
-    assert 'Uncorroborated manuscript' in reviewed and 'EVIDENCE REVIEW REQUIRED' in reviewed
+    assert 'Uncorroborated manuscript' in reviewed and 'REVISIÓN DE FUENTES PENDIENTE' in reviewed
     assert _first_unwritten_title(root, include_unsupported=True) is None
     (root / 'editorial-config.tex').write_text(r'\def\studiumcustomtitle{Editorial title}')
     assert r'\input{../editorial-config.tex}' in _document(root)
@@ -165,3 +165,34 @@ def test_review_copy_retains_stored_answers_without_promoting_them(tmp_path, mon
     assert 'Respuesta propuesta, sin comprobar' in review
     assert 'Solución propuesta; verificación pendiente.' in review
     assert 'Respuesta propuesta, sin comprobar' not in _document(root)
+
+
+def test_reader_section_selection_preserves_defaults_and_review_warning(tmp_path, monkeypatch):
+    from test_professional_math import _setup
+
+    from studium.authoring.render import _document
+    _, root, _ = _setup(tmp_path, monkeypatch)
+    original = _document(root)
+    assert r"\chapter{Hoja de fórmulas}" in original
+    config = root / "project.toml"
+    config.write_text(config.read_text() + '\n[render]\nfrontmatter = []\nappendices = ["solutions"]\n')
+    before = {p: p.read_bytes() for p in root.rglob("*.jsonl")}
+    text = _document(root, include_unsupported=True)
+    assert r"\chapter{Soluciones}" in text
+    assert r"\begin{thebibliography}" in text
+    for title in ("Hoja de fórmulas", "Notación", "Auditoría de fuentes", "Plan de estudio", "Prefacio", "Cómo usar este libro"):
+        assert r"\chapter{" + title + "}" not in text
+    assert "REVISIÓN DE FUENTES PENDIENTE" in text
+    assert {p: p.read_bytes() for p in root.rglob("*.jsonl")} == before
+
+
+@pytest.mark.parametrize("setting", ['appendices = ["solutions", "solutions"]', 'appendices = ["typo"]', 'frontmatter = "preface"'])
+def test_invalid_reader_section_selection_fails_explicitly(tmp_path, monkeypatch, setting):
+    from test_professional_math import _setup
+
+    from studium.authoring.render import _document
+    _, root, _ = _setup(tmp_path, monkeypatch)
+    config = root / "project.toml"
+    config.write_text(config.read_text() + "\n[render]\n" + setting + "\n")
+    with pytest.raises(ValueError, match="render\\."):
+        _document(root)

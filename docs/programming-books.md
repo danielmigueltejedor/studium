@@ -69,7 +69,7 @@ like other trusted LaTeX source, not downloaded source material.
 
 `render_draft(root, include_unsupported=True)` explicitly creates a review copy
 that includes stored draft paragraphs whose evidence is blocked. It also retains original TikZ figures with visible pending-evidence captions. It prints an
-English warning and reports `includes_unsupported_drafts=true`; it never repairs
+Spanish warning for Spanish books (English otherwise) and reports `includes_unsupported_drafts=true`; it never repairs
 citations, bypasses audits or changes persisted approval. The default remains
 `False`. This opt-in is useful when removing fabricated evidence without losing
 the manuscript being reviewed. It is intentionally not a release option.
@@ -82,3 +82,21 @@ Stored verification fields are not promoted; stale check summaries are omitted
 from the proposed solution. Worked developments already printed in the chapter
 are not duplicated in full in the solutions appendix. Default rendering still
 filters unchecked solutions.
+
+
+Reader editions may explicitly choose generated sections in `project.toml`:
+
+```toml
+[render]
+frontmatter = []
+appendices = ["solutions"]
+```
+
+The default frontmatter is `["preface", "reader_guide"]`; the default appendices
+are `["notation", "formulas", "solutions", "diagram_report", "audit", "study"]`.
+Unknown or repeated names fail explicitly. Bibliography, chapters and exercises
+remain. These settings change presentation only: journals and evidence are not
+deleted, review metadata and the unsupported-draft warning remain. A reader
+edition can thus omit an irrelevant formula sheet and internal audit/work plans
+while keeping them available to editorial tools. Unconfigured STEM books retain
+their existing sections.
