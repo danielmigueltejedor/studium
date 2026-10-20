@@ -660,7 +660,9 @@ def _tikz_document(source: str) -> str:
     return "\n".join(
         [
             r"\documentclass{article}",
+            r"\usepackage{amsmath,amssymb}",
             r"\usepackage{tikz}",
+            r"\usetikzlibrary{arrows.meta,positioning,calc,shapes.geometric}",
             r"\pagestyle{empty}",
             r"\begin{document}",
             r"\begin{tikzpicture}",
@@ -805,7 +807,14 @@ def _unwrap_tikz(value: str) -> str | None:
     begin = r"\begin{tikzpicture}"
     end = r"\end{tikzpicture}"
     if value.startswith(begin) and value.endswith(end) and len(value) > len(begin) + len(end):
-        return value[len(begin):-len(end)].strip()
+        inner = value[len(begin):-len(end)].strip()
+        if inner.startswith("["):
+            close = inner.find("]")
+            if close > 0:
+                opts = inner[1:close].strip()
+                rest = inner[close + 1 :].strip()
+                return f"\\tikzset{{{opts}}}\n{rest}" if opts else rest
+        return inner
     return None
 
 

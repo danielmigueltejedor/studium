@@ -42,6 +42,14 @@ _QUANTITY = re.compile(
     re.IGNORECASE,
 )
 
+_CODE_SPAN = re.compile(r"```[\s\S]*?```|~~~[\s\S]*?~~~|`[^`\n]+`")
+
+
+def _strip_code_spans(text: str) -> str:
+    """Remove Markdown fenced code blocks and inline code spans before scanning prose."""
+
+    return _CODE_SPAN.sub(" ", text)
+
 
 def _finding_strings(finding: dict[str, object], key: str) -> list[str]:
     value = finding.get(key)
@@ -309,8 +317,9 @@ def _accepted_passages(root: Path) -> list[tuple[str, str]]:
 
 
 def _quantities(text: str) -> list[tuple[str, str]]:
+    prose = _strip_code_spans(text)
     found: list[tuple[str, str]] = []
-    for match in _QUANTITY.finditer(text):
+    for match in _QUANTITY.finditer(prose):
         name = match.group(1).lower()
         if name in {"the", "a", "an", "this", "that", "it", "is"}:
             continue
@@ -546,12 +555,13 @@ def _finding(
 
 
 def _numeric_matches(text: str) -> list[tuple[str, str, str | None, str | None]]:
+    prose = _strip_code_spans(text)
     found: list[tuple[str, str, str | None, str | None]] = []
-    for match in _QUANTITY.finditer(text):
+    for match in _QUANTITY.finditer(prose):
         name = match.group(1).lower()
         if name in _STOP_NAMES:
             continue
-        tail = _sentence_tail(text, match.end())
+        tail = _sentence_tail(prose, match.end())
         found.append(
             (
                 name,

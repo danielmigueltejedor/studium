@@ -204,3 +204,16 @@ def test_dollar_spans_with_comparisons_and_digit_led_variables_are_math():
     assert not _dollar_ok("5, ")  # Adjacent currency amounts stay literal.
     assert not _dollar_ok("5 ")
     assert not _dollar_ok("5 and 10")
+
+
+def test_dunder_and_leading_underscore_identifiers_stay_literal():
+    rendered = render_text_run("En Python __dict__, __slots__ y _private son identificadores.")
+    assert r"\_\_dict\_\_" in rendered
+    assert r"\_\_slots\_\_" in rendered
+    assert r"\_private" in rendered
+    assert r"\(" not in rendered
+
+
+def test_unit_tex_escapes_percent():
+    from studium.authoring.render import _unit_tex
+    assert _unit_tex("%") == r"\mathrm{\%}"

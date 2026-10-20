@@ -16,6 +16,7 @@ from studium.authoring.contradictions import (
     _canon_number,
     _quantities,
     _source_fingerprint,
+    _strip_code_spans,
     contradiction_scan,
     open_contradictions,
     review_edition,
@@ -390,8 +391,9 @@ _RULES_OUT = re.compile(
 def _asserted_quantities(text: str) -> list[tuple[str, str]]:
     """The ``name = number`` claims a passage asserts, leaving out sentences that deny them."""
 
+    prose = _strip_code_spans(text)
     found: list[tuple[str, str]] = []
-    for sentence in re.split(r"(?<=[.!?])\s+", text):
+    for sentence in re.split(r"(?<=[.!?])\s+", prose):
         if not _RULES_OUT.search(sentence):
             found.extend(_quantities(sentence))
     return found

@@ -852,7 +852,7 @@ _SPAN = re.compile(
 #: Math spans shown as display equations: environments, ``$$`` and ``\\[``.
 _DISPLAY = re.compile(r"\\begin\{(" + _ENVIRONMENTS + r")\}(.+?)\\end\{\1\}|\$\$(.+?)\$\$|\\\[(.+?)\\\]", re.S)
 _RELATION_OPS = re.compile(
-    r"\\(?:approx|simeq|equiv|geq?|leq?|neq?|gg|ll|propto|sim)(?![A-Za-z])|:=|(?<![<>!\\])[<>]=?|(?<![<>!\\:])="
+    r"\\(?:approx|simeq|equiv|geq?|leq?|neq?|gg|ll|propto|sim)(?![A-Za-z])|:=|(?<![<>!\\])[<>]=?|(?<![<>!\\:.])="
 )
 _OP_KINDS = {
     "=": "claim",
@@ -874,6 +874,15 @@ def math_statements(text: str) -> list[tuple[str, str]]:
     return list(_math_statements(text))
 
 
+_CODE_SPAN = re.compile(r"```[\s\S]*?```|~~~[\s\S]*?~~~|`[^`\n]+`")
+
+
+def _strip_code_spans(text: str) -> str:
+    """Remove Markdown fenced code blocks and inline code spans before scanning prose."""
+
+    return _CODE_SPAN.sub(" ", text)
+
+
 @lru_cache(maxsize=4096)
 def _math_statements(text: str) -> tuple[tuple[str, str], ...]:
     """Every complete relation in a passage, as ``(kind, "lhs op rhs")``.
@@ -886,6 +895,7 @@ def _math_statements(text: str) -> tuple[tuple[str, str], ...]:
     No fragment such as ``= -p`` is ever returned.
     """
 
+    text = _strip_code_spans(text)
     found: list[tuple[str, str]] = []
     outside: list[str] = []
     last = 0
@@ -1142,6 +1152,7 @@ def equation_evidence(
 
 
 def _display_statements(text: str) -> list[str]:
+    text = _strip_code_spans(text)
     statements: list[str] = []
     for match in _DISPLAY.finditer(text):
         groups = match.groups()

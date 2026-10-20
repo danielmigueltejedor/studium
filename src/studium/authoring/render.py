@@ -978,6 +978,8 @@ _SPELLED_DELTA = re.compile(r"\b[Dd]elta (?=[A-Za-z](?:_[A-Za-z0-9]+)? ?=)")
 _INTERNAL_IDENTIFIER = re.compile(
     r"\[[A-Za-z0-9][A-Za-z0-9.-]*:[A-Za-z0-9_.:-]+\]"
     r"|\b[A-Za-z][A-Za-z0-9]*(?:_[A-Za-z0-9]+){2,}\b"
+    r"|(?<![\w)}\]])_[A-Za-z0-9_]+"
+    r"|[A-Za-z0-9_]*__[A-Za-z0-9_]*"
 )
 
 
@@ -1463,6 +1465,7 @@ def _textbook_packages() -> list[str]:
         r"\definecolor{studiumCodeBack}{RGB}{245,245,242}",
         r"\definecolor{studiumCodeRule}{RGB}{48,48,52}",
         r"\usepackage{listings}",
+        r"\lstset{defaultdialect=[5.3]Lua}",
         r"\lstdefinelanguage{Rust}{",
         r"  morekeywords={as,async,await,break,const,continue,crate,dyn,else,enum,extern,false,fn,for,if,impl,in,let,loop,match,mod,move,mut,pub,ref,return,self,Self,static,struct,super,trait,true,type,unsafe,use,where,while},",
         r"  sensitive=true,",
@@ -1544,6 +1547,7 @@ def _preamble(footer: str, language: BookLanguage, copy: dict[str, str], *, tikz
         )
     if language.babel == "spanish":
         lines.append(r"\AtBeginDocument{\spanishdeactivate{" + "\"~<>}}")
+        lines.append(r"\addto\extrasspanish{\spanishdeactivate{" + "\"~<>}}")
     if language.babel == "galician":
         lines.append(r"\makeatletter\AtBeginDocument{\def\gl@roman#1{\romannumeral#1}}\makeatother")
     lines.extend(
@@ -1560,7 +1564,7 @@ def _preamble(footer: str, language: BookLanguage, copy: dict[str, str], *, tikz
             r"\setcounter{secnumdepth}{3}",
             r"\setcounter{tocdepth}{2}",
             r"\usepackage{graphicx}",
-            *( [r"\usepackage{tikz}"] if tikz else [] ),
+            *( [r"\usepackage{tikz}", r"\usetikzlibrary{arrows.meta,positioning,calc,shapes.geometric}"] if tikz else [] ),
             *_textbook_packages(),
             r"\titleformat{\section}{\Large\bfseries}{\thesection}{0.8em}{}",
             r"\titleformat{\subsection}{\large\bfseries}{\thesubsection}{0.7em}{}",
@@ -2375,6 +2379,8 @@ def _normalize_math_text(text: str) -> str:
             out.append("_" + _SUB_MAP[ch])
         elif ch in _GREEK:
             out.append("\\" + _GREEK[ch].lstrip("\\"))
+        elif ch in "%&#$":
+            out.append("\\" + ch)
         else:
             out.append(ch)
     return "".join(out)

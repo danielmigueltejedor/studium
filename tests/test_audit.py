@@ -550,3 +550,30 @@ def test_ungrounded_formula_in_a_section_names_its_paragraph(tmp_path, monkeypat
     )
     assert refused["status"] == "audit.rejected"
     assert f"F = C × 9/5 + 32 [{paragraph}]" in refused["message"]
+
+
+def test_fenced_and_inline_code_assignments_do_not_trigger_ungrounded_quantity_or_formula(tmp_path, monkeypatch):
+    monkeypatch.setattr("urllib.request.urlopen", _explode)
+    session, _root = _topic(tmp_path, "programacion", "Algoritmos y Programación")
+    _section(session, section_id="tema-1", title="Invariantes de bucle")
+    left, right = _two_excerpts(session)
+    code_prose = (
+        f"The density is 2. {_TEACH} "
+        "In inline code `steps = 99` and `total = count * 3 + 7` are program statements, not physical constants:\n"
+        "```python\n"
+        "def collatz(n: int) -> int:\n"
+        "    steps = 0\n"
+        "    while n > 1:\n"
+        "        steps = steps + 1\n"
+        "    return steps\n"
+        "```"
+    )
+    _paragraph(session, "tema-1", code_prose, [left, right])
+    audited = dispatch(
+        "studium_audit_record",
+        {"target": "tema-1", "kind": "code", "excerpts": [left, right]},
+        session=session,
+    )
+    assert audited["status"] == "recorded", audited
+    scanned = dispatch("studium_contradiction_scan", {}, session=session)
+    assert scanned["open_count"] == 0
