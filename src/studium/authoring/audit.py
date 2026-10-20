@@ -28,6 +28,7 @@ from studium.authoring.figures import unresolved_figure_references
 from studium.authoring.grounding import derivation_fingerprint
 from studium.authoring.grounding import record_excerpt_texts as _record_excerpt_texts
 from studium.authoring.grounding import ungrounded_formulas as _ungrounded_formulas
+from studium.authoring.literals import mask_code
 from studium.authoring.paragraphs import supported_paragraphs
 from studium.authoring.problems import problem_input_sha256, problem_result_current
 from studium.authoring.section_blocks import blocked_ids
@@ -391,7 +392,7 @@ def _asserted_quantities(text: str) -> list[tuple[str, str]]:
     """The ``name = number`` claims a passage asserts, leaving out sentences that deny them."""
 
     found: list[tuple[str, str]] = []
-    for sentence in re.split(r"(?<=[.!?])\s+", text):
+    for sentence in re.split(r"(?<=[.!?])\s+", mask_code(text)):
         if not _RULES_OUT.search(sentence):
             found.extend(_quantities(sentence))
     return found

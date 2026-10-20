@@ -7,6 +7,7 @@ or pdflatex is on PATH. A missing engine leaves no PDF behind.
 import re
 import shutil
 import subprocess
+from contextvars import ContextVar
 from fractions import Fraction
 from pathlib import Path
 
@@ -25,6 +26,7 @@ from studium.authoring.languages import (
     generic_section_titles,
     messages,
 )
+from studium.authoring.literals import code_regions
 from studium.authoring.mathematics import DEFAULT_SYMBOL_NAMES, MathError, numeric_latex, symbolic_latex, unit_latex
 from studium.authoring.notation import notation_registry
 from studium.authoring.paragraphs import supported_paragraphs
@@ -43,11 +45,13 @@ from studium.storage.records import (
     DERIVATIONS,
     EXCERPTS,
     FIGURES,
+    PARAGRAPHS,
     PROBLEMS,
     PUBLIC_BIBLIOGRAPHY,
     fold_by_id,
 )
 
+_REVIEW_RENDERING: ContextVar[bool] = ContextVar("studium_review_rendering", default=False)
 _TEX_NAME = "draft.tex"
 _PDF_NAME = "draft.pdf"
 _LABEL_SAFE = re.compile(r"[^A-Za-z0-9._:-]")
@@ -360,7 +364,7 @@ def _map_math_run(text: str, *, escape: bool = False) -> str:
     return "".join(parts)
 
 
-def render_draft(root: Path) -> dict[str, object]:
+def render_draft(root: Path, *, include_unsupported: bool = False) -> dict[str, object]:
     """Write a DRAFT .tex of the blueprint and supported claims, then compile if possible."""
 
     try:
@@ -371,7 +375,7 @@ def render_draft(root: Path) -> dict[str, object]:
                 return _error("render.path_escaped", "draft path leaves the project")
             if book_language(root) is None:
                 return _error("render.invalid_language", INVALID_LANGUAGE)
-            document = _document(root)
+            document = _document(root, include_unsupported=include_unsupported)
             tex_path.parent.mkdir(parents=True, exist_ok=True)
             tex_path.write_text(document, encoding="utf-8")
             _remove_stale_toc(tex_path)
@@ -386,8 +390,9 @@ def render_draft(root: Path) -> dict[str, object]:
 
     engine = find_engine()
     relative_tex = _relative(root, tex_path)
-    unwritten = _first_unwritten_title(root)
+    unwritten = _first_unwritten_title(root, include_unsupported=include_unsupported)
     body = {
+        "includes_unsupported_drafts": include_unsupported,
         "tex": relative_tex,
         "pdf": None,
         "released": project_state == "RELEASED",
@@ -451,8 +456,10 @@ def _render_status(
     return {"status": "incomplete", "message": note, "compile_status": status, **body}
 
 
-def _first_unwritten_title(root: Path) -> str | None:
-    covered = {record.get("section") for record in supported_paragraphs(root)}
+def _first_unwritten_title(root: Path, *, include_unsupported: bool = False) -> str | None:
+    paragraphs = ([r for r in fold_by_id(root / PARAGRAPHS) if r.get("status") == "draft"]
+                  if include_unsupported else supported_paragraphs(root))
+    covered = {record.get("section") for record in paragraphs}
     academic = current_academic_blueprint(root)
     if academic is not None:
         parts = academic.get("parts")
@@ -804,11 +811,25 @@ def render_text_run(value: str) -> str:
         if start < cursor:
             continue
         if start > cursor:
-            parts.append(latex_escape(text[cursor:start]))
+            parts.append(_prose_markup(text[cursor:start]))
         parts.append(tex)
         cursor = end
     if cursor < len(text):
-        parts.append(latex_escape(text[cursor:]))
+        parts.append(_prose_markup(text[cursor:]))
+    return "".join(parts)
+
+
+def _prose_markup(text: str) -> str:
+    """Minimal emphasis in prose only; code/math are already opaque spans."""
+    pattern = re.compile(r"(\*\*|\*)(?=\S)(.+?)(?<=\S)\1")
+    parts = []
+    cursor = 0
+    for match in pattern.finditer(text):
+        parts.append(latex_escape(text[cursor:match.start()]))
+        command = r"\textbf" if match[1] == "**" else r"\emph"
+        parts.append(command + "{" + latex_escape(match[2]) + "}")
+        cursor = match.end()
+    parts.append(latex_escape(text[cursor:]))
     return "".join(parts)
 
 
@@ -840,6 +861,7 @@ def emit_prose(value: str, *, italic: bool = False, figure_ref: str = "") -> lis
                 lines.append(r"\noindent\textit{" + rendered + "}")
             else:
                 lines.append(rendered)
+            lines.append("")
 
     for kind, payload, extra in _split_blocks(text):
         if kind == "text":
@@ -890,7 +912,13 @@ def _pure_inline_formula(original: str, rendered: str) -> bool:
 def _explicit_spans(text: str) -> list[tuple[int, int, str]]:
     spans: list[tuple[int, int, str]] = []
     index = 0
+    code = {r.start: r for r in code_regions(text)}
     while index < len(text):
+        region = code.get(index)
+        if region is not None:
+            spans.append((region.start, region.end, _inline_code(region.body)))
+            index = region.end
+            continue
         found = _match_explicit(text, index)
         if found is None:
             index += 1
@@ -978,6 +1006,7 @@ _SPELLED_DELTA = re.compile(r"\b[Dd]elta (?=[A-Za-z](?:_[A-Za-z0-9]+)? ?=)")
 _INTERNAL_IDENTIFIER = re.compile(
     r"\[[A-Za-z0-9][A-Za-z0-9.-]*:[A-Za-z0-9_.:-]+\]"
     r"|\b[A-Za-z][A-Za-z0-9]*(?:_[A-Za-z0-9]+){2,}\b"
+    r"|(?<![A-Za-z0-9_])__[A-Za-z][A-Za-z0-9_]*__(?![A-Za-z0-9_])"
 )
 
 
@@ -1152,6 +1181,7 @@ def _one_space(text: str, token: tuple[int, int, str]) -> bool:
 
 def _split_blocks(text: str) -> list[tuple[str, str, str]]:
     blocks: list[tuple[str, str, str]] = []
+    literals = {r.start: r for r in code_regions(text) if r.block}
     buf: list[str] = []
     index = 0
 
@@ -1161,13 +1191,12 @@ def _split_blocks(text: str) -> list[tuple[str, str, str]]:
             buf.clear()
 
     while index < len(text):
-        if _line_start(text, index):
-            fence = _read_fence(text, index)
-            if fence is not None:
-                flush()
-                code, language, index = fence
-                blocks.append(("code", code, language))
-                continue
+        region = literals.get(index)
+        if region is not None:
+            flush()
+            blocks.append(("code", region.body, region.language))
+            index = region.end
+            continue
         env = _read_env(text, index)
         if env is not None:
             flush()
@@ -1249,7 +1278,10 @@ def _read_env(text: str, index: int) -> tuple[str, str, int] | None:
 
 
 def _inline_code(code: str) -> str:
-    return r"\texttt{" + _texttt(code) + "}"
+    escaped = _texttt(code)
+    if len(code) > 24:
+        escaped = re.sub(r"(\\_|[./-])", r"\1\\allowbreak{}", escaped)
+    return r"\texttt{" + escaped + "}"
 
 
 def _texttt(code: str) -> str:
@@ -1273,6 +1305,14 @@ def _texttt(code: str) -> str:
 def _listing_lines(code: str, language: str) -> list[str]:
     body, escape = _listing_body(code)
     options = ["style=studium"]
+    kind = language.strip().lower()
+    labels = {"console": "Terminal", "terminal": "Terminal", "output": "Output", "error": "Diagnostic", "json": "JSON", "yaml": "YAML", "toml": "TOML"}
+    if kind in labels:
+        options.append("title={" + labels[kind] + "}")
+        if kind in {"console", "terminal"}:
+            options.extend(["backgroundcolor=\\color{studiumInk}", "basicstyle=\\ttfamily\\small\\color{white}"])
+        elif kind == "error":
+            options.append("rulecolor=\\color{red!70!black}")
     mapped = _LISTINGS_LANGUAGE.get(language.strip().lower())
     if mapped:
         options.append("language={" + mapped + "}")
@@ -1311,7 +1351,12 @@ def _escape_delimiters(code: str) -> tuple[str, str]:
     for begin, end in _ESCAPE_DELIMS:
         if begin not in code and end not in code:
             return begin, end
-    return _ESCAPE_DELIMS[-1]
+    index = 0
+    while True:
+        begin, end = f"(*studium{index}@", f"@studium{index}*)"
+        if begin not in code and end not in code:
+            return begin, end
+        index += 1
 
 
 def _listing_token(character: str) -> str:
@@ -1463,6 +1508,7 @@ def _textbook_packages() -> list[str]:
         r"\definecolor{studiumCodeBack}{RGB}{245,245,242}",
         r"\definecolor{studiumCodeRule}{RGB}{48,48,52}",
         r"\usepackage{listings}",
+        r"\lstset{defaultdialect=[5.3]Lua}",
         r"\lstdefinelanguage{Rust}{",
         r"  morekeywords={as,async,await,break,const,continue,crate,dyn,else,enum,extern,false,fn,for,if,impl,in,let,loop,match,mod,move,mut,pub,ref,return,self,Self,static,struct,super,trait,true,type,unsafe,use,where,while},",
         r"  sensitive=true,",
@@ -1544,6 +1590,7 @@ def _preamble(footer: str, language: BookLanguage, copy: dict[str, str], *, tikz
         )
     if language.babel == "spanish":
         lines.append(r"\AtBeginDocument{\spanishdeactivate{" + "\"~<>}}")
+        lines.append(r"\addto\extrasspanish{\spanishdeactivate{" + "\"~<>}}")
     if language.babel == "galician":
         lines.append(r"\makeatletter\AtBeginDocument{\def\gl@roman#1{\romannumeral#1}}\makeatother")
     lines.extend(
@@ -1560,7 +1607,7 @@ def _preamble(footer: str, language: BookLanguage, copy: dict[str, str], *, tikz
             r"\setcounter{secnumdepth}{3}",
             r"\setcounter{tocdepth}{2}",
             r"\usepackage{graphicx}",
-            *( [r"\usepackage{tikz}"] if tikz else [] ),
+            *( [r"\usepackage{tikz}", r"\usetikzlibrary{arrows.meta,positioning,calc,shapes.geometric}"] if tikz else [] ),
             *_textbook_packages(),
             r"\titleformat{\section}{\Large\bfseries}{\thesection}{0.8em}{}",
             r"\titleformat{\subsection}{\large\bfseries}{\thesubsection}{0.7em}{}",
@@ -1642,13 +1689,23 @@ def _title_page(root: Path, book: str, copy: dict[str, str]) -> list[str]:
     return lines
 
 
-def _document(root: Path) -> str:
+def _document(root: Path, *, include_unsupported: bool = False) -> str:
+    token = _REVIEW_RENDERING.set(include_unsupported)
+    try:
+        return _document_body(root, include_unsupported=include_unsupported)
+    finally:
+        _REVIEW_RENDERING.reset(token)
+
+
+def _document_body(root: Path, *, include_unsupported: bool = False) -> str:
     kind = book_kind(root)
     language = _require_language(root)
     copy = messages(language)
     sections = current_sections(root)
     claims = supported_drafts(root)
     paragraphs = supported_paragraphs(root)
+    if include_unsupported:
+        paragraphs = [r for r in fold_by_id(root / PARAGRAPHS) if r.get("status") == "draft"]
     titles = _source_titles(root)
     sources = _source_records(root)
     excerpts = excerpts_by_id(root)
@@ -1661,11 +1718,17 @@ def _document(root: Path) -> str:
             by_section.setdefault(section, []).append(paragraph)
     lines = [
         *_preamble(copy["footer"], language, copy, tikz=_checked_tikz(root)),
+        *([r"\input{../editorial-config.tex}"] if (root / "editorial-config.tex").is_file() else []),
         r"\begin{document}",
         r"\frontmatter",
+        r"\ifdefined\studiumcustomtitle",
+        r"\studiumcustomtitle",
+        r"\else",
         *_title_page(root, book, copy),
+        r"\fi",
         r"\chapter{" + latex_escape(copy["preface"]) + "}",
         r"\noindent " + latex_escape(copy["note"]),
+        *([r"\par\medskip\noindent\textbf{EVIDENCE REVIEW REQUIRED. This review copy includes unsupported drafts. Compilation does not establish source integrity or technical correctness.}"] if include_unsupported else []),
         r"\chapter{" + latex_escape(copy["how"]) + "}",
         r"\noindent " + latex_escape(copy["how_a"]),
         "",
@@ -1881,6 +1944,8 @@ def _chapter_lines(
     caller that renders several sections would otherwise repeat them.
     """
 
+    if figures_shown is None:
+        figures_shown = set()
     purpose: list[tuple[dict[str, object], str]] = []
     consejo: list[tuple[dict[str, object], str]] = []
     definitions: list[tuple[dict[str, object], str]] = []
@@ -1915,6 +1980,9 @@ def _chapter_lines(
     if chapter_boxes:
         lines.extend(_chapter_back_matter(root, section_id, copy, language))
     lines.extend(_box(copy["self_check"], _record_prose(self_check, figure_ref), "self_check"))
+    # A figure may first be cited in purpose, definition, or self-check prose.
+    for record in paragraphs:
+        lines.extend(_figure_lines(root, section_id, copy, figures_shown, keys=_cited_keys(_str_field(record, "text"))))
     return lines
 
 
@@ -2212,7 +2280,7 @@ def _solution_body(
     result = solution.get("result")
     if isinstance(result, str) and result.strip():
         body.extend(["", r"\noindent\textbf{" + latex_escape(_extra_label(language, "result")) + "}"])
-        body.extend(_display_math(result))
+        body.extend(_result_lines(result))
     body.extend(figures("graphical", _extra_label(language, "graphical")))
     interpretation = solution.get("interpretation")
     if isinstance(interpretation, str) and interpretation.strip():
@@ -2359,7 +2427,7 @@ def _unit_tex(unit: str) -> str:
     try:
         return unit_latex(unit)
     except MathError:
-        return r"\mathrm{" + _normalize_math_text(unit.strip()) + "}"
+        return r"\mathrm{" + latex_escape(unit.strip()) + "}"
 
 
 def _normalize_math_text(text: str) -> str:
@@ -2378,6 +2446,16 @@ def _normalize_math_text(text: str) -> str:
         else:
             out.append(ch)
     return "".join(out)
+
+
+def _result_lines(text: str) -> list[str]:
+    # Results may contain a numerical expression followed by an explanation.
+    # Sending an entire explanatory sentence to math mode loses spaces and
+    # overflows the page. Explicit math remains handled by emit_prose.
+    words = re.findall(r"(?<!\\)\b[^\W\d_]{4,}\b", text)
+    if len(words) >= 3 or code_regions(text):
+        return emit_prose(text)
+    return _display_math(text)
 
 
 def _display_math(tex: str) -> list[str]:
@@ -2843,7 +2921,9 @@ def _single_figure_lines(root: Path, record: dict[str, object], copy: dict[str, 
 
     lines: list[str] = []
     output = _checked_output(root, record)
-    if output is None or not renderable(root, record):
+    review_figure = (_REVIEW_RENDERING.get() and record.get("kind") == "tikz"
+                     and isinstance(record.get("source"), str))
+    if (output is None or not renderable(root, record)) and not review_figure:
         return lines
     if record.get("kind") == "tikz" and isinstance(record.get("source"), str):
         body = "\n".join(
@@ -2855,8 +2935,11 @@ def _single_figure_lines(root: Path, record: dict[str, object], copy: dict[str, 
         )
         fitted = _fit_block(body, consume_box=False)
     else:
+        assert output is not None
         fitted = _fit_block(r"\includegraphics{" + output + "}", consume_box=True)
     caption = _str_field(record, "caption")
+    if review_figure and (output is None or not renderable(root, record)):
+        caption = "DRAFT FIGURE: evidence review pending. " + caption
     prefix = _figure_caption_prefix(record, copy)
     lines.extend(
         [
@@ -2952,7 +3035,7 @@ def _figure_caption_prefix(record: dict[str, object], copy: dict[str, str]) -> s
 
 def _checked_tikz(root: Path) -> bool:
     for record in fold_by_id(root / FIGURES):
-        if record.get("kind") == "tikz" and _checked_output(root, record) is not None:
+        if record.get("kind") == "tikz" and (_checked_output(root, record) is not None or _REVIEW_RENDERING.get()):
             return True
     return False
 
@@ -3111,7 +3194,7 @@ def _notation_lines(root: Path, copy: dict[str, str], language: BookLanguage) ->
     for symbol, entry in sorted(registry.items()):
         meaning = latex_escape(str(entry.get("meaning") or ""))
         units = _format_units(str(entry.get("units") or ""), language)
-        sym_tex = _symbol_tex(symbol)
+        sym_tex = _symbol_tex(symbol).replace(",", r",\allowbreak ")
         sym_col = f"${sym_tex}$" if sym_tex else render_text_run(symbol)
         lines.append(rf"{sym_col} & {meaning} & {units} \\")
     lines.extend([r"\end{longtable}", r"\endgroup"])
@@ -3164,7 +3247,8 @@ def _solution_lines(root: Path, copy: dict[str, str], language: BookLanguage) ->
         witnessed = current and (
             record.get("status") == "two_witnesses" or record.get("corroboration") == "two_witnesses"
         )
-        if not checked and not witnessed:
+        review_only = _REVIEW_RENDERING.get() and not checked and not witnessed
+        if not checked and not witnessed and not review_only:
             continue
         prompt = _str_field(record, "prompt")
         if not prompt.strip():
@@ -3172,12 +3256,33 @@ def _solution_lines(root: Path, copy: dict[str, str], language: BookLanguage) ->
         section = _str_field(record, "section")
         lines = groups.setdefault(section, [])
         if is_practice and isinstance(identifier, str):
-            solved_practice.add(identifier)
+            if not review_only:
+                solved_practice.add(identifier)
             number = numbering.get(identifier, 0)
             lines.extend(["", r"\noindent\textbf{" + latex_escape(f"{exercise_label} {number} [{identifier}]") + "}"])
         elif isinstance(identifier, str):
             lines.extend(["", r"\noindent\textbf{" + latex_escape(f"{copy['worked']} [{identifier}]") + "}"])
         solution = record.get("solution")
+        if review_only:
+            warning = "Solución propuesta; verificación pendiente." if language.babel == "spanish" else "Proposed solution; verification pending."
+            lines.extend(["", r"\noindent\textbf{" + warning + "}", "", *emit_prose(prompt)])
+            if isinstance(solution, dict) and solution and not is_practice:
+                # Worked developments already appear in their chapter. Keep a
+                # short answer pointer, not a second copy of the whole solution.
+                note = "Desarrollo propuesto en el capítulo correspondiente." if language.babel == "spanish" else "Proposed development appears in the corresponding chapter."
+                lines.extend(["", latex_escape(note)])
+                result = solution.get("result")
+                if isinstance(result, str):
+                    lines.extend(_result_lines(result))
+            elif isinstance(solution, dict) and solution:
+                pending = {key: value for key, value in record.items() if key not in {"step_checks", "answer_check", "structure_check"}}
+                lines.extend(_solution_body(pending, solution, copy, language, root=root, skip_stages=("statement",)))
+            else:
+                expected = _str_field(record, "expected")
+                if expected.strip():
+                    label = "Respuesta propuesta, sin comprobar" if language.babel == "spanish" else "Proposed answer, not verified"
+                    lines.extend(["", r"\noindent\textbf{" + label + "}: " + latex_escape(expected)])
+            continue
         if is_practice and isinstance(solution, dict) and solution:
             # A practice problem with a stored solution gets the same full
             # engineering solution the worked problem does, so the appendix is a
@@ -3191,7 +3296,7 @@ def _solution_lines(root: Path, copy: dict[str, str], language: BookLanguage) ->
                 # A problem with a structured solution already typesets its
                 # answer; reuse it so the appendix never prints a raw float.
                 lines.extend(["", r"\noindent\textbf{" + latex_escape(copy["respuesta"]) + "}"])
-                lines.extend(_display_math(result))
+                lines.extend(_result_lines(result))
                 lines.extend(_answer_check_lines(record.get("answer_check"), language))
             else:
                 expected = _str_field(record, "expected")
