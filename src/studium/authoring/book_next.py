@@ -696,8 +696,8 @@ def _pending_problem(root: Path, sections: list[dict[str, str]]) -> dict[str, ob
             "tool": "studium_problem_record",
             "arguments": {"section": section_id},
             "reason": (
-                "Record a programming exercise contract for this code section. "
-                "Declared tests remain unchecked; untrusted program execution requires external isolation."
+                "Record a Rust test contract for this code section's legacy worked-example workflow. "
+                "It remains unchecked; untrusted program execution requires external isolation."
             ),
         }
     if any(item.get("status") == "replayed" and item.get("correct") is True for item in list_computations(root)):
