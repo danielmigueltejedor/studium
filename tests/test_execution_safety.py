@@ -155,3 +155,18 @@ def test_python_reference_does_not_recommend_an_impossible_check(tmp_path, monke
     monkeypatch.setattr(orchestrator, "unresolved_figure_references", lambda _root: [{"paragraph": "PAR-0001", "reason": "unchecked", "key": "plot"}])
     monkeypatch.setattr(orchestrator, "figure_reference_map", lambda _root: {"plot": {"id": "FIG-0001", "kind": "python"}})
     assert orchestrator._pending_figure_reference({}, tmp_path) is None
+
+
+def test_pending_python_does_not_hide_an_actionable_figure(tmp_path, monkeypatch):
+    from studium.authoring import book_next as orchestrator
+
+    monkeypatch.setattr(orchestrator, "unresolved_figure_references", lambda _root: [
+        {"paragraph": "PAR-0001", "reason": "unchecked", "key": "plot"},
+        {"paragraph": "PAR-0002", "reason": "missing", "key": "diagram"},
+    ])
+    monkeypatch.setattr(orchestrator, "figure_reference_map", lambda _root: {"plot": {"id": "FIG-0001", "kind": "python"}})
+    monkeypatch.setattr(orchestrator, "_step", lambda state, tool, arguments, reason, blocked: {"tool": tool, "reason": reason})
+    result = orchestrator._pending_figure_reference({}, tmp_path)
+    assert result is not None
+    assert result["tool"] == "studium_figure_record"
+    assert "diagram" in result["reason"]

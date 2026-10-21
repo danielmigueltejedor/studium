@@ -1506,12 +1506,16 @@ def _pending_figure_reference(
     unresolved = unresolved_figure_references(root)
     if not unresolved:
         return None
-    item = unresolved[0]
+    mapping = figure_reference_map(root)
+    for item in unresolved:
+        target = mapping.get(item["key"].lower())
+        if item["reason"] != "unchecked" or not isinstance(target, dict) or target.get("kind") != "python":
+            break
+    else:
+        return None
     paragraph = item["paragraph"] or "a paragraph"
     if item["reason"] == "unchecked":
-        target = figure_reference_map(root).get(item["key"].lower())
-        if isinstance(target, dict) and target.get("kind") == "python":
-            return None
+        target = mapping.get(item["key"].lower())
         identifier = target.get("id") if isinstance(target, dict) else None
         return _step(
             state,
