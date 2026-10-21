@@ -802,7 +802,7 @@ def render_text_run(value: str) -> str:
     for start, end in blocked:
         masked[start:end] = [" " if char.isspace() else "X" for char in text[start:end]]
     pattern = re.compile(
-        r"(?<![\w\\*])(\*\*\*|\*\*|\*)(?!\*)(?=\S)(.+?)(?<=\S)(?<!\*)\1(?![\w*])",
+        r"(?<![\w\\*])(\*\*\*|\*\*|\*)(?!\*)(?=\S)(.+?)(?<=\S)(?<!\*)\1(?!\*)",
         re.DOTALL,
     )
     parts: list[str] = []

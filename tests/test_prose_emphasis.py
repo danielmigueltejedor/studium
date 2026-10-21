@@ -20,6 +20,7 @@ from studium.authoring.render import render_text_run
         ("**x²**", r"\textbf{\(x^{2}\)}"),
         ("*x²*", r"\emph{\(x^{2}\)}"),
         ("**snake_case_name**", r"\textbf{snake\_case\_name}"),
+        ("**S**poofing y **T**ampering; **TLS**.", r"\textbf{S}poofing y \textbf{T}ampering; \textbf{TLS}."),
     ],
 )
 def test_emphasis_includes_literals_and_math(source, expected):
