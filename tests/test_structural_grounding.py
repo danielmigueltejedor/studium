@@ -209,7 +209,7 @@ def test_equation_report_lists_statements_as_written_with_filters(tmp_path, monk
     assert bad["status"] == "mcp.invalid_input"
 
 
-def test_equation_of_an_independently_verified_derivation_is_symbolically_verified(tmp_path, monkeypatch):
+def test_equation_solution_of_a_checked_derivation_retains_its_premises(tmp_path, monkeypatch):
     monkeypatch.setattr("urllib.request.urlopen", _explode)
     session, root = _book(tmp_path)
     excerpt = _excerpt(session, "La presión es fuerza por unidad de área.")
@@ -226,7 +226,11 @@ def test_equation_of_an_independently_verified_derivation_is_symbolically_verifi
     assert checked["verification_status"] == "INDEPENDENTLY_VERIFIED", checked
     paragraph = _paragraph(session, r"Torricelli da $V^{2} = 2gh$ para la descarga libre.", [excerpt])
     items = equation_evidence(root, paragraph)
-    assert [(item["status"], item["evidence"]) for item in items] == [("symbolically_verified", [derivation])]
+    # The symbolic check establishes satisfaction under V=sqrt(2*g*h), not an
+    # unrestricted identity among V, g and h or the applicability of Torricelli.
+    assert [(item["status"], item["evidence"]) for item in items] == [("follows_from_stated_premises", [derivation])]
+    assert items[0]["verification_scope"][0]["solution"] == {"V": "sqrt(2*g*h)"}
+    assert items[0]["human_review"] == "required"
 
 
 def test_parser_reads_scalar_notation_and_refuses_vector_operators():

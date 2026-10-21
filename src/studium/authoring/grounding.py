@@ -654,7 +654,7 @@ def verified_derivations(root: Path, section: object) -> list[dict[str, object]]
             continue
         verification = record.get("verification")
         status = str(verification.get("status")) if isinstance(verification, dict) else "UNVERIFIED"
-        if status in VERIFIED_DERIVATION_STATUSES:
+        if status in VERIFIED_DERIVATION_STATUSES and _has_bound_derivation_check(record):
             found.append(record)
     return found
 
@@ -769,6 +769,20 @@ def validate_math(
                     return _error(
                         "paragraph.math_ungrounded",
                         f"derivation {identifier} carries no passing deterministic check",
+                    )
+                if not _has_bound_derivation_check(derivation):
+                    return _error(
+                        "paragraph.math_ungrounded",
+                        f"derivation {identifier} has no passing check bound to its declared equation",
+                    )
+                final, _chained = _final_relations(derivation)
+                if (
+                    any(_same_relation(statement, line) for line in final)
+                    and not any(status != "verification_failed" for status, _scope in _bound_derivation_checks(derivation, statement))
+                ):
+                    return _error(
+                        "paragraph.math_ungrounded",
+                        f"derivation {identifier} has no passing check bound to this final relation: {statement}",
                     )
             statements = [
                 line
@@ -1134,6 +1148,7 @@ def equation_evidence(
                 "important": normalize_math(statement) in display,
                 "machine_parseable": _relation(statement) is not None or notes.get("calculus_readable") is True,
                 "premises": notes.get("premises", []),
+                "verification_scope": notes.get("verification_scope", []),
                 "dimensions": loaded.dimension_probe(statement) if kind == "claim" and _relation(statement) is not None else None,
                 "human_review": "required" if status in HUMAN_REVIEW_STATUSES - {"source_supported"}
                 else ("recommended" if status == "source_supported" else "none"),
@@ -1202,22 +1217,23 @@ def _evidence(
             found.append(("source_supported", excerpt_id))
     for derivation in context.derivations(record.get("section")):
         identifier = str(derivation.get("id"))
-        verification = derivation.get("verification")
-        derivation_status = str(verification.get("status")) if isinstance(verification, dict) else "UNVERIFIED"
-        covered, chained = _final_relations(derivation)
-        if any(_same_relation(statement, line) for line in covered):
-            if derivation_status in _DERIVATION_EVIDENCE:
-                found.append((_DERIVATION_EVIDENCE[derivation_status], identifier))
-            elif derivation_status == "FAILED":
-                failed.append(identifier)
+        bindings = _bound_derivation_checks(derivation, statement)
+        if bindings:
+            for bound_status, scope in bindings:
+                if bound_status == "verification_failed":
+                    failed.append(identifier)
+                else:
+                    found.append((bound_status, identifier))
+                _note_scope(notes, {"verification": identifier, **scope})
             continue
-        if derivation_status in _DERIVATION_EVIDENCE and any(_same_relation(statement, line) for line in chained):
+        _covered, chained = _final_relations(derivation)
+        if _has_bound_derivation_check(derivation) and any(_same_relation(statement, line) for line in chained):
             # The equation states several relations and the check covers one of them, not necessarily this one.
             found.append(("derived_steps_unchecked", identifier))
             continue
         steps = derivation.get("steps_latex")
         lines = [line for line in steps if isinstance(line, str)] if isinstance(steps, list) else []
-        if derivation_status in _DERIVATION_EVIDENCE and any(_same_relation(statement, line) for line in lines):
+        if _has_bound_derivation_check(derivation) and any(_same_relation(statement, line) for line in lines):
             found.append(("derived_steps_unchecked", identifier))
     for verification in context.verifications:
         inputs = verification.get("inputs")
@@ -1227,9 +1243,15 @@ def _evidence(
             continue
         identifier = str(verification.get("id"))
         if verification.get("verification_status") == "SYMBOLICALLY_VERIFIED" and verification.get("ok") is True:
-            found.append(("symbolically_verified", identifier))
+            scope = _check_scope(inputs)
+            found.append(("follows_from_stated_premises" if scope else "symbolically_verified", identifier))
+            if scope:
+                _note_scope(notes, {"verification": identifier, **scope})
         elif verification.get("verification_status") == "FAILED":
             failed.append(identifier)
+            scope = _check_scope(inputs)
+            if scope:
+                _note_scope(notes, {"verification": identifier, **scope})
     for computation in context.computations:
         if _computation_states(computation, statement):
             found.append(("numerically_reproduced", str(computation.get("id"))))
@@ -1266,14 +1288,105 @@ def _string_list(value: object) -> list[str]:
     return [item for item in value if isinstance(item, str)] if isinstance(value, list) else []
 
 
-def _final_relations(derivation: dict[str, object]) -> tuple[list[str], list[str]]:
-    """Relations a derivation's check is about, and relations that only share its equation.
+def _check_scope(inputs: object) -> dict[str, object]:
+    """Conditions are premises of a check, never universal prose assumptions."""
 
-    A derivation whose equation states one relation is covered by its check.
-    When the equation states several (``a = b = c``, ``u(r) = ..., Q = ...``)
-    the check verifies the stored symbolic residual, and which of the
-    relations that residual encodes is not recorded, so none of them is
-    covered individually. The symbolic form itself always is.
+    return {key: inputs[key] for key in ("solution", "assumptions") if inputs.get(key)} if isinstance(inputs, dict) else {}
+
+
+def _note_scope(notes: dict[str, object] | None, scope: dict[str, object]) -> None:
+    if notes is not None:
+        scopes = notes.setdefault("verification_scope", [])
+        if isinstance(scopes, list):
+            scopes.append(scope)
+
+
+def _expression_matches(first: str, second: str) -> bool:
+    return _same_relation(f"checkvalue = {first}", f"checkvalue = {second}")
+
+
+def _bound_derivation_checks(derivation: dict[str, object], statement: str) -> list[tuple[str, dict[str, object]]]:
+    """Only individual checks with matching declared inputs support a relation.
+
+    The aggregate derivation status combines all its checks. It cannot bind an
+    unrelated successful identity to the final equation, or upgrade a numeric
+    check with an unrelated symbolic proof. Legacy records without check inputs
+    remain available but provide no invented binding.
+    """
+
+    verification = derivation.get("verification")
+    checks = verification.get("checks") if isinstance(verification, dict) else None
+    if not isinstance(checks, list):
+        return []
+    covered, chained = _final_relations(derivation)
+    declared = [line for line in (*covered, *chained) if _same_relation(statement, line)]
+
+    def matching_relation(relation: str) -> bool:
+        return _same_relation(statement, relation) or any(_same_relation(line, relation) for line in declared)
+
+    bindings: list[tuple[str, dict[str, object]]] = []
+    for check in checks:
+        if not isinstance(check, dict) or not isinstance(check.get("inputs"), dict):
+            continue
+        inputs = check["inputs"]
+        status = str(check.get("status"))
+        evidence = "verification_failed" if status == "FAILED" else _DERIVATION_EVIDENCE.get(status)
+        if evidence is None:
+            continue
+        left, right = inputs.get("left"), inputs.get("right")
+        scope = _check_scope(inputs)
+        matches = isinstance(left, str) and isinstance(right, str) and matching_relation(f"{left} = {right}")
+        solution = inputs.get("solution")
+        if not matches and status != "FAILED" and isinstance(solution, dict):
+            # A solved symbolic family may be printed in the explicitly supplied
+            # solved form. This remains conditional on the original equation.
+            matches = any(
+                isinstance(name, str) and isinstance(value, str) and matching_relation(f"{name} = {value}")
+                for name, value in solution.items()
+            )
+        expression = inputs.get("expression")
+        if not matches and isinstance(expression, str):
+            for line in declared:
+                relation = _sympy_text(line)
+                if relation is not None and relation.count("=") == 1:
+                    sides = [side.strip() for side in relation.split("=")]
+                    side_match = any(
+                        re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", sides[1 - index]) is not None
+                        and _expression_matches(expression, side)
+                        for index, side in enumerate(sides)
+                    )
+                    residual_match = inputs.get("claimed") == 0 and _expression_matches(expression, f"({sides[0]}) - ({sides[1]})")
+                    if side_match or residual_match:
+                        matches = True
+                        # A scalar replay does not identify which output a
+                        # multi-relation final equation assigns to that value.
+                        if line in chained:
+                            if evidence == "verification_failed":
+                                matches = False
+                            else:
+                                evidence = "derived_steps_unchecked"
+                        break
+        if matches:
+            if scope and evidence != "verification_failed":
+                evidence = "follows_from_stated_premises"
+            bindings.append((evidence, {"method": check.get("engine_method") or check.get("method"), "inputs": inputs, **scope}))
+    return bindings
+
+
+def _has_bound_derivation_check(derivation: dict[str, object]) -> bool:
+    covered, chained = _final_relations(derivation)
+    return any(
+        status != "verification_failed"
+        for statement in (*covered, *chained)
+        for status, _scope in _bound_derivation_checks(derivation, statement)
+    )
+
+
+def _final_relations(derivation: dict[str, object]) -> tuple[list[str], list[str]]:
+    """Candidate final relations and relations in a chain, before check binding.
+
+    Individual check inputs must still match a candidate. Membership alone
+    never establishes that the relation was checked.
     """
 
     covered: list[str] = []
