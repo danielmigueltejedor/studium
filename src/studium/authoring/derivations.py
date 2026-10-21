@@ -279,21 +279,30 @@ def check_derivation(
             )
         else:
             result = verify_algebraic_equivalence(left, right)
-        results.append(_result_payload("symbolic", result))
+        inputs: dict[str, object] = {"left": left, "right": right}
+        if symbolic_identity.solution is not None:
+            inputs["solution"] = solution
+        results.append(_result_payload("symbolic", result, inputs))
     if numeric_check is not None:
         result = verify_substitution(
             numeric_check.expression,
             values=numeric_check.values,
             claimed=numeric_check.claimed,
         )
-        results.append(_result_payload("numeric_substitution", result))
+        results.append(_result_payload("numeric_substitution", result, {
+            "expression": numeric_check.expression, "values": numeric_check.values, "claimed": numeric_check.claimed,
+        }))
     if dimensional_check is not None:
         result = verify_dimensions(
             dimensional_check.expression,
             dimensional_check.symbol_units,
             expected_unit=dimensional_check.expected_unit,
         )
-        results.append(_result_payload("dimensional", result))
+        results.append(_result_payload("dimensional", result, {
+            "expression": dimensional_check.expression,
+            "symbol_units": dimensional_check.symbol_units,
+            "expected_unit": dimensional_check.expected_unit,
+        }))
     if not results:
         return _error("mcp.invalid_input", "at least one of symbolic, numeric, or dimensions is required")
     for item in results:
@@ -301,7 +310,10 @@ def check_derivation(
             failed = failed or item.get("status") == "FAILED"
     overall = _overall(results)
     updated = dict(current)
-    updated["verification"] = {"status": overall, "checks": results, "checked_at": utc_now()}
+    updated["verification"] = {
+        "status": overall, "checks": results, "checked_at": utc_now(),
+        "scope": "Declared check inputs only. Each prose relation must match a check; solutions remain conditional.",
+    }
     try:
         with project_lock(root):
             append_jsonl(root / DERIVATIONS, updated)
@@ -363,14 +375,15 @@ def _free_symbols(*texts: str) -> set[str]:
     return {name for name in names if name not in reserved and not name.startswith("_")}
 
 
-def _result_payload(method: str, result: object) -> dict[str, object]:
+def _result_payload(method: str, result: object, inputs: dict[str, object]) -> dict[str, object]:
     status = str(getattr(result, "status", "UNVERIFIED"))
     detail = str(getattr(result, "detail", ""))
     return {
         "method": method,
         "status": status.split(".")[-1],
         "detail": detail,
-        "inputs": getattr(result, "inputs", None),
+        "inputs": inputs,
+        "engine_method": getattr(result, "method", None),
     }
 
 

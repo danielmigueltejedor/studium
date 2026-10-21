@@ -13,7 +13,8 @@ Statuses are never conflated. A symbolic identity becomes
 
 from __future__ import annotations
 
-from collections.abc import Callable
+import ast
+from collections.abc import Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeout
 from typing import TypeVar
@@ -25,7 +26,7 @@ from studium.verification.model import (
     VerificationStatus,
     combine,
 )
-from studium.verification.parser import ExpressionError, ParsedExpression, parse_expression
+from studium.verification.parser import FUNCTIONS, ExpressionError, ParsedExpression, parse_expression
 
 DEFAULT_TIMEOUT = 5.0
 NUMERIC_DIGITS = 30
@@ -40,6 +41,42 @@ _ASSUMPTION_FLAGS = frozenset(
 
 class VerificationTimeout(TimeoutError):
     """A symbolic step exceeded the wall-clock bound."""
+
+
+class _UndefinedPoint(ValueError):
+    """An original expression is undefined at a proposed substitution."""
+
+
+def _check_original_point(text: str, assignment: Mapping[sympy.Symbol, sympy.Expr]) -> None:
+    """Inspect original subexpressions before SymPy cancels their domain guards.
+
+    Parsing has already enforced the allowlist and complexity limits. Walking
+    its syntax again preserves divisions such as ``x/x`` and ``0*(1/x)`` that
+    disappear in the simplified expression. Unknown symbolic domains remain
+    conditional; finite complex values are allowed by the algebraic engine.
+    """
+
+    tree = ast.parse(text.strip(), mode="eval")
+
+    def value(node: ast.AST) -> sympy.Expr:
+        return parse_expression(ast.unparse(node)).expr.subs(list(assignment.items()), simultaneous=True)
+
+    for node in reversed(list(ast.walk(tree))):
+        if isinstance(node, ast.Name) and node.id in FUNCTIONS:
+            continue
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div) and value(node.right) == 0:
+            raise _UndefinedPoint("the original expression is undefined: division by zero")
+        if (
+            isinstance(node, ast.BinOp)
+            and isinstance(node.op, ast.Pow)
+            and value(node.right).is_negative is True
+            and value(node.left) == 0
+        ):
+            raise _UndefinedPoint("the original expression is undefined: zero to a negative power")
+        if isinstance(node, (ast.BinOp, ast.UnaryOp, ast.Call, ast.Name)):
+            result = value(node)
+            if result.is_finite is False or result.has(sympy.nan, sympy.zoo, sympy.oo, -sympy.oo):
+                raise _UndefinedPoint("the original expression is undefined: a nonfinite subexpression")
 
 
 def _run_bounded(call: Callable[[], _T], timeout: float) -> _T:
@@ -259,6 +296,7 @@ def verify_equation(
     """Substitute a proposed solution and check both sides agree."""
 
     method = "symbolic_equation"
+    inputs: dict[str, object] = {"left": left, "right": right, "solution": dict(solution)}
     declared = set(symbols or ()) | set(solution)
     try:
         lhs = parse_expression(left, symbols=declared)
@@ -268,23 +306,36 @@ def verify_equation(
             for name, value in solution.items()
         }
     except ExpressionError as exc:
-        return _failed(method, str(exc))
+        return _failed(method, str(exc), inputs=inputs)
     try:
-        difference = (lhs.expr - rhs.expr).subs(list(substituted.items()))
+        for text in (left, right, *solution.values()):
+            _run_bounded(lambda text=text: _check_original_point(text, substituted), timeout)
+        if any(parse_expression(value, symbols=declared).symbols & solution.keys() for value in solution.values()):
+            return _unverified(
+                method,
+                "dependent or cyclic solution assignments need explicit independent parameters before verification",
+                inputs,
+            )
+        difference = lhs.expr.subs(list(substituted.items()), simultaneous=True) - rhs.expr.subs(list(substituted.items()), simultaneous=True)
         simplified = _run_bounded(lambda: sympy.simplify(difference), timeout)
+    except _UndefinedPoint as exc:
+        return _failed(method, str(exc), inputs=inputs)
     except VerificationTimeout as exc:
-        return _unverified(method, str(exc))
+        return _unverified(method, str(exc), inputs)
     except Exception as exc:
-        return _unverified(method, f"substitution did not complete: {exc}")
+        return _unverified(method, f"substitution did not complete: {exc}", inputs)
     if simplified == 0:
         return VerificationResult(
             status=VerificationStatus.SYMBOLICALLY_VERIFIED,
             method=method,
             detail="the proposed solution satisfies the equation",
-            inputs={"left": left, "right": right, "solution": dict(solution)},
-            limitations=("satisfying the equation is not proof the solution is unique",),
+            inputs=inputs,
+            limitations=(
+                "satisfying the equation is not proof the solution is unique",
+                "a symbolic solution family is conditional on the original expressions' common domain",
+            ),
         )
-    return _failed(method, f"the proposed solution leaves a residual: {simplified}")
+    return _failed(method, f"the proposed solution leaves a residual: {simplified}", inputs=inputs)
 
 
 def verify_substitution(
@@ -302,6 +353,7 @@ def verify_substitution(
     """
 
     method = "numeric_substitution"
+    inputs: dict[str, object] = {"expression": expression, "values": dict(values), "claimed": claimed}
     declared = set(symbols or ()) | set(values)
     try:
         parsed = parse_expression(expression, symbols=declared)
@@ -312,9 +364,12 @@ def verify_substitution(
     except ExpressionError as exc:
         return _failed(method, str(exc))
     try:
-        replaced = parsed.expr.subs(list(assignment.items()))
+        _run_bounded(lambda: _check_original_point(expression, assignment), timeout)
+        replaced = parsed.expr.subs(list(assignment.items()), simultaneous=True)
         computed = _run_bounded(lambda: sympy.N(replaced, NUMERIC_DIGITS), timeout)
         number = float(computed)
+    except _UndefinedPoint as exc:
+        return _failed(method, str(exc), inputs=inputs)
     except VerificationTimeout as exc:
         return _unverified(method, str(exc))
     except Exception as exc:
@@ -362,6 +417,7 @@ def verify_limit(
     """Check a limit, including one-sided points such as ``0+``."""
 
     method = "symbolic_limit"
+    inputs: dict[str, object] = {"expression": expression, "variable": variable, "point": point, "claimed": claimed}
     declared = set(symbols or ())
     declared.add(variable)
     try:
@@ -375,16 +431,16 @@ def verify_limit(
         computed = _run_bounded(lambda: sympy.limit(parsed.expr, symbol, target, dir=direction), timeout)
         simplified = _run_bounded(lambda: sympy.simplify(computed - expected), timeout)
     except VerificationTimeout as exc:
-        return _unverified(method, str(exc))
+        return _unverified(method, str(exc), inputs)
     except Exception as exc:
-        return _unverified(method, f"limit did not complete: {exc}")
+        return _unverified(method, f"limit did not complete: {exc}", inputs)
     if simplified == 0:
         return VerificationResult(
             status=VerificationStatus.SYMBOLICALLY_VERIFIED,
             method=method,
             detail=f"the limit is {computed}",
-            inputs={"expression": expression, "variable": variable, "point": point, "claimed": claimed},
-            outputs={"limit": str(computed)},
+            inputs=inputs,
+            outputs={"limit": str(computed), "direction": direction},
         )
     return _failed(method, f"the limit is {computed}, not {claimed}")
 
@@ -399,7 +455,7 @@ def _limit_point(point: str, declared: set[str]) -> tuple[sympy.Expr, str]:
         # A limit at infinity is common in physics (a wall moved to infinity, a ratio of speeds
         # growing without bound); the expression parser has no symbol for it.
         return infinite, "+"
-    direction = "+"
+    direction = "+-"
     if text.endswith("+"):
         text, direction = text[:-1], "+"
     elif text.endswith("-"):
@@ -448,6 +504,9 @@ def verify_numeric_cross_check(
     try:
         for point in points:
             assignment = {sympy.Symbol(name): sympy.Rational(str(value)) for name, value in point.items()}
+            _run_bounded(lambda assignment=assignment: _check_original_point(left, assignment), timeout)
+            if right is not None:
+                _run_bounded(lambda assignment=assignment: _check_original_point(right, assignment), timeout)
             left_a = _evalf(parsed_left.expr.subs(list(assignment.items())))
             left_b = _lambdify(parsed_left.expr, sorted(parsed_left.symbols), point)
             if not _close(left_a, left_b, tolerance):
@@ -462,6 +521,8 @@ def verify_numeric_cross_check(
                         method,
                         f"the expressions disagree at {point}: {left_a:g} vs {right_a:g}",
                     )
+    except _UndefinedPoint as exc:
+        return _failed(method, str(exc), inputs={"left": left, "right": right, "samples": points})
     except VerificationTimeout as exc:
         return _unverified(method, str(exc))
     except Exception as exc:
