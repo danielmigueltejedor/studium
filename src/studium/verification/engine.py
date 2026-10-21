@@ -14,7 +14,7 @@ Statuses are never conflated. A symbolic identity becomes
 from __future__ import annotations
 
 import ast
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeout
 from typing import TypeVar
@@ -47,7 +47,7 @@ class _UndefinedPoint(ValueError):
     """An original expression is undefined at a proposed substitution."""
 
 
-def _check_original_point(text: str, assignment: dict[sympy.Symbol, sympy.Expr]) -> None:
+def _check_original_point(text: str, assignment: Mapping[sympy.Symbol, sympy.Expr]) -> None:
     """Inspect original subexpressions before SymPy cancels their domain guards.
 
     Parsing has already enforced the allowlist and complexity limits. Walking
@@ -59,7 +59,7 @@ def _check_original_point(text: str, assignment: dict[sympy.Symbol, sympy.Expr])
     tree = ast.parse(text.strip(), mode="eval")
 
     def value(node: ast.AST) -> sympy.Expr:
-        return parse_expression(ast.unparse(node)).expr.subs(assignment, simultaneous=True)
+        return parse_expression(ast.unparse(node)).expr.subs(list(assignment.items()), simultaneous=True)
 
     for node in reversed(list(ast.walk(tree))):
         if isinstance(node, ast.Name) and node.id in FUNCTIONS:
@@ -310,7 +310,7 @@ def verify_equation(
     try:
         for text in (left, right, *solution.values()):
             _run_bounded(lambda text=text: _check_original_point(text, substituted), timeout)
-        difference = lhs.expr.subs(substituted, simultaneous=True) - rhs.expr.subs(substituted, simultaneous=True)
+        difference = lhs.expr.subs(list(substituted.items()), simultaneous=True) - rhs.expr.subs(list(substituted.items()), simultaneous=True)
         simplified = _run_bounded(lambda: sympy.simplify(difference), timeout)
     except _UndefinedPoint as exc:
         return _failed(method, str(exc), inputs=inputs)
@@ -359,7 +359,7 @@ def verify_substitution(
         return _failed(method, str(exc))
     try:
         _run_bounded(lambda: _check_original_point(expression, assignment), timeout)
-        replaced = parsed.expr.subs(assignment, simultaneous=True)
+        replaced = parsed.expr.subs(list(assignment.items()), simultaneous=True)
         computed = _run_bounded(lambda: sympy.N(replaced, NUMERIC_DIGITS), timeout)
         number = float(computed)
     except _UndefinedPoint as exc:
