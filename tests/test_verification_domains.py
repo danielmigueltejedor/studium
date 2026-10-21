@@ -64,6 +64,13 @@ def test_equation_also_checks_original_solution_expression():
     assert "undefined" in result.detail
 
 
+@pytest.mark.parametrize("solution", [{"x": "y", "y": "0"}, {"x": "y", "y": "x"}, {"x": "x"}])
+def test_cross_bound_solution_mappings_are_explicitly_undecided(solution):
+    result = verify_equation("x/x", "1", solution=solution)
+    assert result.status == VerificationStatus.UNVERIFIED
+    assert "solution assignments" in result.detail
+
+
 def test_mcp_persists_rejected_domain_and_undecided_limit(tmp_path):
     session = open_workspace(str(tmp_path))
     assert dispatch("studium_project_create", {"slug": "domain", "topic": "Mathematics"}, session=session)["status"] == "created"

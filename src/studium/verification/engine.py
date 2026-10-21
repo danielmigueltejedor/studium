@@ -310,6 +310,12 @@ def verify_equation(
     try:
         for text in (left, right, *solution.values()):
             _run_bounded(lambda text=text: _check_original_point(text, substituted), timeout)
+        if any(parse_expression(value, symbols=declared).symbols & solution.keys() for value in solution.values()):
+            return _unverified(
+                method,
+                "dependent or cyclic solution assignments need explicit independent parameters before verification",
+                inputs,
+            )
         difference = lhs.expr.subs(list(substituted.items()), simultaneous=True) - rhs.expr.subs(list(substituted.items()), simultaneous=True)
         simplified = _run_bounded(lambda: sympy.simplify(difference), timeout)
     except _UndefinedPoint as exc:

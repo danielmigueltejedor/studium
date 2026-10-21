@@ -24,6 +24,9 @@ point guards use the existing allowlisted parser and its 1000-character,
 subexpressions, so cancellation cannot erase a demonstrated singularity.
 Unknown symbolic domains remain conditional and are explicitly described in
 successful equation limitations. This is not an exhaustive branch/domain proof.
+Cross-bound or cyclic solution mappings (for example `x=y, y=0`) require an
+independent parameterization and remain UNVERIFIED. Simultaneous substitution
+must not leave a mapped symbol behind and certify an undefined point as a family.
 
 ## Check binding and compatibility
 
@@ -54,7 +57,7 @@ It no longer expects a universal identity among independent `V`, `g` and `h`.
 Genuine matched arithmetic, explicit symbolic identities and failed checks of
 the same relation retain their distinct statuses. No academic approval is added.
 
-Focused validation on the final binding change: 145 tests passed covering
+Focused validation on the final binding and substitution changes: 148 tests passed covering
 scope, grounding, structural grounding, Young's modulus, persisted mathematical
 verification, domain guards, scientific contracts and academic-depth integration,
 including LaTeX compilation with the task's local TEXMF dependencies. Full regression results belong in the
