@@ -321,9 +321,10 @@ _TOOLS: tuple[dict[str, object], ...] = (
         "description": (
             "Store a problem on a blueprint section. "
             "Either a Rust test (source file text plus a rustc or cargo test invocation limited to files inside the book) "
-            "or a numeric expected answer tied to two stored excerpt ids from different public sources. "
+            "a numeric expected answer tied to two stored excerpt ids from different public sources, "
+            "or a programming practice contract with reference solution and test cases/rubric. "
             "A numeric problem is two_witnesses only when those excerpts are independent, and it is not verified. "
-            "A model-written solution is not correct until studium_problem_check passes. "
+            "Storing a reference solution is not execution or academic approval; programming contracts remain unchecked. "
             "Does not fetch URLs, does not run the test, and does not move the book to RELEASED."
         ),
     },
@@ -340,13 +341,14 @@ _TOOLS: tuple[dict[str, object], ...] = (
         "name": "studium_problem_check",
         "class": "WRITE",
         "description": (
-            "Run a stored Rust test 3 times with a timeout and no network. "
+            "Run a stored Rust test 3 times with a timeout. Native code is not sandboxed; use reviewed trusted code or external isolation. "
             "Three identical rustc runs are a reproducibility check, not an independent proof. "
             "Do not treat the three runs as three methods. "
             "Record each pass or fail. The problem is checked only when all 3 runs pass. "
             "A file of only comments is not a test and stays unchecked. "
             "The source must contain a #[test] function or an assert, assert_eq, or assert_ne. "
             "A numeric problem stays two_witnesses only when the excerpts are independent, and it is not verified. "
+            "Programming contracts return unchecked; their declared cases are not execution evidence. "
             "If rustc or cargo is missing, return compiler_missing and do not pretend the test passed. "
             "Does not fetch URLs and does not move the book to RELEASED."
         ),
@@ -370,7 +372,7 @@ _TOOLS: tuple[dict[str, object], ...] = (
         "class": "WRITE",
         "description": (
             "Run the stored figure source again. TikZ uses pdflatex. A plot uses python3. "
-            "Timeout, no network, and files only inside the book. "
+            "Timeout and constrained artifact paths. Executed code is not sandboxed. "
             "The figure is checked only when that rerun succeeds and the output file exists. "
             "A failed or missing engine returns an error and does not mark the figure checked. "
             "A numeric claim in the caption still needs two excerpts or a replayed computation. "
@@ -1287,6 +1289,19 @@ def _schema(tool: Mapping[str, object]) -> dict[str, object]:
                 "project": _project_property(),
                 "section": {"type": "string", "description": "Blueprint section id."},
                 "prompt": {"type": "string", "description": "Problem prompt. Untrusted data. The model is not a source."},
+                "programming": {
+                    "type": "object",
+                    "description": "Non-physical practice contract; stores reference text and test cases/rubric without executing or approving code. Cannot mix with numeric/Rust inputs.",
+                    "properties": {
+                        "kind": {"enum": ["conceptual", "implementation", "debugging", "architecture", "project"]},
+                        "language": {"type": "string"},
+                        "solution": {"type": "string"},
+                        "tests": {"type": "array", "items": {"type": "string"}},
+                        "rubric": {"type": "array", "items": {"type": "string"}},
+                    },
+                    "required": ["kind", "language", "solution"],
+                    "additionalProperties": False,
+                },
                 "source_text": {
                     "type": "string",
                     "description": "Rust source for a test. A model-written solution is not correct until the check passes.",
@@ -1294,7 +1309,7 @@ def _schema(tool: Mapping[str, object]) -> dict[str, object]:
                 "invocation": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "rustc or cargo test arguments. Paths must stay inside the book. No network.",
+                    "description": "rustc or cargo test arguments. Artifact paths stay inside the book; Cargo resolves offline. Executed native code is not sandboxed.",
                 },
                 "expected": {"type": "string", "description": "Numeric expected answer. Not verified."},
                 "excerpts": {

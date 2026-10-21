@@ -253,7 +253,7 @@ _INSTRUCTIONS = (
             "studium_draft_completeness reports how many sections have a supported paragraph and which are empty. "
             "When a blueprint exists, next_action names the empty sections, tells the client to fill them from opened open-licensed text, and tells the client to add checked problems. "
             "Call studium_problem_record with a prompt and either a Rust test or a numeric answer tied to two stored excerpt ids. "
-            "studium_problem_check runs a Rust test 3 times with a timeout and no network. "
+            "studium_problem_check runs a Rust test 3 times with a timeout; native code is not sandboxed. "
             "The problem is checked only when all 3 runs pass and the source has a #[test] function or an assert, assert_eq, or assert_ne. "
             "A file of only comments stays unchecked. Three runs of an empty file do not count. "
             "studium_problem_remove deletes one problem by id. A missing id is an error. "
@@ -271,7 +271,7 @@ _INSTRUCTIONS = (
             "A figure inside an explanation must be executed. "
             "studium_figure_record stores a caption, the blueprint section, TikZ or Python source, "
             "and the excerpt ids it illustrates. Reject a figure with no executable source. "
-            "studium_figure_check runs that source again with pdflatex or python3, a timeout, and no network, "
+            "studium_figure_check runs that source again with pdflatex or python3 and a timeout; Python code is not sandboxed, "
             "and writes only inside the book. "
             "The figure is checked only when that rerun succeeds and the output file exists. "
             "A failed or missing engine does not mark it checked. "
@@ -842,6 +842,7 @@ def _dispatch(session: McpSession, name: str, arguments: Mapping[str, object]) -
             solution=arguments.get("solution") if "solution" in arguments else None,
             structure=arguments.get("structure") if "structure" in arguments else None,
             actor=actor,
+            programming=arguments.get("programming"),
         )
     if name == "studium_problem_structure_update":
         regenerate = arguments.get("regenerate")
