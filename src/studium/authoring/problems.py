@@ -29,6 +29,7 @@ from studium.storage.init_project import load_state_holding_lock
 from studium.storage.locking import ProjectLocked, project_lock
 from studium.storage.migrate import utc_now
 from studium.storage.records import PROBLEMS, allocate_id, append_jsonl, fold_by_id
+from studium.verification.execution import ReviewedHostExecution, host_execution_authorized, isolation_required
 
 _AUDIT = "audit/audit.jsonl"
 _MAX_PROMPT = 20_000
@@ -279,9 +280,12 @@ def list_problems(root: Path) -> dict[str, object]:
     return {"status": "ok", "problems": [_public(record, root) for record in fold_by_id(root / PROBLEMS)]}
 
 
-def check_problem(root: Path, problem_id: object) -> dict[str, object]:
-    """Run a Rust test three times, or report two_witnesses for a numeric problem.
+def check_problem(
+    root: Path, problem_id: object, *, execution: ReviewedHostExecution | None = None,
+) -> dict[str, object]:
+    """Check numeric evidence, or explicitly reviewed local Rust fixtures.
 
+    External code requires isolation. CLI/MCP cannot grant host authorization.
     A missing compiler does not count as a pass. This does not release the book.
     """
 
@@ -298,7 +302,7 @@ def check_problem(root: Path, problem_id: object) -> dict[str, object]:
         return _check_numeric(root, current)
     if current.get("kind") != "rust":
         return _error("problem.kind_unknown", "problem is not a rust test or a numeric answer")
-    return _check_rust(root, current)
+    return _check_rust(root, current, execution=execution)
 
 
 def remove_problem(
@@ -554,7 +558,9 @@ def _step_checks(record: dict[str, object]) -> "tuple[list[dict[str, object]], F
     return checks, final_value
 
 
-def _check_rust(root: Path, record: dict[str, object]) -> dict[str, object]:
+def _check_rust(
+    root: Path, record: dict[str, object], *, execution: ReviewedHostExecution | None = None,
+) -> dict[str, object]:
     invocation = record.get("invocation")
     source_path = record.get("source_path")
     source_text = record.get("source_text")
@@ -564,6 +570,12 @@ def _check_rust(root: Path, record: dict[str, object]) -> dict[str, object]:
         return _error("problem.invocation_invalid", "the stored Rust source is missing")
     if not _has_real_rust_test(source_text):
         return _refuse_empty_rust(root, record, _NO_TEST)
+    # Cargo may execute build scripts and dependencies outside this source hash.
+    # A single-file local authorization cannot cover that build graph.
+    requested = [str(item) for item in invocation]
+    if requested[0] != "rustc" or not host_execution_authorized(source_text, requested, execution):
+        return {**isolation_required(source_text), "problem": _public({**record, "status": "unchecked", "correct": False})}
+    assert execution is not None
     tool = invocation[0] if isinstance(invocation[0], str) else ""
     compiler = shutil.which(tool)
     state = _read_state(root)
@@ -598,6 +610,7 @@ def _check_rust(root: Path, record: dict[str, object]) -> dict[str, object]:
     updated["correct"] = checked
     updated["classification"] = "PENDING"
     updated["checked_at"] = utc_now()
+    updated["execution"] = execution.audit_record()
     updated["status_text"] = _rust_status_text(root)
     updated["check_kind"] = "reproducibility" if checked else None
     _stamp_inputs(root, updated)
@@ -960,6 +973,8 @@ def _public(record: dict[str, object], root: Path | None = None) -> dict[str, ob
             visible["status_text"] = record["status_text"]
         if record.get("check_kind") == "reproducibility":
             visible["check_kind"] = "reproducibility"
+        if isinstance(record.get("execution"), dict):
+            visible["execution"] = record["execution"]
     if record.get("kind") == "numeric":
         visible["expected"] = record.get("expected")
         visible["excerpts"] = record.get("excerpts")

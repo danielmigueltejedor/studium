@@ -338,10 +338,13 @@ def test_book_next_rejects_a_rust_problem_outside_computer_science(tmp_path, mon
         session=code,
     )
     code_next = dispatch("studium_book_next", {}, session=code)
-    assert code_next["tool"] == "studium_problem_check"
+    assert code_next["tool"] != "studium_problem_check"
     assert code_next["reason"] != _RUST_PROBLEM
-    assert "reproducibility check" in code_next["reason"]
-    assert "not an independent proof" in code_next["reason"]
+    assert code_next["pending_execution"][0]["kind"] == "problem"
+    assert code_next["pending_execution"][0]["status"] == "execution.isolation_required"
+    again = dispatch("studium_book_next", {}, session=code)
+    assert again["tool"] != "studium_problem_check"
+    assert again["pending_execution"] == code_next["pending_execution"]
     assert "three methods" not in code_next["reason"].lower()
     assert code_next["tool"] != "studium_render"
     assert code_next["released"] is False

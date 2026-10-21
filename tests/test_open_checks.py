@@ -2,6 +2,8 @@
 
 import json
 
+from trusted_execution import checked_problem_fixture
+
 from studium.mcp.server import dispatch, handle, open_workspace
 
 _COURSE = {
@@ -24,7 +26,7 @@ def test_rust_test_is_checked_only_after_three_passes(tmp_path, monkeypatch):
     for absent in ("verified", "accepted"):
         assert absent not in recorded["problem"]
     state_before = (root / ".studium" / "state.json").read_bytes()
-    checked = dispatch("studium_problem_check", {"id": "PRB-0001"}, session=session)
+    checked = checked_problem_fixture(root, "PRB-0001")
     assert checked["status"] == "checked"
     assert checked["checked"] is True
     assert checked["released"] is False
@@ -38,6 +40,8 @@ def test_rust_test_is_checked_only_after_three_passes(tmp_path, monkeypatch):
     )
     assert checked["problem"]["status_text"] == checked["message"]
     assert checked["problem"]["check_kind"] == "reproducibility"
+    assert checked["problem"]["execution"]["isolated"] is False
+    assert len(checked["problem"]["execution"]["input_sha256"]) == 64
     assert "three methods" not in json.dumps(checked).lower()
     assert "methods" not in checked["problem"]
     assert (root / ".studium" / "state.json").read_bytes() == state_before
@@ -53,7 +57,7 @@ def test_failing_rust_test_stays_unchecked(tmp_path, monkeypatch):
     monkeypatch.setattr("urllib.request.urlopen", _explode)
     _rust_problem(session, "ownership", "This assertion does not hold.", _FAIL)
     state_before = (root / ".studium" / "state.json").read_bytes()
-    checked = dispatch("studium_problem_check", {"id": "PRB-0001"}, session=session)
+    checked = checked_problem_fixture(root, "PRB-0001")
     assert checked["status"] == "unchecked"
     assert checked["checked"] is False
     assert checked["problem"]["correct"] is False
@@ -77,7 +81,7 @@ def test_comment_only_rust_stays_unchecked_and_assert_eq_can_pass(tmp_path, monk
     recorded = _rust_problem(session, "ownership", "Comments are not a calculation.", comments)
     assert recorded["problem"]["status"] == "unchecked"
     state_before = (root / ".studium" / "state.json").read_bytes()
-    refused = dispatch("studium_problem_check", {"id": recorded["problem"]["id"]}, session=session)
+    refused = checked_problem_fixture(root, recorded["problem"]["id"])
     assert refused["status"] == "unchecked"
     assert refused["checked"] is False
     assert refused["problem"]["correct"] is False
@@ -94,7 +98,7 @@ def test_comment_only_rust_stays_unchecked_and_assert_eq_can_pass(tmp_path, monk
 
     passing = "#[test]\nfn holds() {\n    assert_eq!(2 + 2, 4);\n}\n"
     second = _rust_problem(session, "ownership", "One equality the server can run.", passing)
-    checked = dispatch("studium_problem_check", {"id": second["problem"]["id"]}, session=session)
+    checked = checked_problem_fixture(root, second["problem"]["id"])
     assert checked["status"] == "checked"
     assert checked["checked"] is True
     assert checked["problem"]["correct"] is True
@@ -110,7 +114,7 @@ def test_missing_compiler_does_not_pretend_the_test_passed(tmp_path, monkeypatch
     _rust_problem(session, "ownership", "Compile nothing.", _PASS)
     monkeypatch.setattr("studium.authoring.problems.shutil.which", lambda _name: None)
     monkeypatch.setattr("studium.authoring.problems._execute", _explode)
-    checked = dispatch("studium_problem_check", {"id": "PRB-0001"}, session=session)
+    checked = checked_problem_fixture(root, "PRB-0001")
     assert checked["status"] == "compiler_missing"
     assert checked["checked"] is False
     assert checked["runs"] == []

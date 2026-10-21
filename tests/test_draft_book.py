@@ -5,6 +5,7 @@ import re
 import subprocess
 
 import pytest
+from trusted_execution import checked_figure_fixture
 
 from studium.authoring.render import emit_prose, find_engine, render_text_run
 from studium.mcp.server import dispatch, open_workspace
@@ -655,8 +656,8 @@ def test_draft_cover_math_code_boxes_and_figure_caption(tmp_path, monkeypatch):
         },
         session=session,
     )
-    assert dispatch("studium_figure_check", {"id": scheme["figure"]["id"]}, session=session)["checked"] is True
-    assert dispatch("studium_figure_check", {"id": measured["figure"]["id"]}, session=session)["checked"] is True
+    assert checked_figure_fixture(root, scheme["figure"]["id"])["checked"] is True
+    assert checked_figure_fixture(root, measured["figure"]["id"])["checked"] is True
     rendered = dispatch("studium_render", {}, session=session)
     tex = (root / "latex" / "draft.tex").read_text(encoding="utf-8")
     cover = tex.split(r"\begin{document}", 1)[1].split(r"\clearpage", 1)[0]
