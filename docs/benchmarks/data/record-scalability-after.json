@@ -1,0 +1,55 @@
+{
+  "scope": "JSONL paragraph read and fold only; no PDF page count, semantic audit, full-book benchmark or optimization claim. Files generated deterministically; warm OS cache; five samples; tracemalloc measured separately.",
+  "python": "3.12.15 (main, Sep 30 2026, 22:04:19) [Clang 21.0.0 (clang-2100.3.34.2)]",
+  "platform": "macOS-27.2-arm64-arm-64bit",
+  "results": [
+    {
+      "chapters": 10,
+      "current_paragraphs": 1000,
+      "history_rows": 1200,
+      "evidence_links": 2000,
+      "input_bytes": 2733000,
+      "load_fold_seconds_median": 0.006608,
+      "load_fold_seconds_samples": [
+        0.007488,
+        0.006719,
+        0.005943,
+        0.006608,
+        0.006095
+      ],
+      "python_peak_bytes": 11964152
+    },
+    {
+      "chapters": 30,
+      "current_paragraphs": 3000,
+      "history_rows": 3600,
+      "evidence_links": 6000,
+      "input_bytes": 8199000,
+      "load_fold_seconds_median": 0.018024,
+      "load_fold_seconds_samples": [
+        0.019073,
+        0.018408,
+        0.017722,
+        0.017585,
+        0.018024
+      ],
+      "python_peak_bytes": 35906808
+    },
+    {
+      "chapters": 60,
+      "current_paragraphs": 6000,
+      "history_rows": 7200,
+      "evidence_links": 12000,
+      "input_bytes": 16398000,
+      "load_fold_seconds_median": 0.037158,
+      "load_fold_seconds_samples": [
+        0.043478,
+        0.037158,
+        0.036053,
+        0.037634,
+        0.035454
+      ],
+      "python_peak_bytes": 71823632
+    }
+  ]
+}
