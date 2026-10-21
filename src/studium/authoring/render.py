@@ -790,6 +790,35 @@ _FUNC_WORDS = frozenset(
 
 
 def render_text_run(value: str) -> str:
+    """Render emphasis around prose, code, and mathematics as a single span.
+
+    Hide literal/formula contents while finding delimiters, so operators and
+    strings inside those regions cannot open or close prose emphasis.
+    """
+    text = value.replace("\r\n", "\n").replace("\r", "\n")
+    explicit = _explicit_spans(text)
+    blocked = [(start, end) for start, end, _tex in explicit]
+    blocked.extend(_formula_spans(text, explicit))
+    masked = list(text)
+    for start, end in blocked:
+        masked[start:end] = [" " if char.isspace() else "X" for char in text[start:end]]
+    pattern = re.compile(
+        r"(?<![\\*])(\*\*\*|\*\*|\*)(?!\*)(?=\S)(.+?)(?<=\S)(?<!\*)\1(?!\*)",
+        re.DOTALL,
+    )
+    parts: list[str] = []
+    cursor = 0
+    for match in pattern.finditer("".join(masked)):
+        parts.append(_render_unstyled_text_run(text[cursor:match.start()]))
+        body = render_text_run(text[match.start(2):match.end(2)])
+        command = {"*": r"\emph", "**": r"\textbf", "***": r"\textbf{\emph"}[match[1]]
+        parts.append(command + "{" + body + ("}}" if match[1] == "***" else "}"))
+        cursor = match.end()
+    parts.append(_render_unstyled_text_run(text[cursor:]))
+    return "".join(parts)
+
+
+def _render_unstyled_text_run(value: str) -> str:
     """Escape prose, keep explicit math, and wrap Unicode formulas in math mode."""
 
     text = value.replace("\r\n", "\n").replace("\r", "\n")
@@ -813,25 +842,11 @@ def render_text_run(value: str) -> str:
         if start < cursor:
             continue
         if start > cursor:
-            parts.append(_prose_markup(text[cursor:start]))
+            parts.append(latex_escape(text[cursor:start]))
         parts.append(tex)
         cursor = end
     if cursor < len(text):
-        parts.append(_prose_markup(text[cursor:]))
-    return "".join(parts)
-
-
-def _prose_markup(text: str) -> str:
-    """Minimal emphasis in prose only; code/math are already opaque spans."""
-    pattern = re.compile(r"(\*\*|\*)(?=\S)(.+?)(?<=\S)\1")
-    parts = []
-    cursor = 0
-    for match in pattern.finditer(text):
-        parts.append(latex_escape(text[cursor:match.start()]))
-        command = r"\textbf" if match[1] == "**" else r"\emph"
-        parts.append(command + "{" + latex_escape(match[2]) + "}")
-        cursor = match.end()
-    parts.append(latex_escape(text[cursor:]))
+        parts.append(latex_escape(text[cursor:]))
     return "".join(parts)
 
 
