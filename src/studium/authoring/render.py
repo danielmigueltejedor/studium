@@ -20,6 +20,7 @@ from studium.authoring.computation import ComputationError, current_computations
 from studium.authoring.derivations import derivations_for_section
 from studium.authoring.diagrams import diagram_state, problem_figures, renderable
 from studium.authoring.excerpts import excerpts_by_id
+from studium.authoring.figure_artifacts import checked_figure_output
 from studium.authoring.figures import FIGURE_REF, figures_in_section, referenced_figure_keys
 from studium.authoring.grounding import FORMULA_STATUSES, GroundingContext, formula_statuses
 from studium.authoring.languages import (
@@ -3225,24 +3226,8 @@ def _fit_block(body: str, *, consume_box: bool) -> list[str]:
 
 
 def _checked_output(root: Path, record: dict[str, object]) -> str | None:
-    if record.get("status") != "checked" or record.get("correct") is not True:
-        return None
-    output = record.get("output")
-    if not isinstance(output, str) or not output.startswith("figures/FIG-") or ".." in Path(output).parts:
-        return None
-    if not output.endswith(("/figure.png", "/figure.pdf")):
-        return None
-    path = (root / output).resolve()
-    try:
-        path.relative_to(root.resolve())
-    except ValueError:
-        return None
-    try:
-        if path.is_symlink() or not path.is_file() or path.stat().st_size <= 0:
-            return None
-    except OSError:
-        return None
-    return "../" + output
+    output = checked_figure_output(root, record)
+    return "../" + output if output is not None else None
 
 
 def _audit_label(root: Path, record: dict[str, object]) -> str:
