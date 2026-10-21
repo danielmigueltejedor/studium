@@ -217,7 +217,13 @@ def test_renderer_maps_records_and_preserves_editorial_corrections(tmp_path, mon
         assert any(entry["record"] == paragraph for entry in report["source_map"])
         assert report["counts"]["ERROR"] == 0
         assert (root / "latex" / "draft.quality.md").is_file()
-    after = {path: data for path, data in _snapshot(root).items() if not path.startswith("latex/")}
+    # Publication recovery copies are generated artifacts, not stored content.
+    backups = ".studium/render-backups/"
+    snapshot = _snapshot(root)
+    assert any(path.startswith(backups) for path in snapshot)
+    after = {
+        path: data for path, data in snapshot.items() if not path.startswith(("latex/", backups))
+    }
     assert before == after
 
 

@@ -16,6 +16,7 @@ from pathlib import Path
 
 from studium.authoring.blueprint import current_sections
 from studium.authoring.computation import current_computations
+from studium.authoring.figure_artifacts import checked_figure_output
 from studium.authoring.support import corroboration_for_excerpts, paragraph_citation_blockers
 from studium.policy.trust import contains_directive, directive_changes_policy
 from studium.storage.init_project import load_state_holding_lock
@@ -527,7 +528,7 @@ def unresolved_figure_references(root: Path) -> list[dict[str, str]]:
             target = mapping.get(key.lower())
             if target is None:
                 unresolved.append({"paragraph": paragraph_id, "key": key, "reason": "missing"})
-            elif not (target.get("status") == "checked" and target.get("correct") is True):
+            elif checked_figure_output(root, target) is None:
                 unresolved.append({"paragraph": paragraph_id, "key": key, "reason": "unchecked"})
     return unresolved
 
@@ -580,7 +581,7 @@ def figure_usage(root: Path) -> list[dict[str, object]]:
         identifier = record.get("id")
         if not isinstance(identifier, str):
             continue
-        checked = record.get("status") == "checked" and record.get("correct") is True
+        checked = checked_figure_output(root, record) is not None
         usage.append(
             {
                 "id": identifier,

@@ -17,6 +17,7 @@ from studium.authoring.blueprint import current_sections, is_support_section
 from studium.authoring.contradictions import open_contradictions
 from studium.authoring.depth.planner import planned_figures_for_chapter
 from studium.authoring.derivations import derivations_for_section
+from studium.authoring.figure_artifacts import checked_figure_output
 from studium.authoring.problems import problem_result_current
 from studium.domain.profiles import depth_thresholds
 from studium.storage.init_project import domain_profile as _domain_profile
@@ -118,7 +119,7 @@ def _section_report(root: Path, section_id: str, context: dict[str, object]) -> 
         if isinstance(names, list):
             covered.update(str(name) for name in names)
     notation_count = _notation_count(root, section_id)
-    figures_checked = [item for item in figures if item.get("status") == "checked"]
+    figures_checked = [item for item in figures if checked_figure_output(root, item) is not None]
     min_words = depth_thresholds(profile).min_explanation_words
 
     checks: list[dict[str, object]] = []
