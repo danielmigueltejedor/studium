@@ -7,6 +7,7 @@ from test_figures import _PNG, _ready, _topic
 from test_professional_math import _setup
 from test_scientific_contracts import contract
 from test_user_material_excerpts import _book, _excerpt, _intake, _notes
+from trusted_execution import checked_figure_fixture
 
 from studium.authoring.figures import _run_python
 from studium.authoring.support import citation_blockers, excluded_drafts
@@ -62,7 +63,7 @@ plt.close(f)
         session=session,
     )
     assert recorded["status"] == "recorded", recorded
-    checked = dispatch("studium_figure_check", {"id": recorded["figure"]["id"]}, session=session)
+    checked = checked_figure_fixture(root, recorded["figure"]["id"])
     assert checked["checked"] is True, checked
     assert checked["figure"]["classification"] == "PENDING"
     assert checked["figure"]["proves_science"] is False

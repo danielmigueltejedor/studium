@@ -341,7 +341,7 @@ _TOOLS: tuple[dict[str, object], ...] = (
         "name": "studium_problem_check",
         "class": "WRITE",
         "description": (
-            "Run a stored Rust test 3 times with a timeout. Native code is not sandboxed; use reviewed trusted code or external isolation. "
+            "Inspect a stored problem. Rust execution is blocked with execution.isolation_required: no isolated executor is configured. "
             "Three identical rustc runs are a reproducibility check, not an independent proof. "
             "Do not treat the three runs as three methods. "
             "Record each pass or fail. The problem is checked only when all 3 runs pass. "
@@ -349,7 +349,7 @@ _TOOLS: tuple[dict[str, object], ...] = (
             "The source must contain a #[test] function or an assert, assert_eq, or assert_ne. "
             "A numeric problem stays two_witnesses only when the excerpts are independent, and it is not verified. "
             "Programming contracts return unchecked; their declared cases are not execution evidence. "
-            "If rustc or cargo is missing, return compiler_missing and do not pretend the test passed. "
+            "The MCP tool cannot authorize host execution, including through trusted metadata. "
             "Does not fetch URLs and does not move the book to RELEASED."
         ),
     },
@@ -371,8 +371,8 @@ _TOOLS: tuple[dict[str, object], ...] = (
         "name": "studium_figure_check",
         "class": "WRITE",
         "description": (
-            "Run the stored figure source again. TikZ uses pdflatex. A plot uses python3. "
-            "Timeout and constrained artifact paths. Executed code is not sandboxed. "
+            "Check a stored figure. TikZ uses pdflatex; Python execution returns execution.isolation_required without launching code. "
+            "No isolated Python executor is configured. Timeouts and Python guards are not a security sandbox. "
             "The figure is checked only when that rerun succeeds and the output file exists. "
             "A failed or missing engine returns an error and does not mark the figure checked. "
             "A numeric claim in the caption still needs two excerpts or a replayed computation. "

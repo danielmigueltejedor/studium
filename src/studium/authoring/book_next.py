@@ -142,7 +142,18 @@ def book_next(root: Path) -> dict[str, object]:
 
     token = _BOOK_LANGUAGE.set(active_language(root))
     try:
-        return _book_next(root)
+        result = _book_next(root)
+        pending = _pending_execution(root)
+        if pending:
+            result["pending_execution"] = pending
+            if result.get("tool") is None:
+                result["status"] = "execution.isolation_required"
+                result["reason"] = (
+                    "The draft still has execution checks pending. No isolated executor is configured. "
+                    "Continue independent authoring work; external code must remain UNVERIFIED. "
+                    "A PDF does not resolve these checks or establish academic approval."
+                )
+        return result
     finally:
         _BOOK_LANGUAGE.reset(token)
 
@@ -219,10 +230,6 @@ def _book_next(root: Path) -> dict[str, object]:
     quality = _chapter_gate(state, root, sections)
     if quality is not None:
         return quality
-    if _profile(root) == "COMPUTER_SCIENCE" and _foreign_rust(root) is None:
-        problem = _pending_problem(root, sections)
-        if problem is not None and problem.get("tool") == "studium_problem_check":
-            return _step(state, str(problem["tool"]), _arguments(problem.get("arguments")), str(problem["reason"]))
     pending = _pending_paragraph(root, sections)
     if pending is not None:
         section, excerpt_id = pending
@@ -678,18 +685,9 @@ def _pending_problem(root: Path, sections: list[dict[str, str]]) -> dict[str, ob
             return None
         unchecked = next((record for record in rust if isinstance(record.get("id"), str)), None)
         if unchecked is not None:
-            runs = unchecked.get("runs")
-            failed = isinstance(runs, list) and any(isinstance(run, dict) and run.get("passed") is False for run in runs)
-            offered = offers_for(root, section_id, "problem_check")
-            if failed or offered:
-                mark_blocked(root, section_id=section_id, title=section["title"], reason=_NO_REPLAY)
-                return None
-            remember_offer(root, section_id=section_id, kind="problem_check")
-            return {
-                "tool": "studium_problem_check",
-                "arguments": {"id": unchecked["id"]},
-                "reason": f"Run studium_problem_check. {REPRODUCIBILITY_TEXT}",
-            }
+            # No isolated executor is available. Report this dependency without
+            # repeatedly offering a check that MCP cannot safely perform.
+            return None
         if offers_for(root, section_id, "problem_record"):
             mark_blocked(root, section_id=section_id, title=section["title"], reason=_NO_REPLAY)
             return None
@@ -697,7 +695,10 @@ def _pending_problem(root: Path, sections: list[dict[str, str]]) -> dict[str, ob
         return {
             "tool": "studium_problem_record",
             "arguments": {"section": section_id},
-            "reason": "Record a Rust test for this code section. The server reruns it before it is checked.",
+            "reason": (
+                "Record a Rust test contract for this code section's legacy worked-example workflow. "
+                "It remains unchecked; untrusted program execution requires external isolation."
+            ),
         }
     if any(item.get("status") == "replayed" and item.get("correct") is True for item in list_computations(root)):
         return None
@@ -1505,10 +1506,16 @@ def _pending_figure_reference(
     unresolved = unresolved_figure_references(root)
     if not unresolved:
         return None
-    item = unresolved[0]
+    mapping = figure_reference_map(root)
+    for item in unresolved:
+        target = mapping.get(item["key"].lower())
+        if item["reason"] != "unchecked" or not isinstance(target, dict) or target.get("kind") != "python":
+            break
+    else:
+        return None
     paragraph = item["paragraph"] or "a paragraph"
     if item["reason"] == "unchecked":
-        target = figure_reference_map(root).get(item["key"].lower())
+        target = mapping.get(item["key"].lower())
         identifier = target.get("id") if isinstance(target, dict) else None
         return _step(
             state,
@@ -1530,6 +1537,27 @@ def _pending_figure_reference(
         ),
         blocked=blocked_sections(root),
     )
+
+
+def _pending_execution(root: Path) -> list[dict[str, object]]:
+    """Unavailable execution is a dependency, never an automatic host launch."""
+
+    pending: list[dict[str, object]] = []
+    for path, kind, source_kind in ((PROBLEMS, "problem", "rust"), (FIGURES, "figure", "python")):
+        for record in fold_by_id(root / path):
+            if record.get("kind") != source_kind:
+                continue
+            if record.get("status") == "checked" and record.get("correct") is True:
+                continue
+            pending.append({
+                "kind": kind,
+                "id": record.get("id"),
+                "section": record.get("section"),
+                "status": "execution.isolation_required",
+                "required_action": "Provide an externally isolated executor, or review and replace with declarative content.",
+                "verification": "UNVERIFIED",
+            })
+    return pending
 
 
 def _pending_audit(root: Path, *, repeat: bool = False) -> str | None:

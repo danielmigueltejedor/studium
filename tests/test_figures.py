@@ -4,6 +4,8 @@ import json
 import re
 from pathlib import Path
 
+from trusted_execution import checked_figure_fixture
+
 from studium.authoring.figures import figure_gap
 from studium.authoring.render import find_engine
 from studium.mcp.server import dispatch, handle, open_workspace, tool_names
@@ -57,13 +59,14 @@ def test_passing_rerun_checks_the_figure(tmp_path, monkeypatch):
     assert recorded["released"] is False
     assert "verified" not in json.dumps(recorded)
     assert not (root / "figures" / "FIG-0001" / "figure.png").exists()
-    checked = dispatch("studium_figure_check", {"id": "FIG-0001"}, session=session)
+    checked = checked_figure_fixture(root, "FIG-0001")
     assert checked["status"] == "checked"
     assert checked["checked"] is True
     assert checked["figure"]["correct"] is True
     assert checked["figure"]["status"] == "checked"
     assert checked["figure"]["proves_science"] is False
     assert checked["figure"]["output"] == "figures/FIG-0001/figure.png"
+    assert checked["figure"]["execution"]["isolated"] is False
     assert checked["released"] is False
     assert "verified" not in json.dumps(checked)
     assert (root / "figures" / "FIG-0001" / "figure.png").is_file()
@@ -78,7 +81,7 @@ def test_passing_rerun_checks_the_figure(tmp_path, monkeypatch):
         },
         session=session,
     )
-    numeric_check = dispatch("studium_figure_check", {"id": numeric["figure"]["id"]}, session=session)
+    numeric_check = checked_figure_fixture(root, numeric["figure"]["id"])
     assert numeric_check["status"] == "checked"
     assert numeric_check["figure"]["caption_corroboration"] == "unchecked"
     assert numeric_check["figure"]["proves_science"] is False
@@ -153,7 +156,7 @@ def test_failing_program_stays_unchecked(tmp_path, monkeypatch):
         session=session,
     )
     state_before = (root / ".studium" / "state.json").read_bytes()
-    failed = dispatch("studium_figure_check", {"id": "FIG-0001"}, session=session)
+    failed = checked_figure_fixture(root, "FIG-0001")
     assert failed["status"] == "unchecked"
     assert failed["checked"] is False
     assert failed["figure"]["status"] == "unchecked"
@@ -167,7 +170,7 @@ def test_failing_program_stays_unchecked(tmp_path, monkeypatch):
     assert stored["status"] == "unchecked"
     assert stored["correct"] is False
     monkeypatch.setattr("studium.authoring.figures.shutil.which", lambda _name: None)
-    missing = dispatch("studium_figure_check", {"id": "FIG-0001"}, session=session)
+    missing = checked_figure_fixture(root, "FIG-0001")
     assert missing["status"] == "compiler_missing"
     assert missing["checked"] is False
     assert missing["figure"]["status"] == "unchecked"
@@ -211,8 +214,8 @@ def test_draft_omits_an_unchecked_figure(tmp_path, monkeypatch):
         },
         session=session,
     )
-    assert dispatch("studium_figure_check", {"id": checked["figure"]["id"]}, session=session)["checked"] is True
-    assert dispatch("studium_figure_check", {"id": omitted["figure"]["id"]}, session=session)["checked"] is False
+    assert checked_figure_fixture(root, checked["figure"]["id"])["checked"] is True
+    assert checked_figure_fixture(root, omitted["figure"]["id"])["checked"] is False
     rendered = dispatch("studium_render", {}, session=session)
     tex = (root / "latex" / "draft.tex").read_text(encoding="utf-8")
     chapter, _marker, appendix = tex.partition(r"\chapter{Source audit}")
@@ -280,8 +283,8 @@ def test_removed_figure_is_absent_and_the_warning_stays_in_the_audit(tmp_path, m
         },
         session=session,
     )
-    assert dispatch("studium_figure_check", {"id": checked["figure"]["id"]}, session=session)["checked"] is True
-    assert dispatch("studium_figure_check", {"id": omitted["figure"]["id"]}, session=session)["checked"] is False
+    assert checked_figure_fixture(root, checked["figure"]["id"])["checked"] is True
+    assert checked_figure_fixture(root, omitted["figure"]["id"])["checked"] is False
     state_before = (root / ".studium" / "state.json").read_bytes()
     paragraphs_before = (root / "draft" / "paragraphs.jsonl").read_bytes()
     excerpts_before = (root / "bibliography" / "excerpts.jsonl").read_bytes()
@@ -367,7 +370,7 @@ def test_inline_figure_does_not_force_a_float_page(tmp_path, monkeypatch):
         },
         session=session,
     )
-    checked = dispatch("studium_figure_check", {"id": recorded["figure"]["id"]}, session=session)
+    checked = checked_figure_fixture(root, recorded["figure"]["id"])
     assert checked["checked"] is True
     assert checked["released"] is False
     rendered = dispatch("studium_render", {}, session=session)
@@ -408,7 +411,7 @@ def test_tikz_without_an_output_stays_unchecked(tmp_path, monkeypatch):
         session=session,
     )
     assert recorded["status"] == "recorded"
-    checked = dispatch("studium_figure_check", {"id": recorded["figure"]["id"]}, session=session)
+    checked = checked_figure_fixture(root, recorded["figure"]["id"])
     pdf = root / "figures" / recorded["figure"]["id"] / "figure.pdf"
     if pdf.is_file() and checked["checked"] is True:
         assert checked["status"] == "checked"

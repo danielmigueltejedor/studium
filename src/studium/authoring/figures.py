@@ -22,6 +22,7 @@ from studium.storage.init_project import load_state_holding_lock
 from studium.storage.locking import ProjectLocked, project_lock
 from studium.storage.migrate import utc_now
 from studium.storage.records import FIGURES, PROBLEMS, allocate_id, append_jsonl, fold_by_id
+from studium.verification.execution import ReviewedHostExecution, host_execution_authorized, isolation_required
 
 _AUDIT = "audit/audit.jsonl"
 _MAX_CAPTION = 2_000
@@ -309,11 +310,13 @@ def record_figure(
         return _error("storage.locked", "project is locked")
 
 
-def check_figure(root: Path, figure_id: object) -> dict[str, object]:
-    """Run the stored source again. A missing engine or a failed run is not checked.
+def check_figure(
+    root: Path, figure_id: object, *, execution: ReviewedHostExecution | None = None,
+) -> dict[str, object]:
+    """Check TikZ or explicitly reviewed author-owned Python source.
 
-    The stored source is what runs. A description of the drawing is not accepted.
-    This does not fetch a URL and does not release the book.
+    Python is refused by default; the legacy Python guards are not isolation.
+    A missing engine or a failed run is not checked. This does not release a book.
     """
 
     identifier = _identifier(figure_id)
@@ -326,6 +329,8 @@ def check_figure(root: Path, figure_id: object) -> dict[str, object]:
     source = current.get("source")
     if kind not in _KINDS or not isinstance(source, str) or not source.strip():
         return _error("figure.source_missing", "a figure needs executable source")
+    if kind == "python" and not host_execution_authorized(source, ["python", "figure"], execution):
+        return {**isolation_required(source), "figure": _public({**current, "status": "unchecked", "correct": False})}
     engine_name = "pdflatex" if kind == "tikz" else sys.executable
     engine = shutil.which(engine_name)
     state = _read_state(root)
@@ -365,6 +370,9 @@ def check_figure(root: Path, figure_id: object) -> dict[str, object]:
     updated["proves_science"] = False
     updated["classification"] = "PENDING"
     updated["checked_at"] = utc_now()
+    if kind == "python":
+        assert execution is not None
+        updated["execution"] = execution.audit_record()
     excerpts_value = updated.get("excerpts")
     excerpts = excerpts_value if isinstance(excerpts_value, list) else []
     excerpt_ids = [item for item in excerpts if isinstance(item, str)]
@@ -750,6 +758,8 @@ def _public(record: dict[str, object]) -> dict[str, object]:
         visible["key"] = record["key"]
     if isinstance(record.get("output"), str):
         visible["output"] = record["output"]
+    if isinstance(record.get("execution"), dict):
+        visible["execution"] = record["execution"]
     return visible
 
 

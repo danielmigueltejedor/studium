@@ -28,8 +28,11 @@ Use `studium.verification.programs.verify_program` with the appropriate mode and
 explicit trust opt-in for reviewed source, or execute within external isolation.
 Record exact source hashes, compiler/interpreter versions, commands, outputs and
 oracles. Finite test cases do not establish correctness for all inputs or
-academic approval. The legacy Rust runner has timeouts and offline Cargo
-dependency resolution, but does not provide a network or filesystem sandbox.
+academic approval. Legacy Rust checks now return `execution.isolation_required` through CLI/MCP.
+Trusted author-owned single-file Rust fixtures can run only through an explicit
+local Python capability bound to source and invocation. Cargo remains blocked
+because a single-file hash cannot cover its build scripts and dependencies.
+Neither runner is a security sandbox; see [Security](security.md).
 
 The ordinary renderer retains the evidence policy. An explicit review copy can
 show provisional reference solutions and their status. Programming practice

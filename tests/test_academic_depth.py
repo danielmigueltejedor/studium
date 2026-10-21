@@ -4,6 +4,8 @@ Planning, derivations, notation, completeness reports, and their LaTeX output.
 Every claim here is checked against what the pipeline actually returns.
 """
 
+from trusted_execution import checked_figure_fixture
+
 from studium.authoring.depth.length import (
     LENGTH_PREFERENCES,
     estimate_book_scope,
@@ -578,7 +580,7 @@ def test_a_stem_chapter_needs_a_checked_figure(tmp_path, monkeypatch):
     # Recorded but not yet re-run: the drawing still does not count.
     assert figures_check()["met"] is False
 
-    checked = dispatch("studium_figure_check", {"id": recorded["figure"]["id"]}, session=session)
+    checked = checked_figure_fixture(_root, recorded["figure"]["id"])
     assert checked["status"] == "checked", checked
     assert figures_check()["met"] is True
 
