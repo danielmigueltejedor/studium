@@ -798,12 +798,11 @@ def render_text_run(value: str) -> str:
     text = value.replace("\r\n", "\n").replace("\r", "\n")
     explicit = _explicit_spans(text)
     blocked = [(start, end) for start, end, _tex in explicit]
-    blocked.extend(_formula_spans(text, explicit))
     masked = list(text)
     for start, end in blocked:
         masked[start:end] = [" " if char.isspace() else "X" for char in text[start:end]]
     pattern = re.compile(
-        r"(?<![\\*])(\*\*\*|\*\*|\*)(?!\*)(?=\S)(.+?)(?<=\S)(?<!\*)\1(?!\*)",
+        r"(?<![\w\\*])(\*\*\*|\*\*|\*)(?!\*)(?=\S)(.+?)(?<=\S)(?<!\*)\1(?![\w*])",
         re.DOTALL,
     )
     parts: list[str] = []
