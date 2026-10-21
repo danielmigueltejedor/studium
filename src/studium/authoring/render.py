@@ -1,15 +1,18 @@
 """LaTeX output adapter for a draft. This is not a release build.
 
 Writes ``latex/draft.tex``. Compiles ``latex/draft.pdf`` only when tectonic
-or pdflatex is on PATH. A missing engine leaves no PDF behind.
+or pdflatex is on PATH. A failed attempt preserves the previous PDF.
 """
 
+import os
 import re
 import shutil
 import subprocess
 from contextvars import ContextVar
 from fractions import Fraction
 from pathlib import Path
+from tempfile import TemporaryDirectory
+from uuid import uuid4
 
 from studium.authoring.academic_blueprint import current_academic_blueprint
 from studium.authoring.blueprint import current_sections
@@ -369,33 +372,77 @@ def render_draft(root: Path, *, include_unsupported: bool = False) -> dict[str, 
 
     try:
         with project_lock(root):
-            state = load_state_holding_lock(root)
-            tex_path, pdf_path = _outputs(root)
-            if tex_path is None or pdf_path is None:
-                return _error("render.path_escaped", "draft path leaves the project")
-            if book_language(root) is None:
-                return _error("render.invalid_language", INVALID_LANGUAGE)
-            document = _document(root, include_unsupported=include_unsupported)
-            tex_path.parent.mkdir(parents=True, exist_ok=True)
-            tex_path.write_text(document, encoding="utf-8")
-            _remove_stale_toc(tex_path)
-            if pdf_path.exists():
-                pdf_path.unlink()
-            local = _local(state)
-            project_state = state.get("state")
+            return _render_holding_lock(root, include_unsupported=include_unsupported)
     except UnsupportedLiteralCharacter as error:
         return _error("render.unsupported_literal_character", str(error))
     except ProjectLocked:
         return _error("storage.locked", "project is locked")
     except OSError:
-        return _error("render.write_failed", "the .tex draft could not be written")
+        return _error("render.write_failed", "the draft attempt could not be written; publication recovery copies are under .studium/render-backups")
 
+
+def _render_holding_lock(root: Path, *, include_unsupported: bool) -> dict[str, object]:
+    state = load_state_holding_lock(root)
+    tex_path, pdf_path = _outputs(root)
+    if tex_path is None or pdf_path is None:
+        return _error("render.path_escaped", "draft path leaves the project")
+    if tex_path.is_symlink() or pdf_path.is_symlink():
+        return _error("render.path_escaped", "draft artifacts must not be symlinks")
+    if book_language(root) is None:
+        return _error("render.invalid_language", INVALID_LANGUAGE)
+    document = _document(root, include_unsupported=include_unsupported)
+    tex_path.parent.mkdir(parents=True, exist_ok=True)
+    # A sibling of latex keeps authored ../figures and ../editorial-config
+    # references valid. Compiler intermediates never touch the current edition.
+    with TemporaryDirectory(prefix=".studium-render-", dir=root) as temporary:
+        attempt = Path(temporary) / _TEX_NAME
+        attempt.write_text(document, encoding="utf-8")
+        body = _render_attempt(root, attempt, document, state, include_unsupported=include_unsupported)
+        succeeded = body.get("pdf") is not None
+        preserve = pdf_path.exists()
+        if succeeded and preserve:
+            # Recovery copy precedes every replacement. Files are individually
+            # atomic; this is deliberately not a multi-file filesystem transaction.
+            backup = root / ".studium" / "render-backups" / uuid4().hex
+            try:
+                backup.resolve().relative_to(root.resolve())
+            except ValueError as exc:
+                raise OSError("render backup leaves the project") from exc
+            backup.mkdir(parents=True)
+            for previous in tex_path.parent.glob("draft.*"):
+                if previous.is_symlink():
+                    raise OSError("refusing a symlinked render artifact")
+                if previous.is_file():
+                    shutil.copy2(previous, backup / previous.name)
+            body["previous_artifacts"] = _relative(root, backup)
+        failed_prefix = "draft.failed" if preserve and not succeeded else "draft"
+        for artifact in sorted(Path(temporary).glob("draft.*"), key=lambda path: path.suffix == ".pdf"):
+            if artifact.suffix == ".pdf" and not succeeded:
+                continue
+            destination = tex_path.parent / (failed_prefix + artifact.name[len("draft"):])
+            with artifact.open("rb") as stream:
+                os.fsync(stream.fileno())
+            os.replace(artifact, destination)
+        body["tex"] = "latex/" + failed_prefix + ".tex"
+        body["editorial_report"] = "latex/" + failed_prefix + ".quality.json"
+        if body.get("compiler_log") is not None:
+            body["compiler_log"] = "latex/" + failed_prefix + ".compiler.log"
+        if preserve and not succeeded:
+            body["previous_pdf"] = _relative(root, pdf_path)
+        return body
+
+
+def _render_attempt(
+    root: Path, tex_path: Path, document: str, state: dict[str, object], *, include_unsupported: bool
+) -> dict[str, object]:
+    pdf_path = tex_path.with_suffix(".pdf")
+    local = _local(state)
+    project_state = state.get("state")
     engine = find_engine()
-    relative_tex = _relative(root, tex_path)
     unwritten = _first_unwritten_title(root, include_unsupported=include_unsupported)
     body = {
         "includes_unsupported_drafts": include_unsupported,
-        "tex": relative_tex,
+        "tex": "latex/draft.tex",
         "pdf": None,
         "released": project_state == "RELEASED",
         "project_state": project_state,
@@ -421,7 +468,7 @@ def render_draft(root: Path, *, include_unsupported: bool = False) -> dict[str, 
     _save_editorial_report(tex_path, document, log, compiled and _is_pdf(pdf_path), engine, body)
     body["compiler_log"] = _relative(root, process_log) if process_log.is_file() else None
     if compiled and _is_pdf(pdf_path):
-        body["pdf"] = _relative(root, pdf_path)
+        body["pdf"] = "latex/draft.pdf"
         return _render_status(body, status="rendered", message="compiled a DRAFT PDF", unwritten=unwritten)
     if pdf_path.exists():
         pdf_path.unlink()
