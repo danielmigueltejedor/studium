@@ -13,7 +13,7 @@ from pathlib import Path
 
 from studium.authoring.academic_blueprint import current_academic_blueprint
 from studium.authoring.blueprint import current_sections
-from studium.authoring.computation import current_computations
+from studium.authoring.computation import ComputationError, current_computations, evaluate
 from studium.authoring.derivations import derivations_for_section
 from studium.authoring.diagrams import diagram_state, problem_figures, renderable
 from studium.authoring.excerpts import excerpts_by_id
@@ -2310,7 +2310,7 @@ def _solution_body(
     steps = solution.get("steps")
     development = solution.get("development")
     if isinstance(steps, list) and steps:
-        if isinstance(development, list) and development and staged:
+        if isinstance(development, list) and development:
             body.extend(_numbered_steps([str(item) for item in development], [], language))
         body.extend(_steps_lines(steps, language))
     elif isinstance(development, list) and development:
@@ -2691,7 +2691,15 @@ def _steps_lines(steps: list[object], language: BookLanguage) -> list[str]:
         if isinstance(expression, str) and expression.strip():
             try:
                 numeric = numeric_latex(expression)
-            except MathError:
+                actual = evaluate(expression)
+                # Evaluate the printed expression, rather than copying an
+                # unchecked expected value. Keep discrepancies visible in the
+                # verification section below.
+                if actual.denominator == 1:
+                    numeric += " = " + _number_tex(str(actual.numerator))
+                else:
+                    numeric += r" \approx " + _number_tex(f"{float(actual):.8g}")
+            except (MathError, ComputationError, OverflowError):
                 # Legacy malformed input stays visible for correction.
                 lines.extend(_listing_lines(expression, ""))
             else:
