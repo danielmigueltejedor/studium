@@ -833,11 +833,12 @@ def _public(record: dict[str, object]) -> dict[str, object]:
         visible["key"] = record["key"]
     if isinstance(record.get("output"), str):
         visible["output"] = record["output"]
-    if isinstance(record.get("image"), dict):
+    image = record.get("image")
+    if isinstance(image, dict):
         visible["image"] = {
-            key: record["image"][key]
+            key: image[key]
             for key in ("title", "author", "license", "license_url", "url", "width", "height", "bytes")
-            if key in record["image"]
+            if key in image
         }
     if isinstance(record.get("execution"), dict):
         visible["execution"] = record["execution"]
