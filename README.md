@@ -494,6 +494,7 @@ Detailed technical documentation is available in the `docs/` directory.
 
 | Document | Description |
 |---|---|
+| [Exercises by discipline](./docs/discipline-exercises.md) | Discursive exercises per domain profile and image figures with licences |
 | [Research Model](./docs/research-model.md) | Academic research and source discovery |
 | [Evidence Model](./docs/evidence-model.md) | Provenance, authority, and source versioning |
 | [AI Orchestration](./docs/ai-orchestration.md) | Agent interaction and workflow coordination |
