@@ -8,6 +8,7 @@ import os
 import re
 import shutil
 import subprocess
+import urllib.parse
 from contextvars import ContextVar
 from fractions import Fraction
 from pathlib import Path
@@ -365,7 +366,16 @@ def _map_math_run(text: str, *, escape: bool = False) -> str:
             continue
         parts.append(character)
         index += 1
-    return "".join(parts)
+    return _brace_ascii_exponents("".join(parts))
+
+
+# TeX raises only the first character of ``10^14``. A multi-digit or negative
+# exponent typed in ASCII needs its braces.
+_UNBRACED_EXPONENT = re.compile(r"\^(-\d+|\d{2,})")
+
+
+def _brace_ascii_exponents(tex: str) -> str:
+    return _UNBRACED_EXPONENT.sub(lambda match: "^{" + match.group(1) + "}", tex)
 
 
 def render_draft(root: Path, *, include_unsupported: bool = False) -> dict[str, object]:
@@ -476,7 +486,31 @@ def _render_attempt(
     message = "the LaTeX engine failed. Wrote the .tex draft. No PDF was created."
     if detail:
         message = f"{message} {detail}"
+    missing = _missing_latex_packages(log + "\n" + detail)
+    if missing:
+        body["missing_latex_packages"] = missing
+        message = (
+            f"{message} The TeX installation lacks {', '.join(missing)}; "
+            f"install with: tlmgr install {' '.join(missing)}"
+        )
     return _render_status(body, status="render.compile_failed", message=message, unwritten=unwritten)
+
+
+_MISSING_STYLE = re.compile(r"File [`']([A-Za-z0-9_.+-]+)\.(?:sty|cls)' not found")
+
+
+def _missing_latex_packages(log: str) -> list[str]:
+    """Packages a failed compile could not find, in order, without duplicates.
+
+    A basic TeX Live lacks packages such as ``accsupp``; the raw log ended in a
+    bare engine failure and the cause had to be read from it by hand.
+    """
+
+    found: list[str] = []
+    for name in _MISSING_STYLE.findall(log):
+        if name not in found:
+            found.append(name)
+    return found
 
 
 def _save_editorial_report(
@@ -702,6 +736,7 @@ _EXTRA_BOX_LABELS: dict[str, dict[str, str]] = {
         "given": "Datos",
         "unknown": "Incógnita",
         "model": "Modelo físico",
+        "model_generic": "Modelo",
         "assumptions": "Hipótesis",
         "principles": "Principios",
         "steps": "Pasos",
@@ -763,6 +798,7 @@ _EXTRA_BOX_DEFAULTS = {
     "given": "Given",
     "unknown": "Unknown",
     "model": "Physical model",
+    "model_generic": "Model",
     "assumptions": "Assumptions",
     "principles": "Principles",
     "steps": "Steps",
@@ -1057,7 +1093,72 @@ def _script_content(mapping: dict[str, str], character: str) -> str:
     return mapping[character][2:-1]
 
 
+_QUANTITY = re.compile(
+    r"(?P<number>[+-]?\d+(?:[.,]\d+)?)?[ \u00a0]?"
+    r"(?P<unit>(?=[^\d]*[µμ°²³⁻/^])[A-Za-zµμ°Ω][A-Za-zµμ°Ω/·\-⁰¹²³⁴⁵⁶⁷⁸⁹⁻^0-9]*)"
+)
+_UNIT_SUPERSCRIPTS = {chr(0x2070): "0", "¹": "1", "²": "2", "³": "3", **{chr(0x2070 + i): str(i) for i in range(4, 10)}, "⁻": "-"}
+
+
+def _quantity_tex(span: str) -> str | None:
+    """A measured quantity in prose, ``10 µm`` or ``25 °C``, set as upright units.
+
+    The generic path put ``10 µm`` in math italics with the space lost and cut
+    ``1,9 g/cm³`` in two. A number and a unit that is recognisably a unit (it
+    has a micro sign, a degree sign, a power or a slash) become one formula.
+    """
+
+    match = _QUANTITY.fullmatch(span.strip())
+    if match is None:
+        return None
+    if match.group("number") is None and not re.fullmatch(r"[µμ][A-Za-z]+", match.group("unit")):
+        return None
+    unit = match.group("unit")
+    roman: list[str] = []
+    out: list[str] = []
+
+    def flush() -> None:
+        if roman:
+            out.append(r"\mathrm{" + "".join(roman) + "}")
+            roman.clear()
+
+    index = 0
+    while index < len(unit):
+        character = unit[index]
+        if character in "µμ":
+            flush()
+            out.append(r"\mu ")
+            index += 1
+        elif character == "°":
+            flush()
+            out.append(r"{}^{\circ}")
+            index += 1
+        elif character in _UNIT_SUPERSCRIPTS or character == "^":
+            flush()
+            run: list[str] = []
+            index += 1 if character == "^" else 0
+            while index < len(unit) and (unit[index] in _UNIT_SUPERSCRIPTS or unit[index].isdigit() or unit[index] == "-"):
+                run.append(_UNIT_SUPERSCRIPTS.get(unit[index], unit[index]))
+                index += 1
+            out.append("^{" + "".join(run) + "}")
+        elif character == "·":
+            roman.append(r"\cdot ")
+            index += 1
+        else:
+            roman.append(character)
+            index += 1
+    flush()
+    rendered = "".join(out).replace(r"\mu \mathrm{", r"\mu\mathrm{")
+    number = match.group("number")
+    if number is not None:
+        rendered = number.replace(",", "{,}") + r"\," + rendered
+    return "\\(" + rendered + "\\)"
+
+
 def _formula_tex(span: str) -> str:
+    quantity = _quantity_tex(span)
+    if quantity is not None:
+        return quantity
     return "\\(" + _map_math_run(span, escape=True) + "\\)"
 
 
@@ -1212,6 +1313,13 @@ def _tokenize(text: str) -> list[tuple[int, int, str]]:
                 end += 1
                 while end < len(text) and text[end].isdigit():
                     end += 1
+            elif end + 1 < len(text) and text[end] == "," and text[end + 1].isdigit():
+                # A Spanish decimal comma belongs to its number; "1,2,3" is a list.
+                cursor = end + 1
+                while cursor < len(text) and text[cursor].isdigit():
+                    cursor += 1
+                if not (cursor + 1 < len(text) and text[cursor] == "," and text[cursor + 1].isdigit()):
+                    end = cursor
             tokens.append((index, end, "num"))
             index = end
             continue
@@ -1348,6 +1456,17 @@ def _inline_code(code: str) -> str:
     return r"\texttt{" + escaped + "}"
 
 
+# The T1 Latin Modern typewriter font ligates ``<<``, ``>>`` and ``--`` into
+# guillemets and an en dash, and babel's Spanish shorthands turn ``<<``/``>>``
+# into quotation marks that also end the ``\texttt`` group. An empty group after
+# each character keeps every code character literal.
+_LITERAL_LIGATURE_BREAKS = {
+    "<": r"\textless{}",
+    ">": r"\textgreater{}",
+    "-": "-{}",
+}
+
+
 class UnsupportedLiteralCharacter(ValueError):
     """The selected literal font cannot represent the source faithfully."""
 
@@ -1365,6 +1484,8 @@ def _texttt(code: str) -> str:
             continue
         elif ord(character) > 255:
             raise UnsupportedLiteralCharacter(f"Unsupported literal character U+{ord(character):04X}; use a language escape or a supported font")
+        elif character in _LITERAL_LIGATURE_BREAKS:
+            parts.append(_LITERAL_LIGATURE_BREAKS[character])
         else:
             parts.append(character)
     return "".join(parts)
@@ -1773,11 +1894,21 @@ def _document(root: Path, *, include_unsupported: bool = False) -> str:
         _REVIEW_RENDERING.reset(token)
 
 
-def _render_sections(root: Path, key: str, defaults: tuple[str, ...]) -> tuple[str, ...]:
-    """Explicit reader editions may select sections without changing authoring data."""
+# Profiles whose books are not built on notation or a formula sheet. For them an
+# empty appendix is omitted unless the project selects its appendices itself.
+_NARRATIVE_PROFILES = frozenset({"HUMANITIES", "SOCIAL_SCIENCES", "LAW", "LIFE_SCIENCES"})
+
+
+def _render_config(root: Path) -> dict[str, object]:
     config = load_project_toml(root).get("render", {})
     if not isinstance(config, dict):
         raise ValueError("render must be a TOML table")
+    return config
+
+
+def _render_sections(root: Path, key: str, defaults: tuple[str, ...]) -> tuple[str, ...]:
+    """Explicit reader editions may select sections without changing authoring data."""
+    config = _render_config(root)
     sections = config.get(key, list(defaults))
     if not isinstance(sections, list) or any(not isinstance(s, str) or s not in defaults for s in sections):
         raise ValueError(f"render.{key} must be a list drawn from {defaults}")
@@ -1870,21 +2001,32 @@ def _document_body(root: Path, *, include_unsupported: bool = False) -> str:
             lines.extend(_chapter_lines(root, section["id"], section_paragraphs, copy, language))
     if appendices:
         lines.append(r"\appendix")
+    empty_appendix = ["", r"\noindent " + latex_escape(copy["empty"])]
+    narrative = _domain_profile(root) in _NARRATIVE_PROFILES
+    chosen = "appendices" in _render_config(root)
     for appendix in appendices:
         if appendix == "diagram_report":
             lines.extend(_diagram_report_lines(root, language))
             continue
-        lines.append(r"\chapter{" + latex_escape(copy[appendix]) + "}")
+        body: list[str] = []
         if appendix == "notation":
-            lines.extend(_notation_lines(root, copy, language))
+            body = _notation_lines(root, copy, language)
         elif appendix == "formulas":
-            lines.extend(_formula_sheet_lines(root, copy))
+            body = _formula_sheet_lines(root, copy)
         elif appendix == "solutions":
-            lines.extend(_solution_lines(root, copy, language))
+            body = _solution_lines(root, copy, language)
         elif appendix == "audit":
-            lines.extend(_audit_lines(root, paragraphs, claims, titles, excerpts, sources, copy, kind, counts, language))
+            body = _audit_lines(root, paragraphs, claims, titles, excerpts, sources, copy, kind, counts, language)
         elif appendix == "study":
-            lines.extend(_study_plan_lines(root, unwritten, set(by_section), copy, language))
+            body = _study_plan_lines(root, unwritten, set(by_section), copy, language)
+        # An appendix that only says it has no material is noise in a history,
+        # literature or biology book the author did not configure: notation and
+        # a formula sheet do not apply, and a plan with nothing unwritten has
+        # nothing to plan. Other books keep the empty appendix as a visible gap.
+        if narrative and not chosen and body == empty_appendix and appendix in ("notation", "formulas", "study"):
+            continue
+        lines.append(r"\chapter{" + latex_escape(copy[appendix]) + "}")
+        lines.extend(body)
     lines.extend(
         [
             r"\backmatter",
@@ -2363,7 +2505,8 @@ def _solution_body(
         body.extend(_labeled(_extra_label(language, "unknown"), unknown))
     model = solution.get("model")
     if isinstance(model, list):
-        body.extend(_model_lines(model, language))
+        physical = root is None or _domain_profile(root) == "STEM"
+        body.extend(_model_lines(model, language, physical=physical))
     assumptions = solution.get("assumptions")
     if isinstance(assumptions, list):
         body.extend(_bullet_items(_extra_label(language, "assumptions"), [str(item) for item in assumptions], language))
@@ -2714,10 +2857,11 @@ def _given_lines(given: list[object], language: BookLanguage) -> list[str]:
     return lines
 
 
-def _model_lines(model: list[object], language: BookLanguage) -> list[str]:
+def _model_lines(model: list[object], language: BookLanguage, *, physical: bool = True) -> list[str]:
     if not model:
         return []
-    lines = ["", r"\noindent\textbf{" + latex_escape(_extra_label(language, "model")) + "}"]
+    heading = _extra_label(language, "model" if physical else "model_generic")
+    lines = ["", r"\noindent\textbf{" + latex_escape(heading) + "}"]
     for raw in model:
         if not isinstance(raw, dict):
             continue
@@ -3553,11 +3697,14 @@ def _audit_lines(
 
     # --- per-paragraph verification status (compact) ---
     grounding = GroundingContext(root)
+    statuses: list[tuple[str, str]] = []
     for idx, paragraph in enumerate(paragraphs, 1):
         label = _audit_label(root, paragraph)
         visible = _visible_label(copy, label)
         equations = _equation_status_note(root, paragraph, grounding, language)
-        lines.extend(["", r"\noindent " + latex_escape(f"¶{idx}: {visible}.{equations}")])
+        statuses.append((f"¶{idx}", f"{visible}.{equations}"))
+    for line in _collapse_runs(statuses):
+        lines.extend(["", r"\noindent " + latex_escape(line)])
 
     # --- evidence grouped by source ---
     source_paragraphs: dict[str, list[int]] = {}
@@ -3596,6 +3743,7 @@ def _audit_lines(
         lines.extend(_source_notes(claim, titles, excerpts, sources, copy, include_text=True))
 
     # --- audits and figures ---
+    recorded_audits: list[tuple[str, str]] = []
     for record in fold_by_id(root / AUDITS):
         if record.get("status") != "recorded":
             continue
@@ -3604,7 +3752,9 @@ def _audit_lines(
         if target.startswith("PAR-"):
             target = ""
         check_kind = _str_field(record, "kind")
-        lines.extend(["", r"\noindent " + latex_escape(f"{identifier}: {target} {check_kind}".strip())])
+        recorded_audits.append((identifier, f"{target} {check_kind}".strip()))
+    for line in _collapse_runs(recorded_audits):
+        lines.extend(["", r"\noindent " + latex_escape(line)])
     for record in fold_by_id(root / FIGURES):
         identifier = _str_field(record, "id", "figure")
         if _checked_output(root, record) is None:
@@ -3612,6 +3762,31 @@ def _audit_lines(
             continue
         if record.get("caption_corroboration") == "unchecked":
             lines.extend(["", r"\noindent " + latex_escape(f"{identifier}: {copy['caption']}")])
+    return lines
+
+
+_MIN_COLLAPSED_RUN = 4
+
+
+def _collapse_runs(entries: list[tuple[str, str]]) -> list[str]:
+    """``label: status`` lines, with a run of identical statuses as one range.
+
+    A book of eighty paragraphs that all share one status printed eighty
+    identical lines in the source audit. A run of ``_MIN_COLLAPSED_RUN`` or more
+    consecutive entries prints once as ``first–last: status``.
+    """
+
+    lines: list[str] = []
+    index = 0
+    while index < len(entries):
+        end = index
+        while end + 1 < len(entries) and entries[end + 1][1] == entries[index][1]:
+            end += 1
+        if end - index + 1 >= _MIN_COLLAPSED_RUN:
+            lines.append(f"{entries[index][0]}–{entries[end][0]}: {entries[index][1]}")
+        else:
+            lines.extend(f"{label}: {status}" for label, status in entries[index : end + 1])
+        index = end + 1
     return lines
 
 
@@ -3624,6 +3799,9 @@ def _visible_label(copy: dict[str, str], label: str) -> str:
     }.get(label, label)
 
 
+_URL_SAFE_CHARACTERS = "%:/?#[]@!$&'()*+,;=-._~"
+
+
 def _url_tex(url: str) -> str:
     """A clickable, breakable URL. ``\\url`` keeps the raw characters and lets
     TeX break at ``/``, ``.`` and ``-`` so a long address cannot overflow."""
@@ -3632,7 +3810,10 @@ def _url_tex(url: str) -> str:
     if not cleaned:
         return ""
     if "://" in cleaned or cleaned.startswith("www."):
-        return r"\url{" + cleaned + "}"
+        # pdfLaTeX cannot typeset non-ASCII characters inside ``\url``; an
+        # accented title such as ``Mester_de_clerecía`` printed as mojibake. The
+        # percent-encoded form is the same address, readable and copyable.
+        return r"\url{" + urllib.parse.quote(cleaned, safe=_URL_SAFE_CHARACTERS) + "}"
     return latex_escape(cleaned)
 
 

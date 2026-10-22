@@ -29,7 +29,8 @@ _TOOLS: tuple[dict[str, object], ...] = (
             "STEM is for engineering, physics, or math courses. "
             "A topic book requires slug and topic. It takes no university, degree, or course guide. "
             "A programming topic uses COMPUTER_SCIENCE. "
-            "Computing, math, and engineering topics are not stored as GENERAL. "
+            "A biology, medicine, or other life-science topic uses LIFE_SCIENCES. "
+            "Computing, math, engineering, and life-science topics are not stored as GENERAL. "
             "A new topic book exists, and writing is not available yet. "
             "Set language for either kind: a BCP 47 tag or a TeX babel name. An empty or unknown code is rejected. "
             "Evidence rules are the same for both kinds. "
@@ -983,7 +984,8 @@ def _schema(tool: Mapping[str, object]) -> dict[str, object]:
                         "Create-time only. Course books default to GENERAL when omitted. "
                         "STEM is for engineering, physics, or math courses. "
                         "A programming topic uses COMPUTER_SCIENCE. "
-                        "Computing, math, and engineering topics are not stored as GENERAL."
+                        "A biology, medicine, or other life-science topic uses LIFE_SCIENCES. "
+                        "Computing, math, engineering, and life-science topics are not stored as GENERAL."
                     ),
                 },
                 "sources": {"type": "string"},

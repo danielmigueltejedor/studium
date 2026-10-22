@@ -37,8 +37,11 @@ from studium.storage.records import (
 #: (a comma followed by one or two digits, or four or more, is a decimal; ``1,000`` stays a thousands group).
 _NUMBER = r"-?\d+(?:(?:\{,\}|\.)\d+|,\d{1,2}(?!\d)|,\d{4,})?"
 
+# ``ratio is 3:1`` states a pair, not the number 3. Read as the number 3 it
+# contradicted ``the genotypic ratio is 1:2:1`` in the same chapter, although
+# the two sentences describe different ratios.
 _QUANTITY = re.compile(
-    rf"\b([A-Za-z][A-Za-z0-9_-]{{1,40}})\s*(?:=|is|equals)\s*({_NUMBER})",
+    rf"\b([A-Za-z][A-Za-z0-9_-]{{1,40}})\s*(?:=|is|equals)\s*({_NUMBER})(?!\s*:\s*\d)",
     re.IGNORECASE,
 )
 

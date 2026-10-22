@@ -19,6 +19,7 @@ from studium.storage.records import PUBLIC_BIBLIOGRAPHY, fold_by_id
 _MIN_SOURCES: dict[str, int] = {
     "STEM": 2,
     "COMPUTER_SCIENCE": 2,
+    "LIFE_SCIENCES": 2,
     "GENERAL": 2,
     "HUMANITIES": 2,
     "SOCIAL_SCIENCES": 2,

@@ -156,6 +156,35 @@ def parse_log(log: str, *, filename: str, ranges: list[dict[str, object]]) -> li
     return issues
 
 
+# Prose is escaped, so a LaTeX command typed into a paragraph prints as text:
+# ``Figura \\ref{fig:x}`` reaches the page as the letters ``\\ref{fig:x}``.
+_LITERAL_COMMAND = re.compile(r"\\textbackslash\{\}(ref|eqref|cref|cite|label|autoref)\\\{([^{}]*?)\\\}")
+
+
+def literal_command_issues(
+    document: str, *, filename: str, ranges: list[dict[str, object]]
+) -> list[dict[str, object]]:
+    """One warning for each LaTeX cross-reference command that printed literally."""
+
+    issues: list[dict[str, object]] = []
+    for match in _LITERAL_COMMAND.finditer(document):
+        number = document.count("\n", 0, match.start()) + 1
+        issues.append(
+            {
+                "severity": "WARNING",
+                "type": "literal_latex_command",
+                "file": filename,
+                "line": number,
+                **_origin(number, ranges),
+                "evidence": f"\\{match.group(1)}{{{match.group(2)}}} prints as text in the PDF",
+                "method": "document_scan",
+                "verification": "observed",
+                "suggestion": "Write {{fig:ID}} for a figure reference; prose is escaped, so LaTeX commands are not run.",
+            }
+        )
+    return issues
+
+
 def editorial_report(
     document: str, log: str, *, filename: str, compiled: bool, compiler: str | None
 ) -> dict[str, object]:
@@ -176,6 +205,7 @@ def editorial_report(
                 "suggestion": "Inspect the preserved process output for timeout, missing packages or engine errors.",
             }
         )
+    issues.extend(literal_command_issues(document, filename=filename, ranges=ranges))
     for index, issue in enumerate(issues, 1):
         issue["id"] = f"PUB-{index:04d}"
     return {

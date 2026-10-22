@@ -11,6 +11,7 @@ BOOK_KINDS = frozenset({BOOK_COURSE, BOOK_TOPIC})
 PROFILES: tuple[str, ...] = (
     "GENERAL",
     "STEM",
+    "LIFE_SCIENCES",
     "HUMANITIES",
     "SOCIAL_SCIENCES",
     "COMPUTER_SCIENCE",
@@ -28,6 +29,7 @@ class DepthThresholds(NamedTuple):
 _DEPTH: dict[str, DepthThresholds] = {
     "STEM": DepthThresholds(min_sections=8, min_sources=12, min_explanation_words=400, min_explanation_sections=2),
     "COMPUTER_SCIENCE": DepthThresholds(min_sections=8, min_sources=12, min_explanation_words=400, min_explanation_sections=2),
+    "LIFE_SCIENCES": DepthThresholds(min_sections=6, min_sources=10, min_explanation_words=450, min_explanation_sections=2),
     "HUMANITIES": DepthThresholds(min_sections=6, min_sources=10, min_explanation_words=500, min_explanation_sections=2),
     "SOCIAL_SCIENCES": DepthThresholds(min_sections=6, min_sources=10, min_explanation_words=400, min_explanation_sections=2),
     "LAW": DepthThresholds(min_sections=6, min_sources=10, min_explanation_words=500, min_explanation_sections=2),
@@ -177,19 +179,64 @@ _STEM = (
 )
 
 
+_LIFE_SCIENCES = (
+    "biologia",
+    "biology",
+    "biologia celular",
+    "cell biology",
+    "biologia molecular",
+    "molecular biology",
+    "bioquimica",
+    "biochemistry",
+    "genetica",
+    "genetics",
+    "genomica",
+    "genomics",
+    "microbiologia",
+    "microbiology",
+    "fisiologia",
+    "physiology",
+    "anatomia",
+    "anatomy",
+    "ecologia",
+    "ecology",
+    "evolucion",
+    "evolution",
+    "botanica",
+    "botany",
+    "zoologia",
+    "zoology",
+    "inmunologia",
+    "immunology",
+    "neurociencia",
+    "neuroscience",
+    "neurociencias",
+    "medicina",
+    "medicine",
+    "farmacologia",
+    "pharmacology",
+    "virologia",
+    "virology",
+    "biotecnologia",
+    "biotechnology",
+)
+
+
 def infer_topic_profile(topic: str) -> str | None:
-    """Map a computing, math, or engineering subject onto the profile enum."""
+    """Map a computing, math, engineering, or life-science subject onto the profile enum."""
 
     text = _fold(topic)
     if _matches_any(text, _COMPUTER_SCIENCE):
         return "COMPUTER_SCIENCE"
     if _matches_any(text, _STEM):
         return "STEM"
+    if _matches_any(text, _LIFE_SCIENCES):
+        return "LIFE_SCIENCES"
     return None
 
 
 def resolve_topic_profile(topic: str, requested: str | None) -> str:
-    """A detected computing, math, or engineering topic is never stored as GENERAL."""
+    """A detected computing, math, engineering, or life-science topic is never stored as GENERAL."""
 
     inferred = infer_topic_profile(topic)
     if inferred is not None:
