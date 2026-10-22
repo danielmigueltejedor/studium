@@ -16,6 +16,7 @@ from fractions import Fraction
 from pathlib import Path
 from typing import cast
 
+from studium.authoring import exercises
 from studium.authoring.academic_blueprint import academic_concept_ids
 from studium.authoring.blueprint import current_sections
 from studium.authoring.computation import ComputationError, evaluate, precision_verdict
@@ -61,7 +62,9 @@ DIFFICULTY_LEVELS = {
 }
 #: The kind of reasoning a problem exercises. The set is shared by the
 #: authoring tool and the renderer so a chapter can be audited for variety.
-PROBLEM_TYPES = frozenset(
+#: The discursive types (commentary, chronology, development question...) have
+#: no numeric answer; see :mod:`studium.authoring.exercises`.
+PROBLEM_TYPES = exercises.DISCURSIVE_TYPES | frozenset(
     {
         "CONCEPTUAL",
         "NUMERICAL",
@@ -103,8 +106,17 @@ def record_problem(
     structure: object = None,
     actor: dict[str, object] | None = None,
     programming: object = None,
+    answer: object = None,
+    source: object = None,
+    questions: object = None,
 ) -> dict[str, object]:
     """Store one problem. Does not run it and does not change project state.
+
+    A discursive exercise (``problem_type`` such as SOURCE_COMMENTARY or
+    CHRONOLOGY) carries ``answer``, a model answer whose points cite stored
+    excerpts, plus ``source`` for a commentary and ``questions`` as guidance.
+    The profile decides which types are accepted; a book of the humanities or
+    law accepts no numeric or Rust problem.
 
     ``structure`` holds the problem's data in a registered family (a beam, a
     cross-section, a stress state). It is solved and checked here; data that
@@ -121,7 +133,25 @@ def record_problem(
     contract, contract_error = _programming_contract(programming, cleaned_prompt)
     if contract_error is not None:
         return contract_error
-    if contract is not None:
+    profile = _domain_profile(root)
+    type_key, type_error = _problem_type(problem_type)
+    if type_error is not None:
+        return type_error
+    discursive_fields: dict[str, object] | None = None
+    if type_key in exercises.DISCURSIVE_TYPES or any(item is not None for item in (answer, source, questions)):
+        if contract is not None or any(
+            item is not None for item in (source_text, invocation, expected, excerpts, solution, structure)
+        ):
+            return _error("mcp.invalid_input", "a discursive exercise cannot mix a numeric, Rust or programming input")
+        if type_key not in exercises.DISCURSIVE_TYPES | exercises.SHARED_TYPES:
+            return _error("mcp.invalid_input", "answer, source and questions need a discursive problem_type")
+        discursive_fields, code, message = exercises.validate_discursive(
+            root, profile=profile, problem_type=type_key, answer=answer, source=source, questions=questions
+        )
+        if message is not None:
+            return _error(code or "mcp.invalid_input", message)
+        rust, numeric = None, None
+    elif contract is not None:
         if any(value is not None for value in (source_text, invocation, expected, excerpts, solution, structure)):
             return _error("mcp.invalid_input", "programming contracts cannot be mixed with Rust or numeric inputs")
         if role is not None and role != "practice":
@@ -129,6 +159,8 @@ def record_problem(
         role = "practice"
         rust, numeric = None, None
     else:
+        if not exercises.numeric_allowed(profile):
+            return _error("problem.numeric_not_for_discipline", exercises.numeric_refusal(profile))
         rust, numeric, mode_error = _mode(source_text, invocation, expected, excerpts)
         if mode_error is not None:
             return mode_error
@@ -138,9 +170,6 @@ def record_problem(
     difficulty_key, difficulty_error = _difficulty(difficulty)
     if difficulty_error is not None:
         return difficulty_error
-    type_key, type_error = _problem_type(problem_type)
-    if type_error is not None:
-        return type_error
     objectives, objectives_error = _objectives(root, learning_objectives)
     if objectives_error is not None:
         return objectives_error
@@ -215,6 +244,13 @@ def record_problem(
             if contract is not None:
                 record.update(contract)
                 record["kind"] = "programming"
+            elif discursive_fields is not None:
+                record["kind"] = "discursive"
+                record.update(discursive_fields)
+                cited = [str(item) for item in discursive_fields.get("excerpts", [])]  # type: ignore[union-attr]
+                if exercises.witness_status(root, cited) == "two_witnesses":
+                    record["status"] = "two_witnesses"
+                    record["corroboration"] = "two_witnesses"
             elif rust is not None:
                 relative = f"problems/{identifier}/main.rs"
                 assert rust_source is not None and rust_invocation is not None
@@ -300,8 +336,10 @@ def check_problem(
                 "message": "A stored programming contract is not an execution result. Use an explicitly trusted verifier and retain its source hashes, test cases and tool versions. Finite tests are not academic approval."}
     if current.get("kind") == "numeric":
         return _check_numeric(root, current)
+    if current.get("kind") == "discursive":
+        return _check_discursive(root, current)
     if current.get("kind") != "rust":
-        return _error("problem.kind_unknown", "problem is not a rust test or a numeric answer")
+        return _error("problem.kind_unknown", "problem is not a rust test, a numeric answer or a discursive exercise")
     return _check_rust(root, current, execution=execution)
 
 
@@ -349,6 +387,36 @@ def remove_problem(
         "applied": False,
         "project_state": fresh.get("state"),
         "local_sources": _local(fresh),
+    }
+
+
+def _check_discursive(root: Path, record: dict[str, object]) -> dict[str, object]:
+    """Re-run the mechanical checks of a discursive exercise. Not an academic review."""
+
+    identifier = str(record.get("id"))
+    fields, code, message = exercises.validate_discursive(
+        root,
+        profile=_domain_profile(root),
+        problem_type=str(record.get("problem_type") or ""),
+        answer=record.get("answer"),
+        source=record.get("source"),
+        questions=record.get("questions"),
+    )
+    if fields is None:
+        return {"status": "unchecked", "id": identifier, "correct": False, "code": code, "message": message}
+    cited = [str(item) for item in fields.get("excerpts", [])]  # type: ignore[union-attr]
+    witnessed = exercises.witness_status(root, cited) == "two_witnesses"
+    return {
+        "status": "two_witnesses" if witnessed else "unchecked",
+        "id": identifier,
+        "correct": False,
+        "classification": "PENDING",
+        "message": (
+            "Every point cites a stored excerpt, the quoted text is verbatim, and the excerpts come from "
+            "different sources. That is agreement between sources, not an academic review."
+            if witnessed
+            else "The exercise cites a single source. Cite an excerpt from a second source."
+        ),
     }
 
 
@@ -897,6 +965,14 @@ def problem_input_sha256(root: Path, record: dict[str, object]) -> str:
     ]
     if record.get("kind") == "programming":
         parts.append(json.dumps({key: record.get(key) for key in ("exercise_kind", "language", "tests", "rubric")}, sort_keys=True, ensure_ascii=False))
+    if record.get("kind") == "discursive":
+        parts.append(
+            json.dumps(
+                {key: record.get(key) for key in ("problem_type", "answer", "source", "questions")},
+                sort_keys=True,
+                ensure_ascii=False,
+            )
+        )
     solution = record.get("solution")
     if solution:
         parts.append(json.dumps(solution, sort_keys=True, ensure_ascii=False))
@@ -965,6 +1041,12 @@ def _public(record: dict[str, object], root: Path | None = None) -> dict[str, ob
         visible["structure"] = {"family": structure.get("family"), "has_claims": bool(structure.get("claims"))}
         if isinstance(record.get("structure_check"), dict):
             visible["structure_check"] = record["structure_check"]
+    if record.get("kind") == "discursive":
+        for key in ("answer", "source", "questions", "excerpts"):
+            if record.get(key) is not None:
+                visible[key] = record[key]
+        if record.get("corroboration") == "two_witnesses" and record.get("status") == "two_witnesses":
+            visible["corroboration"] = "two_witnesses"
     if record.get("kind") == "rust":
         visible["source_path"] = record.get("source_path")
         visible["invocation"] = record.get("invocation")

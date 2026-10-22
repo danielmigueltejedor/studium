@@ -29,6 +29,7 @@ from studium.authoring.completeness import chapter_completeness
 from studium.authoring.computation import current_computations, list_computations
 from studium.authoring.derivations import derivations_for_section
 from studium.authoring.excerpts import excerpts_by_id
+from studium.authoring.exercises import DISCURSIVE_TYPES, allowed_types, numeric_allowed
 from studium.authoring.figures import figure_reference_map, uncited_figures, unresolved_figure_references
 from studium.authoring.languages import (
     BookLanguage,
@@ -1189,6 +1190,23 @@ def _shape_gap(
     if not _has_role(root, section["id"], "consejo"):
         return _role_step(state, root, section, "consejo", f"Add one {_tip_word()} for {section['id']} ({section['title']}). {_two_sections()}")
     if _profile(root) != "COMPUTER_SCIENCE" and not _worked_ok(root, section["id"]):
+        if not numeric_allowed(_profile(root)):
+            return _step(
+                state,
+                "studium_problem_record",
+                {"section": section["id"], "role": "worked"},
+                _named(
+                    root,
+                    section,
+                    (
+                        f"Record a worked exercise for {section['id']} ({section['title']}): "
+                        "a discursive exercise with problem_type and a model answer whose points cite stored excerpts "
+                        f"from two different sources. Accepted types: {_discursive_types(root)}. "
+                        "This book asks no numeric exercises."
+                    ),
+                ),
+                blocked=blocked_sections(root),
+            )
         return _step(
             state,
             "studium_computation_check",
@@ -1198,7 +1216,12 @@ def _shape_gap(
                 section,
                 (
                     f"Record a worked problem for {section['id']} ({section['title']}): "
-                    "a replayed computation or a numeric result cited from two excerpts. "
+                    "a replayed computation or a numeric result cited from two excerpts"
+                    + (
+                        f", or a discursive exercise ({_discursive_types(root)}) with a model answer citing two sources. "
+                        if _discursive_types(root)
+                        else ". "
+                    )
                     + _RUST_PROBLEM
                 ),
             ),
@@ -1380,6 +1403,10 @@ def _has_role(root: Path, section_id: str, role: str) -> bool:
     return any(record.get("section") == section_id and record.get("role") == role for record in supported_paragraphs(root))
 
 
+def _discursive_types(root: Path) -> str:
+    return ", ".join(sorted(allowed_types(_profile(root)) & DISCURSIVE_TYPES))
+
+
 def _worked_ok(root: Path, section_id: str) -> bool:
     if _profile(root) == "COMPUTER_SCIENCE":
         return any(
@@ -1398,7 +1425,9 @@ def _worked_ok(root: Path, section_id: str) -> bool:
         if expression.strip() and not _arithmetic_only(expression):
             return True
     for record in fold_by_id(root / PROBLEMS):
-        if record.get("section") != section_id or record.get("kind") != "numeric":
+        if record.get("section") != section_id or record.get("kind") not in ("numeric", "discursive"):
+            continue
+        if record.get("kind") == "discursive" and record.get("role") == "practice":
             continue
         if not problem_result_current(root, record):
             continue

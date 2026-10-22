@@ -325,7 +325,8 @@ _INSTRUCTIONS = (
             "Three identical rustc runs are a reproducibility check, not an independent proof. "
             "Do not treat the three runs as three methods. "
             "User-provided local sources and open-web sources both count. Pirate copies and forbidden licenses do not. "
-            "A worked problem outside COMPUTER_SCIENCE is a replayed computation or a numeric result cited from two excerpts. "
+            "A worked problem outside COMPUTER_SCIENCE is a replayed computation or a numeric result cited from two excerpts, "
+            "or, in a HUMANITIES, LAW, SOCIAL_SCIENCES or LIFE_SCIENCES book, a discursive exercise (problem_type with an answer whose points cite excerpts); HUMANITIES and LAW take no numeric problem. "
             "When no course guide is stored, the blueprint is a study book: roadmap, foundations, the topic chapters, "
             "worked problems, self-check, a formula or concept sheet, and the source audit. "
             "When a guide exists, chapters follow the guide and the same chapter contract applies. "
@@ -844,6 +845,9 @@ def _dispatch(session: McpSession, name: str, arguments: Mapping[str, object]) -
             structure=arguments.get("structure") if "structure" in arguments else None,
             actor=actor,
             programming=arguments.get("programming"),
+            answer=arguments.get("answer") if "answer" in arguments else None,
+            source=arguments.get("source") if "source" in arguments else None,
+            questions=arguments.get("questions") if "questions" in arguments else None,
         )
     if name == "studium_problem_structure_update":
         regenerate = arguments.get("regenerate")
@@ -913,6 +917,7 @@ def _dispatch(session: McpSession, name: str, arguments: Mapping[str, object]) -
             excerpts=arguments.get("excerpts") if "excerpts" in arguments else None,
             key=arguments.get("key") if "key" in arguments else None,
             actor=actor if isinstance(actor, dict) else None,
+            image=arguments.get("image") if "image" in arguments else None,
         )
     if name == "studium_figure_check":
         return check_figure(root, arguments.get("id") if "id" in arguments else None)

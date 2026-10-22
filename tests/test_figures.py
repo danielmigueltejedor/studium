@@ -479,3 +479,32 @@ def _ready(session) -> str:
 
 def _explode(*_args, **_kwargs):
     raise AssertionError("must not fetch")
+
+
+def test_a_tikz_figure_may_use_the_libraries_the_book_loads(tmp_path, monkeypatch):
+    """The check document loads the libraries of the book preamble, so a drawing that renders can be checked."""
+
+    import shutil
+
+    monkeypatch.setattr("urllib.request.urlopen", _explode)
+    session, _root = _topic(tmp_path)
+    excerpt_id = _ready(session)
+    recorded = dispatch(
+        "studium_figure_record",
+        {
+            "section": "tema-1",
+            "caption": "Two boxes joined by an arrow.",
+            "kind": "tikz",
+            "source": (
+                r"\node (a) {A}; \node[right=1cm of a] (b) {B}; "
+                r"\draw[-{Stealth}] (a) -- (b);"
+            ),
+            "excerpts": [excerpt_id],
+        },
+        session=session,
+    )
+    assert recorded["status"] == "recorded", recorded
+    if shutil.which("pdflatex") is None:
+        return
+    checked = dispatch("studium_figure_check", {"id": recorded["figure"]["id"]}, session=session)
+    assert checked["status"] == "checked", checked

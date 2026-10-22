@@ -1,0 +1,12 @@
+schema_version = "1.0.0"
+edition = "0.1.0"
+
+[course]
+kind = "course"
+name = "Test Course"
+university = "Test University"
+degree = "Test Degree"
+language = "es"
+domain_profile = "HUMANITIES"
+
+[overrides]

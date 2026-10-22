@@ -14,7 +14,7 @@ def checked_figure_output(root: Path, record: dict[str, object]) -> str | None:
     output = record.get("output")
     if not isinstance(output, str) or not output.startswith("figures/FIG-") or ".." in Path(output).parts:
         return None
-    if not output.endswith(("/figure.png", "/figure.pdf")):
+    if not output.endswith(("/figure.png", "/figure.pdf", "/figure.jpg")):
         return None
     original = root / output
     try:
