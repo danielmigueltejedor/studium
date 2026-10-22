@@ -143,7 +143,7 @@ def record_problem(
             item is not None for item in (source_text, invocation, expected, excerpts, solution, structure)
         ):
             return _error("mcp.invalid_input", "a discursive exercise cannot mix a numeric, Rust or programming input")
-        if type_key not in exercises.DISCURSIVE_TYPES:
+        if type_key not in exercises.DISCURSIVE_TYPES | exercises.SHARED_TYPES:
             return _error("mcp.invalid_input", "answer, source and questions need a discursive problem_type")
         discursive_fields, code, message = exercises.validate_discursive(
             root, profile=profile, problem_type=type_key, answer=answer, source=source, questions=questions

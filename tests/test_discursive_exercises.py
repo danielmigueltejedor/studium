@@ -228,3 +228,17 @@ def test_the_book_prints_the_source_text_the_questions_and_the_model_answer(tmp_
 def test_no_numeric_profile_is_a_discursive_profile(profile):
     assert not numeric_allowed(profile)
     assert "NUMERICAL" not in allowed_types(profile)
+
+
+def test_a_comparative_exercise_with_an_answer_is_discursive_and_without_one_is_numeric(tmp_path, monkeypatch):
+    session, _root, one, two, _poem = _book(tmp_path, monkeypatch, profile="LIFE_SCIENCES")
+    comparison = _record(session, problem_type="COMPARATIVE", answer=_answer(one, two))
+    assert comparison["status"] == "recorded", comparison
+    assert comparison["problem"]["kind"] == "discursive"
+    numeric = _record(session, problem_type="COMPARATIVE", expected="3", excerpts=[one, two])
+    assert numeric["problem"]["kind"] == "numeric"
+
+
+def test_a_comparative_exercise_with_an_answer_is_accepted_in_a_history_book(tmp_path, monkeypatch):
+    session, _root, one, two, _poem = _book(tmp_path, monkeypatch)
+    assert _record(session, problem_type="COMPARATIVE", answer=_answer(one, two))["status"] == "recorded"

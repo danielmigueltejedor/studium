@@ -54,10 +54,12 @@ DISCURSIVE_TYPES = frozenset(
         CASE_ANALYSIS,
     }
 )
+#: Types that are numeric or discursive; they are discursive when an answer is given.
+SHARED_TYPES = frozenset({"COMPARATIVE", "CONCEPTUAL"})
 #: A commentary quotes a passage the reader reads before answering.
 COMMENTARY_TYPES = frozenset({SOURCE_COMMENTARY, TEXT_COMMENTARY, LITERARY_ANALYSIS})
 
-_ALL = DISCURSIVE_TYPES | {"COMPARATIVE", "CONCEPTUAL"}
+_ALL = DISCURSIVE_TYPES | SHARED_TYPES
 #: The discursive types each domain profile may record. A profile that is absent
 #: records none (engineering and computer science keep their own exercise kinds).
 PROFILE_DISCURSIVE_TYPES: dict[str, frozenset[str]] = {
@@ -158,7 +160,7 @@ def validate_discursive(
     ``excerpts``, the ordered ids the exercise cites.
     """
 
-    if problem_type not in DISCURSIVE_TYPES:
+    if problem_type not in DISCURSIVE_TYPES | SHARED_TYPES:
         return None, "mcp.invalid_input", "problem_type must be a discursive exercise type"
     if problem_type not in allowed_types(profile):
         kinds = ", ".join(sorted(allowed_types(profile) & DISCURSIVE_TYPES)) or "none"
