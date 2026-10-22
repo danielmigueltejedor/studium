@@ -358,7 +358,8 @@ _TOOLS: tuple[dict[str, object], ...] = (
         "name": "studium_figure_record",
         "class": "WRITE",
         "description": (
-            "Store a figure for a blueprint section: caption, executable TikZ or Python source, "
+            "Store a figure for a blueprint section: caption, executable TikZ or Python source "
+            "(or, for kind image, a picture downloaded from an open source with its author, page and licence), "
             "and the excerpt ids it illustrates. Give it a stable key to reference it from prose "
             "as {{fig:key}}; the renderer supplies the number and a hyperlink. "
             "For TikZ, give the picture body only; the server wraps it in a tikzpicture and a document. "
@@ -1529,12 +1530,25 @@ def _schema(tool: Mapping[str, object]) -> dict[str, object]:
                 },
                 "kind": {
                     "type": "string",
-                    "enum": ["tikz", "python"],
-                    "description": "tikz runs under pdflatex. python runs under python3 and must write figure.png or figure.pdf.",
+                    "enum": ["tikz", "python", "image"],
+                    "description": (
+                        "tikz runs under pdflatex. python runs under python3 and must write figure.png or figure.pdf. "
+                        "image is a picture from an open source, downloaded into the book, with an image object."
+                    ),
                 },
                 "source": {
                     "type": "string",
-                    "description": "Executable TikZ commands or a Python program. Required. The model is not a source.",
+                    "description": "Executable TikZ commands or a Python program. Required for tikz and python. The model is not a source.",
+                },
+                "image": {
+                    "type": "object",
+                    "description": (
+                        "For kind image: {path, url, title, author, license, license_url?, credit?, date?}. path is the PNG or JPEG "
+                        "downloaded inside the book (200 to 6000 pixels, at most 3 MB); url is the page it was opened from; "
+                        "license is public domain, CC0, CC BY or CC BY-SA. Other licences are refused. The server does not fetch "
+                        "the URL; it stores the file hash and the picture renders only while the file keeps it. "
+                        "Provenance and licence bookkeeping, not a legal opinion."
+                    ),
                 },
                 "excerpts": {
                     "type": "array",

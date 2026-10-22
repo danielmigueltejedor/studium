@@ -15,6 +15,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from uuid import uuid4
 
+from studium.authoring import figure_images
 from studium.authoring.academic_blueprint import current_academic_blueprint
 from studium.authoring.blueprint import current_sections
 from studium.authoring.computation import ComputationError, current_computations, evaluate
@@ -768,6 +769,7 @@ _EXTRA_BOX_LABELS: dict[str, dict[str, str]] = {
         "checks": "Verificación",
         "worked_number": "Problema resuelto",
         "worked_exercise": "Ejercicio resuelto",
+        "figure_credits": "Créditos de las figuras",
         "source_text": "Texto para comentar",
         "questions": "Cuestiones",
         "answer_guide": "Pauta de respuesta",
@@ -837,6 +839,7 @@ _EXTRA_BOX_DEFAULTS = {
     "checks": "Verification",
     "worked_number": "Worked problem",
     "worked_exercise": "Worked exercise",
+    "figure_credits": "Figure credits",
     "source_text": "Text to comment",
     "questions": "Questions",
     "answer_guide": "Model answer",
@@ -2043,6 +2046,7 @@ def _document_body(root: Path, *, include_unsupported: bool = False) -> str:
             continue
         lines.append(r"\chapter{" + latex_escape(copy[appendix]) + "}")
         lines.extend(body)
+    lines.extend(_figure_credit_lines(root, language))
     lines.extend(
         [
             r"\backmatter",
@@ -3349,6 +3353,9 @@ def _single_figure_lines(root: Path, record: dict[str, object], copy: dict[str, 
     lines.extend(fitted)
     if caption.strip():
         lines.extend([r"\par\nopagebreak", r"{\small " + prefix + render_text_run(caption) + r"\par}"])
+    if record.get("kind") == "image":
+        # The credit a reuse licence asks to keep goes with the picture itself.
+        lines.extend([r"\par\nopagebreak", r"{\footnotesize " + _image_credit_tex(record) + r"\par}"])
     lines.extend(
         [
             r"\end{minipage}",
@@ -3401,6 +3408,44 @@ def _diagram_report_lines(root: Path, language: BookLanguage) -> list[str]:
         + r" \\ \hline",
         *rows,
         r"\end{longtable}",
+    ]
+
+
+def _image_credit_tex(record: dict[str, object]) -> str:
+    """Author, title, licence and the page the picture was opened from."""
+
+    text = latex_escape(figure_images.credit_line(record))
+    address = figure_images.credit_url(record)
+    return f"{text}. {_url_tex(address)}" if address else text
+
+
+def _figure_credit_lines(root: Path, language: BookLanguage) -> list[str]:
+    """Unnumbered list of every rendered picture with its full credit and licence."""
+
+    rows: list[str] = []
+    for record in fold_by_id(root / FIGURES):
+        if record.get("deleted") is True or record.get("kind") != "image":
+            continue
+        if _checked_output(root, record) is None:
+            continue
+        key = record.get("key") if isinstance(record.get("key"), str) and record.get("key") else record.get("id")
+        meta = record.get("image")
+        assert isinstance(meta, dict)
+        licence = r"\href{" + str(meta.get("license_url") or "") + "}{" + latex_escape(str(meta.get("license") or "")) + "}"
+        rows.append(
+            r"\item \textbf{" + latex_escape(_extra_label(language, "diagram_figure")) + "~\\ref{fig:" + _figure_label_key(str(key)) + "}.} "
+            + latex_escape(str(meta.get("author") or ""))
+            + ", «" + latex_escape(str(meta.get("title") or "")) + "». "
+            + licence + ". " + _url_tex(str(meta.get("url") or ""))
+        )
+    if not rows:
+        return []
+    return [
+        r"\chapter*{" + latex_escape(_extra_label(language, "figure_credits")) + "}",
+        r"\addcontentsline{toc}{chapter}{" + latex_escape(_extra_label(language, "figure_credits")) + "}",
+        r"\begin{itemize}",
+        *rows,
+        r"\end{itemize}",
     ]
 
 

@@ -14,6 +14,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from studium.authoring import figure_images
 from studium.authoring.blueprint import current_sections
 from studium.authoring.computation import current_computations
 from studium.authoring.figure_artifacts import checked_figure_output
@@ -30,7 +31,7 @@ _MAX_CAPTION = 2_000
 _MAX_SOURCE = 100_000
 _MAX_EXCERPTS = 40
 _TIMEOUT = 20
-_KINDS = frozenset({"tikz", "python"})
+_KINDS = frozenset({"tikz", "python", "image"})
 # A stable, author-chosen figure key. Lowercase slug so a reference is easy to
 # type and the LaTeX label is predictable: ``{{fig:flujo-tuberia}}``.
 _FIGURE_KEY = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
@@ -247,8 +248,14 @@ def record_figure(
     excerpts: object,
     key: object = None,
     actor: dict[str, object] | None = None,
+    image: object = None,
 ) -> dict[str, object]:
-    """Store one figure. Does not run it, fetch a URL, or change project state."""
+    """Store one figure. Does not run it, fetch a URL, or change project state.
+
+    An ``image`` figure is a picture the client downloaded into the book from an
+    open source. It carries its author, page and an open licence; see
+    :mod:`studium.authoring.figure_images`.
+    """
 
     section_id, section_error = _section(root, section)
     if section_error is not None:
@@ -259,6 +266,17 @@ def record_figure(
     figure_kind, kind_error = _kind(kind)
     if kind_error is not None:
         return kind_error
+    image_meta: dict[str, object] | None = None
+    if figure_kind == "image":
+        if source is not None:
+            return _error("mcp.invalid_input", "an image figure has an image object, not source")
+        image_meta, image_code, image_message = figure_images.validate_image(root, image)
+        if image_message is not None:
+            return _error(image_code or "mcp.invalid_input", image_message)
+        assert image_meta is not None
+        source = figure_images.source_text(image_meta)
+    elif image is not None:
+        return _error("mcp.invalid_input", "image belongs to an image figure")
     cleaned_source, source_error = _source(source, figure_kind)
     if source_error is not None:
         return source_error
@@ -303,6 +321,8 @@ def record_figure(
             }
             if figure_key is not None:
                 record["key"] = figure_key
+            if image_meta is not None:
+                record["image"] = image_meta
             append_jsonl(root / FIGURES, record)
             _audit(root, record=record, actor=actor, operation="record_figure")
             fresh_state = load_state_holding_lock(root)
@@ -330,6 +350,8 @@ def check_figure(
     source = current.get("source")
     if kind not in _KINDS or not isinstance(source, str) or not source.strip():
         return _error("figure.source_missing", "a figure needs executable source")
+    if kind == "image":
+        return _check_image(root, current)
     if kind == "python" and not host_execution_authorized(source, ["python", "figure"], execution):
         return {**isolation_required(source), "figure": _public({**current, "status": "unchecked", "correct": False})}
     engine_name = "pdflatex" if kind == "tikz" else sys.executable
@@ -401,6 +423,56 @@ def check_figure(
             message = f"{message} {detail}"
         body["message"] = message
     return body
+
+
+def _check_image(root: Path, current: dict[str, object]) -> dict[str, object]:
+    """An image figure is checked when its file still has the recorded hash and licence."""
+
+    identifier = str(current.get("id"))
+    work = _work_dir(root, identifier)
+    if work is None:
+        return _error("figure.path_escaped", "figure path leaves the book")
+    meta = current.get("image")
+    licence_ok = isinstance(meta, dict) and figure_images.normalise_license(meta.get("license")) is not None
+    output, problem = (None, "the licence is not an allowed open licence") if not licence_ok else _install_image(root, current, work)
+    updated = dict(current)
+    updated["status"] = "checked" if output is not None else "unchecked"
+    updated["correct"] = output is not None
+    updated["proves_science"] = False
+    updated["classification"] = "PENDING"
+    updated["checked_at"] = utc_now()
+    excerpts_value = updated.get("excerpts")
+    excerpt_ids = [item for item in excerpts_value if isinstance(item, str)] if isinstance(excerpts_value, list) else []
+    updated["caption_corroboration"] = _caption_corroboration(
+        root, str(updated.get("caption") or ""), excerpt_ids, str(updated.get("section") or "")
+    )
+    if output is not None:
+        updated["output"] = output
+    else:
+        updated.pop("output", None)
+        _clear_outputs(work)
+    try:
+        with project_lock(root):
+            append_jsonl(root / FIGURES, updated)
+            _audit(root, record=updated, actor={"kind": "mcp"}, operation="check_figure")
+            fresh = load_state_holding_lock(root)
+    except ProjectLocked:
+        return _error("storage.locked", "project is locked")
+    body = _body(fresh, updated, status="checked" if output is not None else "unchecked", checked=output is not None)
+    body["message"] = (
+        "The picture file matches its recorded hash and its licence is allowed. This is provenance and licence "
+        "bookkeeping, not a legal opinion; a figure does not prove the science."
+        if output is not None
+        else f"The image figure is not checked: {problem}"
+    )
+    return body
+
+
+def _install_image(root: Path, record: dict[str, object], work: Path) -> tuple[str | None, str | None]:
+    try:
+        return figure_images.install(root, record, work)
+    except OSError:
+        return None, "the picture could not be copied inside the book"
 
 
 def remove_figure(
@@ -700,7 +772,7 @@ def _output_ok(root: Path, path: Path) -> bool:
 
 
 def _clear_outputs(work: Path) -> None:
-    for name in ("figure.png", "figure.pdf"):
+    for name in ("figure.png", "figure.pdf", "figure.jpg"):
         path = work / name
         try:
             if path.is_symlink() or path.is_file():
@@ -759,6 +831,12 @@ def _public(record: dict[str, object]) -> dict[str, object]:
         visible["key"] = record["key"]
     if isinstance(record.get("output"), str):
         visible["output"] = record["output"]
+    if isinstance(record.get("image"), dict):
+        visible["image"] = {
+            key: record["image"][key]
+            for key in ("title", "author", "license", "license_url", "url", "width", "height", "bytes")
+            if key in record["image"]
+        }
     if isinstance(record.get("execution"), dict):
         visible["execution"] = record["execution"]
     return visible
@@ -801,7 +879,7 @@ def _caption(value: object) -> tuple[str | None, dict[str, object] | None]:
 
 def _kind(value: object) -> tuple[str | None, dict[str, object] | None]:
     if not isinstance(value, str) or value.strip().lower() not in _KINDS:
-        return None, _error("mcp.invalid_input", "kind must be tikz or python")
+        return None, _error("mcp.invalid_input", "kind must be tikz, python or image")
     return value.strip().lower(), None
 
 
@@ -829,6 +907,8 @@ def _source(value: object, kind: str | None) -> tuple[str | None, dict[str, obje
             value = unwrapped
     if len(value) > _MAX_SOURCE:
         return None, _error("mcp.invalid_input", "a figure needs executable source")
+    if kind == "image":
+        return value, None
     forbidden = _TIKZ_FORBIDDEN if kind == "tikz" else _PY_FORBIDDEN
     lowered = value.lower()
     if any(token in value or token in lowered for token in forbidden):
