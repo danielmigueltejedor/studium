@@ -53,7 +53,7 @@ def test_life_science_depth_matches_a_narrative_book_not_an_engineering_course()
 
 def test_life_science_chapters_need_no_derivation_figure_or_notation(tmp_path, monkeypatch):
     monkeypatch.setattr("urllib.request.urlopen", _explode)
-    session, root = _project(tmp_path, profile="LIFE_SCIENCES")
+    session, _root = _project(tmp_path, profile="LIFE_SCIENCES")
     dispatch("studium_blueprint_store", {"sections": [{"id": "celula", "title": "La célula"}]}, session=session)
     dispatch(
         "studium_paragraph_record",
