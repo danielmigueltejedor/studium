@@ -74,7 +74,8 @@ SPANISH_CHAPTER = (
     "and one autoficha. "
     "Boxes are only those four. Cite stored excerpts. "
     "A formula must be quoted in an excerpt or replayed. "
-    "A worked problem in a book that is not COMPUTER_SCIENCE is a replayed computation or a numeric result cited from two excerpts. "
+    "A worked problem in a book that is not COMPUTER_SCIENCE is a replayed computation or a numeric result cited from two excerpts, "
+    "or, in a HUMANITIES, LAW, SOCIAL_SCIENCES or LIFE_SCIENCES book, a discursive exercise (problem_type with an answer whose points cite excerpts); HUMANITIES and LAW take no numeric problem. "
     "Code behavior needs two sources or a test that passed 3 times. "
     "Do not ask the user how to format the page. The renderer owns the boxes."
 )
@@ -867,7 +868,8 @@ def chapter_contract(language: BookLanguage) -> str:
         f"and one {copy['self_check']}. "
         "Boxes are only those four. Cite stored excerpts. "
         "A formula must be quoted in an excerpt or replayed. "
-        "A worked problem in a book that is not COMPUTER_SCIENCE is a replayed computation or a numeric result cited from two excerpts. "
+        "A worked problem in a book that is not COMPUTER_SCIENCE is a replayed computation or a numeric result cited from two excerpts, "
+    "or, in a HUMANITIES, LAW, SOCIAL_SCIENCES or LIFE_SCIENCES book, a discursive exercise (problem_type with an answer whose points cite excerpts); HUMANITIES and LAW take no numeric problem. "
         "Code behavior needs two sources or a test that passed 3 times. "
         "Do not ask the user how to format the page. The renderer owns the boxes."
     )

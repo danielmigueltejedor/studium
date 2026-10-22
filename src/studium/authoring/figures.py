@@ -742,6 +742,8 @@ def _tikz_document(source: str) -> str:
         [
             r"\documentclass{article}",
             r"\usepackage{tikz}",
+            # The same libraries the book loads, so a figure that renders in the book can be checked.
+            r"\usetikzlibrary{arrows.meta,positioning,calc,shapes.geometric}",
             r"\pagestyle{empty}",
             r"\begin{document}",
             r"\begin{tikzpicture}",
