@@ -486,7 +486,31 @@ def _render_attempt(
     message = "the LaTeX engine failed. Wrote the .tex draft. No PDF was created."
     if detail:
         message = f"{message} {detail}"
+    missing = _missing_latex_packages(log + "\n" + detail)
+    if missing:
+        body["missing_latex_packages"] = missing
+        message = (
+            f"{message} The TeX installation lacks {', '.join(missing)}; "
+            f"install with: tlmgr install {' '.join(missing)}"
+        )
     return _render_status(body, status="render.compile_failed", message=message, unwritten=unwritten)
+
+
+_MISSING_STYLE = re.compile(r"File [`']([A-Za-z0-9_.+-]+)\.(?:sty|cls)' not found")
+
+
+def _missing_latex_packages(log: str) -> list[str]:
+    """Packages a failed compile could not find, in order, without duplicates.
+
+    A basic TeX Live lacks packages such as ``accsupp``; the raw log ended in a
+    bare engine failure and the cause had to be read from it by hand.
+    """
+
+    found: list[str] = []
+    for name in _MISSING_STYLE.findall(log):
+        if name not in found:
+            found.append(name)
+    return found
 
 
 def _save_editorial_report(

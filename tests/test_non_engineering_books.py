@@ -238,3 +238,19 @@ def test_quantities_and_exponents_print_correctly_in_a_spanish_pdf(tmp_path):
     assert "10 µm" in flat or "10µm" in flat
     assert "1,9" in flat
     assert "1014" in flat.replace(" ", "")
+
+
+def test_a_compile_failure_names_the_missing_tex_package():
+    from studium.authoring.render import _missing_latex_packages
+
+    log = "! LaTeX Error: File `accsupp.sty' not found.\n! LaTeX Error: File `upquote.sty' not found.\nFile `accsupp.sty' not found"
+    assert _missing_latex_packages(log) == ["accsupp", "upquote"]
+    assert _missing_latex_packages("Overfull \\hbox") == []
+
+
+def test_colon_ratios_are_not_read_as_a_single_number():
+    from studium.authoring.contradictions import _quantities
+
+    assert _quantities("the phenotypic ratio is 3:1") == []
+    assert _quantities("the genotypic ratio is 1: 2 : 1") == []
+    assert _quantities("the ratio is 3") == [("ratio", "3")]
