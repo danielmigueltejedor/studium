@@ -254,3 +254,15 @@ def test_colon_ratios_are_not_read_as_a_single_number():
     assert _quantities("the phenotypic ratio is 3:1") == []
     assert _quantities("the genotypic ratio is 1: 2 : 1") == []
     assert _quantities("the ratio is 3") == [("ratio", "3")]
+
+
+def test_a_latex_cross_reference_typed_in_prose_is_reported():
+    from studium.authoring.publishing import literal_command_issues
+    from studium.authoring.render import emit_prose
+
+    tex = "\n".join(emit_prose(r"Como muestra la Figura \ref{fig:flujo}, el valor de \cite{x} cambia."))
+    issues = literal_command_issues(tex, filename="draft.tex", ranges=[])
+    assert [issue["type"] for issue in issues] == ["literal_latex_command"] * 2
+    assert r"\ref{fig:flujo}" in issues[0]["evidence"]
+    assert "{{fig:ID}}" in issues[0]["suggestion"]
+    assert literal_command_issues("Texto normal con \\texttt{ref}", filename="d.tex", ranges=[]) == []
