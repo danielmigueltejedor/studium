@@ -366,7 +366,16 @@ def _map_math_run(text: str, *, escape: bool = False) -> str:
             continue
         parts.append(character)
         index += 1
-    return "".join(parts)
+    return _brace_ascii_exponents("".join(parts))
+
+
+# TeX raises only the first character of ``10^14``. A multi-digit or negative
+# exponent typed in ASCII needs its braces.
+_UNBRACED_EXPONENT = re.compile(r"\^(-\d+|\d{2,})")
+
+
+def _brace_ascii_exponents(tex: str) -> str:
+    return _UNBRACED_EXPONENT.sub(lambda match: "^{" + match.group(1) + "}", tex)
 
 
 def render_draft(root: Path, *, include_unsupported: bool = False) -> dict[str, object]:
@@ -1060,7 +1069,72 @@ def _script_content(mapping: dict[str, str], character: str) -> str:
     return mapping[character][2:-1]
 
 
+_QUANTITY = re.compile(
+    r"(?P<number>[+-]?\d+(?:[.,]\d+)?)?[ \u00a0]?"
+    r"(?P<unit>(?=[^\d]*[µμ°²³⁻/^])[A-Za-zµμ°Ω][A-Za-zµμ°Ω/·\-⁰¹²³⁴⁵⁶⁷⁸⁹⁻^0-9]*)"
+)
+_UNIT_SUPERSCRIPTS = {chr(0x2070): "0", "¹": "1", "²": "2", "³": "3", **{chr(0x2070 + i): str(i) for i in range(4, 10)}, "⁻": "-"}
+
+
+def _quantity_tex(span: str) -> str | None:
+    """A measured quantity in prose, ``10 µm`` or ``25 °C``, set as upright units.
+
+    The generic path put ``10 µm`` in math italics with the space lost and cut
+    ``1,9 g/cm³`` in two. A number and a unit that is recognisably a unit (it
+    has a micro sign, a degree sign, a power or a slash) become one formula.
+    """
+
+    match = _QUANTITY.fullmatch(span.strip())
+    if match is None:
+        return None
+    if match.group("number") is None and not re.fullmatch(r"[µμ][A-Za-z]+", match.group("unit")):
+        return None
+    unit = match.group("unit")
+    roman: list[str] = []
+    out: list[str] = []
+
+    def flush() -> None:
+        if roman:
+            out.append(r"\mathrm{" + "".join(roman) + "}")
+            roman.clear()
+
+    index = 0
+    while index < len(unit):
+        character = unit[index]
+        if character in "µμ":
+            flush()
+            out.append(r"\mu ")
+            index += 1
+        elif character == "°":
+            flush()
+            out.append(r"{}^{\circ}")
+            index += 1
+        elif character in _UNIT_SUPERSCRIPTS or character == "^":
+            flush()
+            run: list[str] = []
+            index += 1 if character == "^" else 0
+            while index < len(unit) and (unit[index] in _UNIT_SUPERSCRIPTS or unit[index].isdigit() or unit[index] == "-"):
+                run.append(_UNIT_SUPERSCRIPTS.get(unit[index], unit[index]))
+                index += 1
+            out.append("^{" + "".join(run) + "}")
+        elif character == "·":
+            roman.append(r"\cdot ")
+            index += 1
+        else:
+            roman.append(character)
+            index += 1
+    flush()
+    rendered = "".join(out).replace(r"\mu \mathrm{", r"\mu\mathrm{")
+    number = match.group("number")
+    if number is not None:
+        rendered = number.replace(",", "{,}") + r"\," + rendered
+    return "\\(" + rendered + "\\)"
+
+
 def _formula_tex(span: str) -> str:
+    quantity = _quantity_tex(span)
+    if quantity is not None:
+        return quantity
     return "\\(" + _map_math_run(span, escape=True) + "\\)"
 
 
@@ -1215,6 +1289,13 @@ def _tokenize(text: str) -> list[tuple[int, int, str]]:
                 end += 1
                 while end < len(text) and text[end].isdigit():
                     end += 1
+            elif end + 1 < len(text) and text[end] == "," and text[end + 1].isdigit():
+                # A Spanish decimal comma belongs to its number; "1,2,3" is a list.
+                cursor = end + 1
+                while cursor < len(text) and text[cursor].isdigit():
+                    cursor += 1
+                if not (cursor + 1 < len(text) and text[cursor] == "," and text[cursor + 1].isdigit()):
+                    end = cursor
             tokens.append((index, end, "num"))
             index = end
             continue

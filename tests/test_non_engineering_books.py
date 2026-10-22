@@ -182,3 +182,59 @@ def test_an_engineering_worked_problem_keeps_the_physical_model_label(tmp_path):
     language = describe("es")
     rendered = "\n".join(_solution_body({"id": "PRB-0001"}, _SOLUTION, messages(language), language, root=root))
     assert "Modelo físico" in rendered
+
+
+@pytest.mark.parametrize(
+    "prose, expected",
+    [
+        ("células de 10 µm y masa", r"células de \(10\,\mu\mathrm{m}\) y masa"),
+        ("de 0,2 µm a 5,0 µm", r"de \(0{,}2\,\mu\mathrm{m}\) a \(5{,}0\,\mu\mathrm{m}\)"),
+        ("densidad de 1,9 g/cm³ del agua", r"densidad de \(1{,}9\,\mathrm{g/cm}^{3}\) del agua"),
+        ("a 25 °C y 58 kJ/mol", r"a \(25\,{}^{\circ}\mathrm{C}\) y 58 kJ/mol"),
+    ],
+)
+def test_measured_quantities_in_prose_use_upright_units_and_keep_their_number(prose, expected):
+    from studium.authoring.render import emit_prose
+
+    assert emit_prose(prose)[0] == expected
+
+
+def test_multi_digit_exponents_in_prose_are_braced():
+    from studium.authoring.render import emit_prose
+
+    line = emit_prose("cientos de billones (10^14) y 10^12 células")[0]
+    assert "10^{14}" in line and "10^{12}" in line
+    assert "10^14" not in line
+
+
+def test_list_of_numbers_and_ascii_powers_are_unchanged():
+    from studium.authoring.render import emit_prose
+
+    assert emit_prose("valores 1,2,3")[0] == "valores 1,2,3"
+    assert emit_prose("el valor x^2")[0] == r"el valor \(x^2\)"
+
+
+@pytest.mark.skipif(not (shutil.which("pdflatex") and shutil.which("pdftotext")), reason="needs pdflatex and pdftotext")
+def test_quantities_and_exponents_print_correctly_in_a_spanish_pdf(tmp_path):
+    from studium.authoring.render import emit_prose
+
+    body = "\n".join(emit_prose("Una célula de 10 µm a 25 °C con 10^14 divisiones y 1,9 g/cm³."))
+    source = "\n".join(
+        [
+            r"\documentclass{article}",
+            r"\usepackage[T1]{fontenc}",
+            r"\usepackage[utf8]{inputenc}",
+            r"\usepackage{lmodern}",
+            r"\usepackage[spanish]{babel}",
+            r"\begin{document}",
+            body,
+            r"\end{document}",
+        ]
+    )
+    (tmp_path / "q.tex").write_text(source, encoding="utf-8")
+    subprocess.run(["pdflatex", "-interaction=nonstopmode", "q.tex"], cwd=tmp_path, check=True, capture_output=True)
+    text = subprocess.run(["pdftotext", "q.pdf", "-"], cwd=tmp_path, check=True, capture_output=True, text=True).stdout
+    flat = re.sub(r"\s+", " ", text)
+    assert "10 µm" in flat or "10µm" in flat
+    assert "1,9" in flat
+    assert "1014" in flat.replace(" ", "")
