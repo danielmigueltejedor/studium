@@ -844,6 +844,9 @@ def _dispatch(session: McpSession, name: str, arguments: Mapping[str, object]) -
             structure=arguments.get("structure") if "structure" in arguments else None,
             actor=actor,
             programming=arguments.get("programming"),
+            answer=arguments.get("answer") if "answer" in arguments else None,
+            source=arguments.get("source") if "source" in arguments else None,
+            questions=arguments.get("questions") if "questions" in arguments else None,
         )
     if name == "studium_problem_structure_update":
         regenerate = arguments.get("regenerate")

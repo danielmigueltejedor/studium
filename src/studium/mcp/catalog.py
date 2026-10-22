@@ -1336,8 +1336,39 @@ def _schema(tool: Mapping[str, object]) -> dict[str, object]:
                         "MULTI_STEP", "DESIGN", "PARAMETER_STUDY", "OPTIMIZATION",
                         "INTERPRETATION", "ERROR_IDENTIFICATION", "ASSUMPTION_VALIDATION",
                         "APPLICATION", "COMPARATIVE",
+                        "DEVELOPMENT_QUESTION", "SOURCE_COMMENTARY", "TEXT_COMMENTARY", "LITERARY_ANALYSIS",
+                        "CHRONOLOGY", "CAUSAL_ANALYSIS", "EXPERIMENT_DESIGN", "DATA_INTERPRETATION",
+                        "MECHANISM_EXPLANATION", "CASE_ANALYSIS",
                     ],
-                    "description": "Kind of reasoning the problem exercises. Used to audit exercise variety.",
+                    "description": (
+                        "Kind of reasoning the problem exercises. Used to audit exercise variety. "
+                        "The discursive types (DEVELOPMENT_QUESTION, SOURCE_COMMENTARY, TEXT_COMMENTARY, "
+                        "LITERARY_ANALYSIS, CHRONOLOGY, CAUSAL_ANALYSIS, EXPERIMENT_DESIGN, DATA_INTERPRETATION, "
+                        "MECHANISM_EXPLANATION, CASE_ANALYSIS) take an answer instead of a number. "
+                        "HUMANITIES and LAW books accept only discursive exercises."
+                    ),
+                },
+                "answer": {
+                    "type": "object",
+                    "description": (
+                        "Model answer of a discursive exercise. {summary?, sections: [{label, points: [{text, excerpts}]}], "
+                        "mistakes?, criteria?}; a CHRONOLOGY takes events: [{date, year?, text, excerpts}] instead of sections "
+                        "(three or more events; the year must appear in an excerpt the event cites). Every point cites one to "
+                        "four stored excerpt ids; the answer is two_witnesses when its excerpts come from two different sources."
+                    ),
+                },
+                "source": {
+                    "type": "object",
+                    "description": (
+                        "The passage a SOURCE_COMMENTARY, TEXT_COMMENTARY or LITERARY_ANALYSIS asks the reader to comment: "
+                        "{excerpt, quote, author?, work?, date?, note?}. The quote must be a verbatim passage of that stored excerpt; "
+                        "verses may be separated by newlines."
+                    ),
+                },
+                "questions": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Guiding questions of a discursive exercise, answered by the model answer.",
                 },
                 "learning_objectives": {
                     "type": "array",

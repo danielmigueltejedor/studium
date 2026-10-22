@@ -767,6 +767,14 @@ _EXTRA_BOX_LABELS: dict[str, dict[str, str]] = {
         "graphical": "Solución gráfica",
         "checks": "Verificación",
         "worked_number": "Problema resuelto",
+        "worked_exercise": "Ejercicio resuelto",
+        "source_text": "Texto para comentar",
+        "questions": "Cuestiones",
+        "answer_guide": "Pauta de respuesta",
+        "criteria": "Criterios de evaluación",
+        "chronology": "Cronología",
+        "date": "Fecha",
+        "event": "Hecho",
         "diagram_report": "Verificación de los diagramas",
         "diagram_intro": "Cada diagrama se dibuja a partir de los datos almacenados del problema y se comprueba aparte del dibujo. La tabla da el estado de cada uno; el detalle de las comprobaciones queda en el proyecto.",
         "diagram_figure": "Figura",
@@ -828,6 +836,14 @@ _EXTRA_BOX_DEFAULTS = {
     "graphical": "Graphical solution",
     "checks": "Verification",
     "worked_number": "Worked problem",
+    "worked_exercise": "Worked exercise",
+    "source_text": "Text to comment",
+    "questions": "Questions",
+    "answer_guide": "Model answer",
+    "criteria": "Assessment criteria",
+    "chronology": "Chronology",
+    "date": "Date",
+    "event": "Event",
     "diagram_report": "Diagram verification",
     "diagram_intro": "Every diagram is drawn from the problem's stored data and checked apart from the drawing. The table gives each one's status; the detailed checks stay in the project.",
     "diagram_figure": "Figure",
@@ -2421,6 +2437,19 @@ def _worked_box(root: Path, section_id: str, copy: dict[str, str], language: Boo
     ]
     if not problems and not computations:
         return []
+    discursive = [record for record in problems if record.get("kind") == "discursive"]
+    if discursive:
+        lines: list[str] = []
+        for index, exercise in enumerate(discursive, 1):
+            title = _extra_label(language, "worked_exercise" if len(discursive) == 1 else "worked_number")
+            if len(discursive) > 1:
+                title = f"{_extra_label(language, 'worked_exercise')} {index}"
+            body = [
+                *_discursive_statement_lines(exercise, language, with_label=True),
+                *_discursive_answer_lines(exercise, language),
+            ]
+            lines.extend(_box(title, body, "worked"))
+        return lines
     structured = [record for record in problems if isinstance(record.get("solution"), dict) and record.get("solution")]
     if structured:
         lines: list[str] = []
@@ -2455,6 +2484,92 @@ def _worked_box(root: Path, section_id: str, copy: dict[str, str], language: Boo
         *_labeled(copy["respuesta"], answer, expression=bool(result.strip()) and answer == result.strip()),
     ]
     return _box(copy["worked"], body, "worked")
+
+
+def _quote_lines(source: dict[str, object], language: BookLanguage) -> list[str]:
+    """The passage a commentary exercise asks the reader to comment, with its attribution."""
+
+    raw = str(source.get("quote") or "").strip()
+    verses = [latex_escape(" ".join(line.split())) for line in raw.replace("\r", "").split("\n") if line.strip()]
+    if not verses:
+        return []
+    lines = ["", r"\begin{quote}", r"\itshape " + r" \\ ".join(verses), r"\end{quote}"]
+    parts = [str(source.get(key) or "").strip() for key in ("author", "work", "date")]
+    credit = ", ".join(latex_escape(part) for part in parts if part)
+    if credit:
+        lines.extend([r"{\noindent\footnotesize " + credit + r".\par}"])
+    note = str(source.get("note") or "").strip()
+    if note:
+        lines.extend([r"{\noindent\footnotesize " + latex_escape(note) + r"\par}"])
+    return lines
+
+
+def _discursive_statement_lines(record: dict[str, object], language: BookLanguage, *, with_label: bool = False) -> list[str]:
+    """Statement, quoted text and guiding questions of a discursive exercise."""
+
+    lines: list[str] = []
+    prompt = _str_field(record, "prompt").strip()
+    if with_label:
+        lines.extend(_labeled(_extra_label(language, "statement"), prompt))
+    elif prompt:
+        lines.extend(emit_prose(prompt))
+    source = record.get("source")
+    if isinstance(source, dict):
+        if with_label:
+            lines.extend(["", r"\noindent\textbf{" + latex_escape(_extra_label(language, "source_text")) + "}"])
+        lines.extend(_quote_lines(source, language))
+    questions = record.get("questions")
+    if isinstance(questions, list) and questions:
+        lines.extend(["", r"\noindent\textbf{" + latex_escape(_extra_label(language, "questions")) + r"}", r"\begin{enumerate}"])
+        lines.extend(r"\item " + latex_escape(str(item)) for item in questions)
+        lines.append(r"\end{enumerate}")
+    return lines
+
+
+def _chronology_lines(events: list[object], language: BookLanguage) -> list[str]:
+    rows = sorted((item for item in events if isinstance(item, dict)), key=lambda item: (int(item.get("year") or 0)))
+    lines = [
+        "",
+        r"\noindent\textbf{" + latex_escape(_extra_label(language, "chronology")) + "}",
+        r"\begin{itemize}",
+    ]
+    for row in rows:
+        lines.append(r"\item \textbf{" + latex_escape(str(row.get("date") or "")) + r"}. " + latex_escape(str(row.get("text") or "")))
+    lines.append(r"\end{itemize}")
+    return lines
+
+
+def _discursive_answer_lines(record: dict[str, object], language: BookLanguage) -> list[str]:
+    """The model answer: summary, chronology, labelled points, mistakes and criteria."""
+
+    answer = record.get("answer")
+    if not isinstance(answer, dict):
+        return []
+    lines = ["", r"\noindent\textbf{" + latex_escape(_extra_label(language, "answer_guide")) + "}"]
+    summary = answer.get("summary")
+    if isinstance(summary, str) and summary.strip():
+        lines.extend(emit_prose(summary.strip()))
+    events = answer.get("events")
+    if isinstance(events, list) and events:
+        lines.extend(_chronology_lines(events, language))
+    for section in answer.get("sections") or []:
+        if not isinstance(section, dict):
+            continue
+        label = str(section.get("label") or "").strip()
+        if label:
+            lines.extend(["", r"\noindent\textit{" + latex_escape(label) + "}"])
+        lines.append(r"\begin{itemize}")
+        for point in section.get("points") or []:
+            if isinstance(point, dict) and str(point.get("text") or "").strip():
+                lines.append(r"\item " + latex_escape(str(point["text"]).strip()))
+        lines.append(r"\end{itemize}")
+    for key, label_key in (("mistakes", "mistakes"), ("criteria", "criteria")):
+        items = answer.get(key)
+        if isinstance(items, list) and items:
+            lines.extend(["", r"\noindent\textbf{" + latex_escape(_extra_label(language, label_key)) + r"}", r"\begin{itemize}"])
+            lines.extend(r"\item " + latex_escape(str(item)) for item in items)
+            lines.append(r"\end{itemize}")
+    return lines
 
 
 def _solution_body(
@@ -3068,6 +3183,11 @@ _PROBLEM_TAG_LABELS = {
         "DESIGN": "Diseño", "PARAMETER_STUDY": "Estudio de parámetros", "OPTIMIZATION": "Optimización",
         "INTERPRETATION": "Interpretación", "ERROR_IDENTIFICATION": "Identificación de errores",
         "ASSUMPTION_VALIDATION": "Comprobación de hipótesis", "APPLICATION": "Aplicación", "COMPARATIVE": "Comparación",
+        "DEVELOPMENT_QUESTION": "Pregunta de desarrollo", "SOURCE_COMMENTARY": "Comentario de fuente",
+        "TEXT_COMMENTARY": "Comentario de texto", "LITERARY_ANALYSIS": "Análisis literario",
+        "CHRONOLOGY": "Cronología", "CAUSAL_ANALYSIS": "Causas y consecuencias",
+        "EXPERIMENT_DESIGN": "Diseño experimental", "DATA_INTERPRETATION": "Interpretación de datos",
+        "MECHANISM_EXPLANATION": "Explicación de un mecanismo", "CASE_ANALYSIS": "Análisis de un caso",
     },
     "english": {
         "FOUNDATIONAL": "Foundational", "INTERMEDIATE": "Intermediate", "ADVANCED": "Advanced",
@@ -3077,6 +3197,11 @@ _PROBLEM_TAG_LABELS = {
         "DESIGN": "Design", "PARAMETER_STUDY": "Parameter study", "OPTIMIZATION": "Optimization",
         "INTERPRETATION": "Interpretation", "ERROR_IDENTIFICATION": "Error identification",
         "ASSUMPTION_VALIDATION": "Assumption check", "APPLICATION": "Application", "COMPARATIVE": "Comparison",
+        "DEVELOPMENT_QUESTION": "Essay question", "SOURCE_COMMENTARY": "Source commentary",
+        "TEXT_COMMENTARY": "Text commentary", "LITERARY_ANALYSIS": "Literary analysis",
+        "CHRONOLOGY": "Chronology", "CAUSAL_ANALYSIS": "Causes and consequences",
+        "EXPERIMENT_DESIGN": "Experimental design", "DATA_INTERPRETATION": "Data interpretation",
+        "MECHANISM_EXPLANATION": "Explaining a mechanism", "CASE_ANALYSIS": "Case analysis",
     },
 }
 
@@ -3105,7 +3230,9 @@ def _exercise_box(root: Path, section_id: str, language: BookLanguage) -> list[s
         if tags:
             head += " (" + ", ".join(tags) + ")"
         body.extend(["", r"\noindent\textbf{" + latex_escape(head) + "}"])
-        if prompt.strip():
+        if record.get("kind") == "discursive":
+            body.extend(_discursive_statement_lines(record, language))
+        elif prompt.strip():
             body.extend(emit_prose(prompt.strip()))
         identifier = record.get("id")
         if isinstance(identifier, str):
@@ -3507,6 +3634,9 @@ def _solution_lines(root: Path, copy: dict[str, str], language: BookLanguage) ->
         prompt = _str_field(record, "prompt")
         if not prompt.strip():
             continue
+        if record.get("kind") == "discursive" and not is_practice:
+            # The worked exercise already carries its model answer in the chapter.
+            continue
         section = _str_field(record, "section")
         lines = groups.setdefault(section, [])
         if is_practice and isinstance(identifier, str):
@@ -3517,6 +3647,14 @@ def _solution_lines(root: Path, copy: dict[str, str], language: BookLanguage) ->
         elif isinstance(identifier, str):
             lines.extend(["", r"\noindent\textbf{" + latex_escape(f"{copy['worked']} [{identifier}]") + "}"])
         solution = record.get("solution")
+        if record.get("kind") == "discursive":
+            if review_only:
+                warning = "Pauta propuesta; verificación pendiente." if language.babel == "spanish" else "Proposed model answer; verification pending."
+                lines.extend(["", r"\noindent\textbf{" + warning + "}"])
+            if is_practice:
+                lines.extend(_discursive_statement_lines(record, language))
+            lines.extend(_discursive_answer_lines(record, language))
+            continue
         if record.get("kind") == "programming":
             # Behavioral evidence belongs to the external test report. It does
             # not promote an authored solution to academic approval.
