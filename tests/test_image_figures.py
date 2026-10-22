@@ -171,3 +171,27 @@ def test_the_stored_record_keeps_the_file_hash(tmp_path, monkeypatch):
     if not stored:
         stored = "".join(path.read_text(encoding="utf-8") for path in root.rglob("figures*.jsonl"))
     assert hashlib.sha256(_png()).hexdigest() in stored
+
+
+def test_a_figure_cited_in_the_lead_prints_right_after_it(tmp_path, monkeypatch):
+    session, root, excerpts = _book(tmp_path, monkeypatch)
+    figure = _record(session, excerpts=excerpts)["figure"]
+    assert dispatch("studium_figure_check", {"id": figure["id"]}, session=session)["status"] == "checked"
+    dispatch(
+        "studium_paragraph_record",
+        {
+            "section": "mapa",
+            "role": "purpose",
+            "text": "Este capítulo mira el mapa ({{fig:mapa}}).",
+            "excerpts": excerpts,
+        },
+        session=session,
+    )
+    dispatch(
+        "studium_paragraph_record",
+        {"section": "mapa", "text": "Un segundo párrafo del cuerpo.", "excerpts": excerpts},
+        session=session,
+    )
+    render_draft(root)
+    tex = (root / "latex" / "draft.tex").read_text(encoding="utf-8")
+    assert tex.index(r"\includegraphics") < tex.index("Un segundo párrafo del cuerpo")

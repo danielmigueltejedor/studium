@@ -2240,6 +2240,12 @@ def _chapter_lines(
     lines: list[str] = []
     figure_ref = copy.get("figure_ref", "")
     lines.extend(_record_prose(purpose, figure_ref, italic=True))
+    # A figure the lead cites belongs right after the lead, not at the end of the chapter.
+    lines.extend(
+        _figure_lines(
+            root, section_id, copy, figures_shown, keys=[key for record, _ in purpose for key in _cited_keys(_str_field(record, "text"))]
+        )
+    )
     lines.extend(_body_lines(root, section_id, body, copy, figures_shown))
     lines.extend(_box(copy["consejo"], _record_prose(consejo, figure_ref), "consejo"))
     for record, text in definitions:
