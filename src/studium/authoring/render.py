@@ -15,7 +15,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from uuid import uuid4
 
-from studium.authoring import figure_images
+from studium.authoring import exercises, figure_images
 from studium.authoring.academic_blueprint import current_academic_blueprint
 from studium.authoring.blueprint import current_sections
 from studium.authoring.computation import ComputationError, current_computations, evaluate
@@ -1942,6 +1942,15 @@ def _document_body(root: Path, *, include_unsupported: bool = False) -> str:
     appendices = _render_sections(root, "appendices", ("notation", "formulas", "solutions", "diagram_report", "audit", "study"))
     language = _require_language(root)
     copy = messages(language)
+    if not exercises.numeric_allowed(_domain_profile(root)):
+        # A history or law book has no problem to solve; its chapters close with a worked exercise.
+        copy = {
+            key: value.replace("un problema resuelto", "un ejercicio resuelto")
+            .replace("el problema resuelto", "el ejercicio resuelto")
+            .replace("a worked problem", "a worked exercise")
+            .replace("the worked problem", "the worked exercise")
+            for key, value in copy.items()
+        }
     sections = current_sections(root)
     claims = supported_drafts(root)
     paragraphs = supported_paragraphs(root)

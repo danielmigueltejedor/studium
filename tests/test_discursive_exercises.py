@@ -242,3 +242,11 @@ def test_a_comparative_exercise_with_an_answer_is_discursive_and_without_one_is_
 def test_a_comparative_exercise_with_an_answer_is_accepted_in_a_history_book(tmp_path, monkeypatch):
     session, _root, one, two, _poem = _book(tmp_path, monkeypatch)
     assert _record(session, problem_type="COMPARATIVE", answer=_answer(one, two))["status"] == "recorded"
+
+
+def test_a_history_book_reader_guide_speaks_of_an_exercise_not_a_problem(tmp_path, monkeypatch):
+    _session, root, _one, _two, _poem = _book(tmp_path, monkeypatch)
+    render_draft(root)
+    tex = (root / "latex" / "draft.tex").read_text(encoding="utf-8")
+    assert "el ejercicio resuelto" in tex
+    assert "el problema resuelto" not in tex
