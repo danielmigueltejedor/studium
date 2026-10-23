@@ -204,3 +204,12 @@ def test_dollar_spans_with_comparisons_and_digit_led_variables_are_math():
     assert not _dollar_ok("5, ")  # Adjacent currency amounts stay literal.
     assert not _dollar_ok("5 ")
     assert not _dollar_ok("5 and 10")
+
+
+def test_genotype_with_trailing_underscores_stays_literal_text():
+    from studium.authoring.render import render_text_run
+
+    # ``A_B_`` is a genotype with blanks, not a subscript: math mode would
+    # fail with a double subscript.
+    assert render_text_run('fenotipo (A_B_) y aaB_') == r'fenotipo (A\_B\_) y aaB\_'
+    assert render_text_run('x_1') == r'\(x_1\)'

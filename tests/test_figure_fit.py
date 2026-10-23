@@ -95,3 +95,26 @@ def test_fit_block_keeps_natural_size_and_scales_large_figures(tmp_path, consume
 def test_fit_block_never_reads_the_width_of_a_consumed_box():
     lines = "\n".join(_fit_block(r"\includegraphics{x.pdf}", consume_box=True))
     assert r"\resizebox{\wd0}" not in lines
+
+
+def test_centered_figure_keeps_line_breaks_inside_unaligned_nodes(tmp_path):
+    """A node with ``\\\\`` and no alignment compiles inside the centred figure box."""
+
+    from studium.authoring.render import _TIKZ_LINEBREAK
+
+    def compile_with(prefix: str) -> int:
+        tex = tmp_path / "t.tex"
+        tex.write_text(
+            "\\documentclass{article}\\usepackage{tikz}\\begin{document}\n"
+            "\\noindent\\begin{minipage}{\\linewidth}\\centering\n"
+            + prefix
+            + "\n\\begin{tikzpicture}\\node[draw] {uno\\\\ dos};\\end{tikzpicture}\n"
+            "\\end{minipage}\\end{document}\n",
+            encoding="utf-8",
+        )
+        done = subprocess.run(["pdflatex", "-interaction=nonstopmode", "-halt-on-error", "t.tex"],
+                              cwd=tmp_path, capture_output=True, check=False)
+        return done.returncode
+
+    assert compile_with("") != 0  # the failure this guards against
+    assert compile_with(_TIKZ_LINEBREAK) == 0
