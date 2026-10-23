@@ -8,6 +8,7 @@ import os
 import re
 import shutil
 import subprocess
+import unicodedata
 import urllib.parse
 from contextvars import ContextVar
 from fractions import Fraction
@@ -606,11 +607,54 @@ def latex_escape(value: str) -> str:
         elif ord(character) < 32 and character not in "\n\t":
             continue
         elif ord(character) > 255:
-            parts.append(f"{{U+{ord(character):04X}}}")
+            parts.append(_fallback_character(character))
         else:
             parts.append(character)
     flush_math()
     return "".join(parts)
+
+
+# Typography that arrives from sources and has a proper T1 command; anything else
+# above U+00FF used to be printed as a literal ``U+XXXX`` in the PDF.
+_TYPOGRAPHY = {
+    "\u2026": r"\ldots{}",
+    "\u2018": r"\textquoteleft{}",
+    "\u2019": r"\textquoteright{}",
+    "\u201c": r"\textquotedblleft{}",
+    "\u201d": r"\textquotedblright{}",
+    "\u201e": r"\quotedblbase{}",
+    "\u2013": "--",
+    "\u2014": "---",
+    "\u2212": r"\ensuremath{-}",
+    "\u00a0": "~",
+    "\u2009": r"\,",
+    "\u202f": r"\,",
+    "\u2002": " ",
+    "\u2003": " ",
+}
+_INVISIBLE = {"\u200b", "\u200c", "\u200d", "\u2060", "\ufeff", "\u00ad"}
+_MACRON = {"\u0304"}
+
+
+def _fallback_character(character: str) -> str:
+    """A command for a character outside Latin-1 that pdflatex cannot read directly.
+
+    Invisible format characters vanish, typographic punctuation maps to its T1
+    command, and a letter with a decomposable mark keeps its base letter (with a
+    macron where TeX can draw it). Only a character with no reading at all is
+    shown as its code point, so the gap stays visible instead of silently lost.
+    """
+
+    if character in _INVISIBLE:
+        return ""
+    if character in _TYPOGRAPHY:
+        return _TYPOGRAPHY[character]
+    decomposed = unicodedata.normalize("NFD", character)
+    if len(decomposed) > 1 and decomposed[0].isalpha() and decomposed[0].isascii():
+        if all(mark in _MACRON for mark in decomposed[1:]):
+            return "\\={" + decomposed[0] + "}"
+        return decomposed[0]
+    return f"{{U+{ord(character):04X}}}"
 
 
 _ASCII_OPERATORS = set("=+-*/<>()[]{}^_|")

@@ -213,3 +213,15 @@ def test_genotype_with_trailing_underscores_stays_literal_text():
     # fail with a double subscript.
     assert render_text_run('fenotipo (A_B_) y aaB_') == r'fenotipo (A\_B\_) y aaB\_'
     assert render_text_run('x_1') == r'\(x_1\)'
+
+
+def test_characters_outside_latin1_never_print_their_code_point():
+    escaped = latex_escape("antaño… “hola” \u0101 Tr\u01b0\u01a1ng Kh\u1ea3i\u200b")
+    assert "U+" not in escaped
+    assert r"\ldots{}" in escaped and r"\textquotedblleft{}" in escaped
+    assert r"\={a}" in escaped and "Truong Khai" in escaped
+    assert "\u200b" not in escaped
+
+
+def test_a_character_with_no_reading_is_still_visible():
+    assert latex_escape("\u4e2d") == "{U+4E2D}"
