@@ -77,3 +77,17 @@ def test_missing_figure_is_reported_in_reference_and_usage_views(tmp_path, monke
     output.write_bytes(b'figure')
     assert unresolved_figure_references(tmp_path) == []
     assert figure_usage(tmp_path)[0]['checked'] is True
+
+
+def test_reference_to_an_undrawn_figure_is_not_numbered(tmp_path):
+    from studium.authoring import render
+
+    token = render._DRAWN_FIGURE_KEYS.set(frozenset({'dibujada'}))
+    try:
+        drawn = render._render_figure_refs('Ver {{fig:dibujada}}.', 'figura')
+        missing = render._render_figure_refs('Ver {{fig:sin-archivo}}.', 'figura')
+    finally:
+        render._DRAWN_FIGURE_KEYS.reset(token)
+    assert '\\ref{fig:dibujada}' in drawn
+    assert '\\ref' not in missing
+    assert 'sin-archivo' in missing

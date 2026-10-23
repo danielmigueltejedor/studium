@@ -23,7 +23,7 @@ from studium.authoring.derivations import derivations_for_section
 from studium.authoring.diagrams import diagram_state, problem_figures, renderable
 from studium.authoring.excerpts import excerpts_by_id
 from studium.authoring.figure_artifacts import checked_figure_output
-from studium.authoring.figures import FIGURE_REF, figures_in_section, referenced_figure_keys
+from studium.authoring.figures import FIGURE_REF, figure_reference_map, figures_in_section, referenced_figure_keys
 from studium.authoring.grounding import FORMULA_STATUSES, GroundingContext, formula_statuses
 from studium.authoring.languages import (
     INVALID_LANGUAGE,
@@ -58,6 +58,9 @@ from studium.storage.records import (
 )
 
 _REVIEW_RENDERING: ContextVar[bool] = ContextVar("studium_review_rendering", default=False)
+# Lower-cased keys of the figures this render draws. ``None`` outside a render,
+# where every ``{{fig:key}}`` is still written as a numbered reference.
+_DRAWN_FIGURE_KEYS: ContextVar[frozenset[str] | None] = ContextVar("studium_drawn_figure_keys", default=None)
 _TEX_NAME = "draft.tex"
 _PDF_NAME = "draft.pdf"
 _LABEL_SAFE = re.compile(r"[^A-Za-z0-9._:-]")
@@ -1014,9 +1017,15 @@ def _render_figure_refs(paragraph: str, figure_ref: str) -> str:
         return render_text_run(paragraph)
     parts: list[str] = []
     cursor = 0
+    drawn = _DRAWN_FIGURE_KEYS.get()
     for match in FIGURE_REF.finditer(paragraph):
         parts.append(render_text_run(paragraph[cursor : match.start()]))
-        parts.append(_figure_ref_text(match.group(1), figure_ref))
+        if drawn is None or match.group(1).lower() in drawn:
+            parts.append(_figure_ref_text(match.group(1), figure_ref))
+        else:
+            # The figure is not drawn (missing or unchecked): a numbered
+            # reference would print ``??``. The quality report names the gap.
+            parts.append(latex_escape(figure_ref) + "~" + latex_escape(match.group(1)))
         cursor = match.end()
     parts.append(render_text_run(paragraph[cursor:]))
     return "".join(parts)
@@ -1190,6 +1199,9 @@ _SPELLED_DELTA = re.compile(r"\b[Dd]elta (?=[A-Za-z](?:_[A-Za-z0-9]+)? ?=)")
 _INTERNAL_IDENTIFIER = re.compile(
     r"\[[A-Za-z0-9][A-Za-z0-9.-]*:[A-Za-z0-9_.:-]+\]"
     r"|\b[A-Za-z][A-Za-z0-9]*(?:_[A-Za-z0-9]+){2,}\b"
+    # A trailing underscore (``A_B_``, a genotype written with blanks) would
+    # end a subscript with nothing after it, which LaTeX rejects.
+    r"|\b[A-Za-z][A-Za-z0-9]*(?:_[A-Za-z0-9]+)*_(?![A-Za-z0-9{])"
     r"|(?<![A-Za-z0-9_])__[A-Za-z][A-Za-z0-9_]*__(?![A-Za-z0-9_])"
 )
 
@@ -1905,11 +1917,24 @@ def _title_page(root: Path, book: str, copy: dict[str, str]) -> list[str]:
     return lines
 
 
+def _drawn_figure_keys(root: Path) -> frozenset[str]:
+    """Keys a render will draw, so a reference never points at a missing label."""
+
+    drawn: set[str] = set()
+    for key, record in figure_reference_map(root).items():
+        review = _REVIEW_RENDERING.get() and record.get("kind") == "tikz" and isinstance(record.get("source"), str)
+        if review or (_checked_output(root, record) is not None and renderable(root, record)):
+            drawn.add(key.lower())
+    return frozenset(drawn)
+
+
 def _document(root: Path, *, include_unsupported: bool = False) -> str:
     token = _REVIEW_RENDERING.set(include_unsupported)
+    keys_token = _DRAWN_FIGURE_KEYS.set(_drawn_figure_keys(root))
     try:
         return _document_body(root, include_unsupported=include_unsupported)
     finally:
+        _DRAWN_FIGURE_KEYS.reset(keys_token)
         _REVIEW_RENDERING.reset(token)
 
 
@@ -3328,6 +3353,11 @@ def _figure_keys(record: dict[str, object]) -> set[str]:
     return found
 
 
+# ``\centering`` makes ``\\`` fail inside a node that sets no alignment, although
+# the same drawing compiles when it is checked on its own.
+_TIKZ_LINEBREAK = r"\makeatletter\let\\\@normalcr\makeatother"
+
+
 def _single_figure_lines(root: Path, record: dict[str, object], copy: dict[str, str]) -> list[str]:
     """One checked drawing with its numbered caption, or nothing.
 
@@ -3365,6 +3395,8 @@ def _single_figure_lines(root: Path, record: dict[str, object], copy: dict[str, 
             r"\centering",
         ]
     )
+    if record.get("kind") == "tikz":
+        lines.append(_TIKZ_LINEBREAK)
     lines.extend(fitted)
     if caption.strip():
         lines.extend([r"\par\nopagebreak", r"{\small " + prefix + render_text_run(caption) + r"\par}"])
