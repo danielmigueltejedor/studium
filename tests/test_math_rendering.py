@@ -225,3 +225,12 @@ def test_characters_outside_latin1_never_print_their_code_point():
 
 def test_a_character_with_no_reading_is_still_visible():
     assert latex_escape("\u4e2d") == "{U+4E2D}"
+
+
+def test_long_inline_code_can_break_after_angle_brackets_colons_and_spaced_commas():
+    from studium.authoring.render import _inline_code
+
+    tex = _inline_code("size_of::<Option<&u64>>() y Map<String, Integer>")
+    assert r"\textless{}\allowbreak{}" in tex and r":\allowbreak{}" in tex and r",\allowbreak{} " in tex
+    # a comma inside an accessibility command must stay intact
+    assert ",\\allowbreak{}unicode" not in _inline_code("vacío_con_acentos_largos")

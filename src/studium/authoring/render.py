@@ -1526,8 +1526,8 @@ def _read_env(text: str, index: int) -> tuple[str, str, int] | None:
 
 def _inline_code(code: str) -> str:
     escaped = _texttt(code)
-    if len(code) > 24:
-        escaped = re.sub(r"(\\_|[./-])", r"\1\\allowbreak{}", escaped)
+    if len(code) > 14:
+        escaped = re.sub(r"(\\_|[./:(-]|,(?= )|\\textless\{\}|\\textgreater\{\})", r"\1\\allowbreak{}", escaped)
     return r"\texttt{" + escaped + "}"
 
 
