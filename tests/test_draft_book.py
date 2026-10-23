@@ -1213,3 +1213,41 @@ def _excerpt(session, source_id: str, url: str, text: str = "A stored excerpt is
 
 def _explode(*_args, **_kwargs):
     raise AssertionError("must not fetch")
+
+
+def test_paragraph_replace_role_is_kept_unless_explanation_is_asked(tmp_path, monkeypatch):
+    monkeypatch.setattr("urllib.request.urlopen", _explode)
+    session, _root, cited = _fluidos(tmp_path)
+    dispatch(
+        "studium_blueprint_store",
+        {"sections": [{"id": "mass", "title": "Conservation of mass"}]},
+        session=session,
+    )
+    excerpt_id = _excerpt(session, cited, "https://example.edu/white", "Steady flow conserves mass.")
+    dispatch(
+        "studium_paragraph_record",
+        {
+            "section": "mass",
+            "text": "Mass is conserved in a steady flow.",
+            "excerpts": [excerpt_id],
+            "role": "consejo",
+        },
+        session=session,
+    )
+    kept = dispatch(
+        "studium_paragraph_replace",
+        {"id": "PAR-0001", "text": "Mass is still conserved in a steady flow.", "excerpts": [excerpt_id]},
+        session=session,
+    )
+    assert kept["paragraph"]["role"] == "consejo"
+    cleared = dispatch(
+        "studium_paragraph_replace",
+        {
+            "id": "PAR-0001",
+            "text": "Mass is conserved in a steady flow, as the opened page states.",
+            "excerpts": [excerpt_id],
+            "role": "explanation",
+        },
+        session=session,
+    )
+    assert "role" not in cleared["paragraph"]

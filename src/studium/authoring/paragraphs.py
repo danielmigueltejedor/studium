@@ -126,6 +126,8 @@ def replace_paragraph(
 
     Conflicts and course sources the guide does not cite are rejected, the same
     as ``record_paragraph``. The id does not change. The result stays a draft.
+    When ``role`` is omitted the stored role is kept; ``explanation`` clears it
+    so a box paragraph can become body text again.
     When ``math`` is omitted the stored declarations are kept. When
     ``subsection`` is omitted the paragraph keeps its academic section; an id
     moves it there, and ``None`` or an empty string returns it to the chapter
@@ -147,6 +149,7 @@ def replace_paragraph(
     paragraph_role, role_error = _role(role)
     if role_error is not None:
         return role_error
+    plain_role = isinstance(role, str) and role.strip().lower() == "explanation"
     concept_ids, concept_error = _concepts(root, concepts)
     if concept_error is not None:
         return concept_error
@@ -201,7 +204,7 @@ def replace_paragraph(
             }
             if paragraph_role is not None:
                 record["role"] = paragraph_role
-            elif isinstance(current.get("role"), str):
+            elif not plain_role and isinstance(current.get("role"), str):
                 record["role"] = current["role"]
             if concept_ids:
                 record["concepts"] = concept_ids

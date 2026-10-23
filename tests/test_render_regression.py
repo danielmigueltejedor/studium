@@ -265,15 +265,14 @@ def _full_setup(tmp_path, monkeypatch):
         session=session,
     )
     excerpts = _excerpts(session)
-    for text in (
-        "En un fluido en reposo la presión aumenta linealmente con la profundidad.",
-        "La medición de la presión se realiza con manómetros que comparan columnas.",
+    for text, subsection in (
+        ("En un fluido en reposo la presión aumenta linealmente con la profundidad.", None),
+        ("La medición de la presión se realiza con manómetros que comparan columnas.", "presion.1"),
     ):
-        dispatch(
-            "studium_paragraph_record",
-            {"section": "presion", "text": text, "excerpts": excerpts},
-            session=session,
-        )
+        arguments = {"section": "presion", "text": text, "excerpts": excerpts}
+        if subsection:
+            arguments["subsection"] = subsection
+        dispatch("studium_paragraph_record", arguments, session=session)
     dispatch(
         "studium_notation_record",
         {"section": "presion", "symbol": "p", "meaning": "presión estática", "units": "Pa"},
