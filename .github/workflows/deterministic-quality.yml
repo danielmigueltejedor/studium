@@ -4,22 +4,21 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
-
 permissions:
   contents: read
-
 jobs:
   quality:
     name: quality
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - name: Verify patch whitespace
+        shell: bash
         run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
             git diff --check "${{ github.event.pull_request.base.sha }}" HEAD
           else
             git show --format= --check HEAD
@@ -27,9 +26,13 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+      - name: Install LaTeX toolchain required by rendering tests
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq texlive-latex-base texlive-latex-extra texlive-latex-recommended texlive-fonts-recommended texlive-lang-spanish texlive-lang-european texlive-lang-french texlive-lang-portuguese texlive-lang-italian poppler-utils
       - name: Install project and test dependencies
         run: python -m pip install -e '.[dev]'
       - name: Static analysis
         run: ruff check .
       - name: Tests and minimum branch-aware coverage
-        run: python -m pytest --cov=studium --cov-branch --cov-report=term-missing --cov-fail-under=75
+        run: python -m pytest -q --cov=studium --cov-branch --cov-report=term-missing --cov-fail-under=75
