@@ -1,6 +1,6 @@
+import {podcastEvidenceResolver} from './podcast-evidence.js';
 import {PROFILES,FRAMEWORK,fallbackScope,planStudiumScope} from './studium-engine.js';
 import {speechWords,dialogueText,parseDialogue} from './dialogue.js';
-const normalize=text=>String(text).normalize('NFKC').replace(/\s+/g,' ').trim();
 export function timeLabel(minutes){minutes=Math.max(1,Math.round(minutes));return minutes>=60?`${Math.floor(minutes/60)} h${minutes%60?' '+minutes%60+' min':''}`:`${minutes} min`;}
 export async function contentHash(text){const bytes=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(text));return [...new Uint8Array(bytes)].map(n=>n.toString(16).padStart(2,'0')).join('');}
 export function sourceRanges(text,limit){const ranges=[];let from=0;while(from<text.length){let to=Math.min(text.length,from+limit);if(to<text.length){const slice=text.slice(from,to);let cut=slice.lastIndexOf('\n\n');if(cut<limit*.55)cut=slice.lastIndexOf('. ')+1;if(cut<limit*.55)cut=slice.lastIndexOf(' ');if(cut>limit*.45)to=from+cut;}if(to<=from)throw Error('No se pudo dividir el documento.');ranges.push({from,to});from=to;}if(ranges.length>1&&ranges.at(-1).to-ranges.at(-1).from<100){const last=ranges.pop();ranges.at(-1).to=last.to;}return ranges;}
@@ -14,9 +14,9 @@ export async function nativePodcastPlan(input,options){const plan=createPodcastP
 export function auditPodcastChapter(raw,segment,source,{basic=false}={}){
  let turns;if(basic){turns=raw;}else{let data;try{data=JSON.parse(String(raw).trim().replace(/^```(?:json)?\s*|\s*```$/g,''));}catch{throw Error('La IA no devolvió el diálogo con sus evidencias en formato válido.');}turns=data.turns;}
  if(!Array.isArray(turns)||!turns.length)throw Error('Falta el diálogo de este bloque.');
- const normalized=normalize(source),positions=[];const numbers=new Set((source.match(/\d+(?:[.,]\d+)*/g)||[]).map(n=>n.replace(',','.')));const checked=[];
+ const resolveEvidence=podcastEvidenceResolver(source,segment),positions=[];const numbers=new Set((source.match(/\d+(?:[.,]\d+)*/g)||[]).map(n=>n.replace(',','.')));const checked=[];
  for(const turn of turns){if(!['Ana','Leo'].includes(turn.speaker)||typeof turn.text!=='string'||!turn.text.trim())throw Error('Cada intervención debe pertenecer a Ana o Leo y contener texto.');if(!Array.isArray(turn.evidence)||!turn.evidence.length)throw Error('Falta la evidencia literal de una intervención.');
-  const evidence=turn.evidence.map(e=>{const quote=normalize(e.quote);const at=normalized.indexOf(quote);if(e.id!==segment.evidenceId||quote.length<20||quote.length>300||at<0)throw Error('Una cita no se encuentra en el fragmento original. Usa citas literales del manual.');positions.push(at/Math.max(1,normalized.length),normalized.lastIndexOf(quote)/Math.max(1,normalized.length));return {id:e.id,quote:e.quote,from:at,status:'EVIDENCE_LOCATED',semanticSupport:'PENDING'};});
+  const evidence=turn.evidence.map(e=>{const located=resolveEvidence(e);positions.push(located.from/Math.max(1,source.length),located.to/Math.max(1,source.length));return located;});
   const unsupported=(turn.text.match(/\d+(?:[.,]\d+)*/g)||[]).filter(n=>!numbers.has(n.replace(',','.')));if(unsupported.length)throw Error('El diálogo incluye cifras que no aparecen en la fuente: '+[...new Set(unsupported)].slice(0,8).join(', ')+'. No inventes valores.');checked.push({speaker:turn.speaker,text:turn.text.trim(),evidence});
  }
  const text=dialogueText(checked);parseDialogue(text);const words=speechWords(text),minimum=Math.ceil(segment.targetWords*.75);
@@ -30,8 +30,8 @@ export async function writePodcastChapters(job,{generate,signal,onProgress=()=>{
   if(signal?.aborted)throw new DOMException('Creación pausada.','AbortError');const segment=job.plan.segments[index],source=job.input.text.slice(segment.from,segment.to);onProgress(`Escribiendo ${index+1} de ${job.plan.segments.length} · ${segment.title} · objetivo ${timeLabel(segment.targetWords/145)}`);
   let chapter,error;
   if(job.input.engine==='basic')chapter=basicPodcastChapter(segment,source);
-  else for(let attempt=0;attempt<2;attempt++){try{const raw=await generate({...job.input,text:source,podcastSection:{...segment,total:job.plan.segments.length,depth:job.plan.profile,feedback:error?.message.slice(0,1400)||''}},signal);chapter=auditPodcastChapter(raw,segment,source);break;}catch(e){if(signal?.aborted||/cuota|clave|permisos|Google no|conectar|proveedor|modelo|descargar|WebGPU/i.test(e.message))throw e;error=e;onProgress(`Revisando el bloque ${index+1}: ${e.message}`);}}
-  if(!chapter)throw Error(`Bloque ${index+1} pendiente: ${error?.message||'no se pudo completar'}. Los bloques anteriores están guardados.`);job.chapters.push(chapter);await onCheckpoint(job);
+  else for(let attempt=0;attempt<2;attempt++){try{const raw=await generate({...job.input,text:source,podcastSection:{...segment,evidenceVersion:2,total:job.plan.segments.length,depth:job.plan.profile,feedback:error?.message.slice(0,1400)||''}},signal);chapter=auditPodcastChapter(raw,segment,source);break;}catch(e){if(signal?.aborted||/cuota|clave|permisos|Google no|conectar|proveedor|modelo|descargar|WebGPU/i.test(e.message))throw e;error=e;onProgress(`Revisando el bloque ${index+1}: ${e.message}`);}}
+  if(!chapter)throw Error(`Bloque ${index+1} pendiente: ${error?.message||'no se pudo completar'}. ${job.chapters.length?'Los bloques anteriores están guardados.':'El manual y el borrador están guardados; puedes reanudar este bloque.'}`);job.chapters.push(chapter);await onCheckpoint(job);
  }
  const text=job.chapters.map(c=>c.text).join('\n\n'),words=speechWords(text);job.complete=true;job.scriptHash=await contentHash(text);job.actualWords=words;job.actualMinutes=words/145;await onCheckpoint(job);return {text,words,minutes:words/145,chapters:job.chapters,framework:job.plan.framework,plan:job.plan,quality:{coveredBlocks:job.chapters.length,plannedBlocks:job.plan.segments.length,sourceQuotes:'EVIDENCE_LOCATED',semanticSupport:'PENDING',scientificReview:'PENDING'}};
 }

@@ -33,6 +33,12 @@ Apuntes, resúmenes y libros recorren todos los bloques del texto completo. Las
 tarjetas usan una selección repartida de bloques según la cantidad solicitada;
 no prometen cubrir todo un manual con seis tarjetas. Cada bloque se guarda para
 reanudar tras cuota, desconexión o cancelación. Un libro es siempre un borrador.
+Los podcasts seleccionan identificadores de fragmentos precalculados: la app
+recupera la cita exacta y sus offsets del texto original del PDF, sin pedir al
+modelo que la transcriba. Los identificadores ajenos al bloque se rechazan. Las
+respuestas antiguas con citas literales conservan compatibilidad y se restituyen
+a su fragmento original; no se aceptan paráfrasis como citas.
+
 Los cuadernos y fuentes personales se registran en segundo plano tras una pausa,
 sin detener la tinta. Los trazos se conservan como geometría: no se afirma OCR.
 
