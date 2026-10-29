@@ -24,6 +24,7 @@ from studium.authoring.grounding import grounding_summary
 
 _WEB_PARENT = Path('/studium-projects')
 _WEB_PARENT.mkdir(exist_ok=True)
+_WEB_BRIDGE_VERSION = 2
 
 
 def _web_root(identifier):
@@ -108,15 +109,25 @@ def _web_prepare(payload):
                            'section': 'sec-' + str(index + 1), 'concept': 'concept-' + str(index + 1),
                            'from': segment.get('from', 0), 'to': segment.get('to', 0), 'title': title})
     blueprint = store_blueprint(root, chapters)
+    if blueprint.get('status') != 'recorded':
+        raise ValueError('Studium rejected the outline: ' + json.dumps(blueprint))
     academic = [{'id': chapter['id'], 'title': chapter['title'], 'sections': [
         {'id': placement['section'], 'title': placement['title'], 'concepts': [
             {'id': placement['concept'], 'title': placement['title'],
              'sources': [source_id] if source_id else [],
              'learning_objectives': ['Comprender y repasar el contenido de esta unidad']}]} for placement in placements
         if placement['chapter'] == chapter['id']]} for chapter in chapters]
+    # The original framework permits at most 40 chapters per part. Keep every
+    # source placement and distribute large manuals across valid parts.
+    parts = [{'id': 'part-' + str(index // 40 + 1), 'title': 'Material de estudio · parte ' + str(index // 40 + 1),
+              'chapters': academic[index:index + 40]} for index in range(0, len(academic), 40)]
     academic_result = store_academic_blueprint(root, subject=payload.get('subject') or payload.get('title') or 'Apuntes',
-        profile_key=payload.get('depth') or 'UNDERGRADUATE', parts=[{'id': 'part-1', 'title': 'Material de estudio', 'chapters': academic}])
+        profile_key=payload.get('depth') or 'UNDERGRADUATE', parts=parts)
+    if academic_result.get('status') != 'recorded':
+        raise ValueError('Studium rejected the academic structure: ' + json.dumps(academic_result))
     plan = build_depth_plan(root, academic_depth=payload.get('depth') or 'UNDERGRADUATE', length='COMPREHENSIVE')
+    if plan.get('status') != 'planned':
+        raise ValueError('Studium rejected the depth plan: ' + json.dumps(plan))
     for placement in placements:
         quote = source_text[placement['from']:placement['to']]
         if source_id and quote.strip():
@@ -128,7 +139,7 @@ def _web_prepare(payload):
                 'originals': payload.get('originals') or [], 'source_kind': payload.get('sourceKind') or 'DERIVED_TEXT',
                 'placements': placements, 'title': payload.get('title'), 'units': []}
     (root / 'web-provenance.json').write_text(json.dumps(metadata, ensure_ascii=False), encoding='utf-8')
-    return {'id': payload['id'], 'intake': intake, 'blueprint': blueprint, 'academicBlueprint': academic_result,
+    return {'id': payload['id'], 'bridgeVersion': _WEB_BRIDGE_VERSION, 'intake': intake, 'blueprint': blueprint, 'academicBlueprint': academic_result,
             'plan': plan, 'placements': placements, 'context': context, 'excerpts': excerpts, 'files': _web_files(root)}
 
 
@@ -137,17 +148,25 @@ def _web_record(root, payload):
     results = []
     for unit in payload.get('units') or []:
         placement = next((p for p in metadata['placements'] if p['id'] == unit.get('segmentId')), metadata['placements'][0])
-        quote = unit.get('quote')
-        if not isinstance(quote, str) or not quote.strip() or not metadata.get('source_id'):
+        quotes = unit.get('quotes', [unit.get('quote')])
+        if not isinstance(quotes, list) or not quotes or any(not isinstance(q, str) or not q.strip() for q in quotes) or not metadata.get('source_id'):
             result = {'status': 'unverified', 'message': 'No exact source quote supplied', 'verified': False}
         else:
-            excerpt = _web_safe(record_excerpt, root, source_id=metadata['source_id'], url=None, text=quote,
-                path=metadata['source_path'], locator=str(unit.get('locator') or 'Unidad ' + placement['id']))
-            identifier = (excerpt.get('excerpt') or {}).get('id')
-            if not identifier:
-                result = {'status': 'rejected', 'excerpt': excerpt, 'verified': False}
+            identifiers = []
+            failure = None
+            for quote in dict.fromkeys(quotes):
+                excerpt = _web_safe(record_excerpt, root, source_id=metadata['source_id'], url=None, text=quote,
+                    path=metadata['source_path'], locator=str(unit.get('locator') or 'Unidad ' + placement['id']))
+                identifier = (excerpt.get('excerpt') or {}).get('id')
+                if not identifier:
+                    failure = {'status': 'rejected', 'excerpt': excerpt, 'verified': False}
+                    break
+                if identifier not in identifiers:
+                    identifiers.append(identifier)
+            if failure:
+                result = failure
             else:
-                result = record_paragraph(root, section=placement['chapter'], text=unit.get('text'), excerpts=[identifier],
+                result = record_paragraph(root, section=placement['chapter'], text=unit.get('text'), excerpts=identifiers,
                     role='self_check' if unit.get('kind') == 'card' else 'explanation',
                     concepts=[placement['concept']], subsection=placement['section'])
         results.append(result)

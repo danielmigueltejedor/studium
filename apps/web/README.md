@@ -50,6 +50,14 @@ obligatorios. Los bloques claramente insuficientes se conservan aparte como
 borradores incompletos y se amplían con intervenciones nuevas, sin reescribir el
 avance: hasta tres ampliaciones por ejecución, con reintentos de formato acotados.
 La cuota o un fallo temporal del framework no descartan el texto ya validado.
+Los manuales extensos se distribuyen en partes de hasta 40 capítulos, respetando
+la estructura del núcleo original sin omitir bloques. La preparación comprueba
+el resultado del esquema, la estructura académica y el plan antes de generar.
+Al reanudar un proyecto del adaptador anterior, se reconstruye su estructura y
+se vuelven a registrar las intervenciones conservadas sin regenerar el guion.
+Cada intervención registra todas sus citas; un rechazo identifica bloque,
+intervención y motivo del framework. Las revisiones semántica y experta siguen
+pendientes, aunque las citas se hayan localizado.
 El registro nativo y la revisión del guion solo avanzan al completar las
 comprobaciones; ninguna tolerancia de audio libera una publicación académica.
 
