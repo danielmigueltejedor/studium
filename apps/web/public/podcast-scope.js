@@ -13,6 +13,6 @@ export function narrationTarget(text,{engine,perConcept}){const profile=narratio
 }
 export function narrationWindow(targetWords){const minimum=Math.ceil(targetWords*.75),tolerance=Math.min(24,Math.floor(minimum*.025));return {minimum,tolerance};}
 export function validPodcastContinuation(c){return c===undefined||!!c&&typeof c.text==='string'&&c.text.length>0&&c.text.length<=20000&&Number.isSafeInteger(c.words)&&c.words>0&&c.words<=10000&&Number.isSafeInteger(c.minimumWords)&&c.minimumWords>0&&c.minimumWords<=1600&&typeof c.needsBeginning==='boolean'&&typeof c.needsEnding==='boolean';}
-export function continuationSection(segment,draft,total,depth){const {minimum}=narrationWindow(segment.targetWords),deficit=Math.max(0,minimum-draft.words),targetWords=Math.min(1200,Math.max(100,Math.ceil(deficit*1.2)));
+export function continuationSection(segment,draft,total,depth){const {minimum}=narrationWindow(segment.targetWords),deficit=Math.max(0,minimum-draft.words),targetWords=deficit?Math.min(1200,Math.max(100,Math.ceil(deficit*1.2))):segment.kind==='navigation'?40:80;
  return {...segment,total,depth,evidenceVersion:2,targetWords,continuation:{text:draft.text,words:draft.words,minimumWords:minimum,needsBeginning:!draft.checks?.beginningCovered,needsEnding:!draft.checks?.endingCovered}};
 }
