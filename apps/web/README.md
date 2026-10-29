@@ -48,7 +48,7 @@ extensión es orientativo: una diferencia de hasta el 2,5 % del mínimo (máximo
 La cobertura de la fuente, las citas, los números y los personajes siguen siendo
 obligatorios. Los bloques claramente insuficientes se conservan aparte como
 borradores incompletos y se amplían con intervenciones nuevas, sin reescribir el
-avance: hasta tres ampliaciones por ejecución, con reintentos de formato acotados.
+avance: hasta ocho ampliaciones por ejecución, con reintentos de formato acotados. Si una respuesta mezcla intervenciones repetidas y nuevas, conserva solo las nuevas y vuelve a comprobar sus evidencias.
 La cuota o un fallo temporal del framework no descartan el texto ya validado.
 Los manuales extensos se distribuyen en partes de hasta 40 capítulos, respetando
 la estructura del núcleo original sin omitir bloques. La preparación comprueba

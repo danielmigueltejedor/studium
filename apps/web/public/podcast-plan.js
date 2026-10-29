@@ -29,7 +29,7 @@ export function auditPodcastChapter(raw,segment,source,{basic=false}={}){
 export function basicPodcastChapter(segment,source){const turns=sourceRanges(source,1100).map((range,index)=>{const text=source.slice(range.from,range.to).trim(),quotes=text.length>240?[text.slice(0,240),text.slice(-240)]:[text];return {speaker:index%2?'Leo':'Ana',text,evidence:quotes.map(quote=>({id:segment.evidenceId,quote:quote.length>=20?quote:source.slice(0,240)}))};});return auditPodcastChapter(turns,segment,source,{basic:true});}
 function upgradeNarrationPlan(job){if(job.plan.version>=2)return;const profile=PROFILES[job.plan.profile]||PROFILES.UNDERGRADUATE,perConcept=job.plan.scope?.breakdown?.concepts/Math.max(1,job.plan.nativeSpec?.concepts)||profile.pages_per_concept;for(const s of job.plan.segments.slice(job.chapters.length))Object.assign(s,narrationTarget(job.input.text.slice(s.from,s.to),{engine:job.input.engine,perConcept}));const targetWords=job.plan.segments.reduce((n,s)=>n+s.targetWords,0);Object.assign(job.plan,{version:2,targetWords,minutes:targetWords/145,minMinutes:targetWords*.75/145,maxMinutes:targetWords*1.35/145});}
 function readAdditionalTurns(raw){let data;try{data=JSON.parse(String(raw).trim().replace(/^```(?:json)?\s*|\s*```$/g,''));}catch{throw Error('La IA no devolvió el diálogo con sus evidencias en formato válido.');}if(!Array.isArray(data.turns)||!data.turns.length)throw Error('Falta la ampliación de este bloque.');return data.turns;}
-function appendTurns(draft,turns){const normalized=s=>String(s).normalize('NFKC').replace(/\s+/g,' ').trim().toLocaleLowerCase(),previous=draft.turns.map(t=>normalized(t.text));if(turns.some(t=>typeof t.text==='string'&&normalized(t.text).length>=40&&previous.some(p=>p.includes(normalized(t.text))||normalized(t.text).includes(p))))throw Error('La ampliación repite el diálogo anterior. Añade una explicación nueva apoyada por la fuente.');return [...draft.turns,...turns];}
+function appendTurns(draft,turns){const normalized=s=>String(s).normalize('NFKC').replace(/\s+/g,' ').trim().toLocaleLowerCase(),previous=draft.turns.map(t=>normalized(t.text));const additions=turns.filter(t=>{if(typeof t.text!=='string')return true;const value=normalized(t.text);return !previous.some(p=>p===value||value.length>=40&&p.includes(value));});if(!additions.length)throw Error('La ampliación repite el diálogo anterior. Añade una explicación nueva apoyada por la fuente.');return [...draft.turns,...additions];}
 export async function writePodcastChapters(job,{generate,signal,onProgress=()=>{},onCheckpoint=async()=>{}}){
  upgradeNarrationPlan(job);
  for(let index=job.chapters.length;index<job.plan.segments.length;index++){
@@ -38,7 +38,7 @@ export async function writePodcastChapters(job,{generate,signal,onProgress=()=>{
   if(job.input.engine==='basic')chapter=basicPodcastChapter(segment,source);
   if(partial&&!chapter){try{chapter=auditPodcastChapter(JSON.stringify({turns:partial.turns}),segment,source);}catch(e){if(e.code!=='PODCAST_SCOPE_INCOMPLETE')throw Error('El bloque parcial guardado necesita revisión: '+e.message);partial=e.draft;error=e;}}
   while(!chapter&&job.input.engine!=='basic'){
-   if(partial&&additions>=3)break;const expanding=!!partial;let usable=false;
+   if(partial&&additions>=8)break;const expanding=!!partial;let usable=false;
    for(let attempt=0;attempt<2;attempt++){
     if(signal?.aborted)throw new DOMException('Creación pausada.','AbortError');
     const section=partial?continuationSection(segment,partial,job.plan.segments.length,job.plan.profile):{...segment,evidenceVersion:2,total:job.plan.segments.length,depth:job.plan.profile};
@@ -48,7 +48,7 @@ export async function writePodcastChapters(job,{generate,signal,onProgress=()=>{
    }
    if(expanding)additions++;if(!usable)break;
   }
-  if(!chapter)throw Error(`Bloque ${index+1} pendiente: ${partial?'La ampliación de este bloque sigue pendiente; '+partial.words+' palabras están conservadas.':error?.message||'no se pudo completar'}. El manual y los avances están guardados; puedes reanudar sin repetir los bloques completados.`);
+  if(!chapter)throw Error(`Bloque ${index+1} pendiente: ${partial?'La ampliación de este bloque sigue pendiente; '+partial.words+' palabras están conservadas. '+(error?.message||''):error?.message||'no se pudo completar'}. El manual y los avances están guardados; puedes reanudar sin repetir los bloques completados.`);
   delete job.pendingChapter;job.chapters.push(chapter);await onCheckpoint(job);
  }
  const text=job.chapters.map(c=>c.text).join('\n\n'),words=speechWords(text);job.complete=true;job.scriptHash=await contentHash(text);job.actualWords=words;job.actualMinutes=words/145;await onCheckpoint(job);return {text,words,minutes:words/145,chapters:job.chapters,framework:job.plan.framework,plan:job.plan,quality:{coveredBlocks:job.chapters.length,plannedBlocks:job.plan.segments.length,sourceQuotes:'EVIDENCE_LOCATED',semanticSupport:'PENDING',scientificReview:'PENDING'}};
