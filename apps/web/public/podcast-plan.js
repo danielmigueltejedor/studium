@@ -1,5 +1,6 @@
 import {narrationTarget,narrationWindow,continuationSection} from './podcast-scope.js';
 import {podcastEvidenceResolver,separatePodcastReferences} from './podcast-evidence.js';
+import {podcastNumberChecker} from './podcast-numbers.js';
 import {PROFILES,FRAMEWORK,fallbackScope,planStudiumScope} from './studium-engine.js';
 import {speechWords,dialogueText,parseDialogue} from './dialogue.js';
 export function timeLabel(minutes){minutes=Math.max(1,Math.round(minutes));return minutes>=60?`${Math.floor(minutes/60)} h${minutes%60?' '+minutes%60+' min':''}`:`${minutes} min`;}
@@ -15,10 +16,10 @@ export async function nativePodcastPlan(input,options){const plan=createPodcastP
 export function auditPodcastChapter(raw,segment,source,{basic=false}={}){
  let turns;if(basic){turns=raw;}else{let data;try{data=JSON.parse(String(raw).trim().replace(/^```(?:json)?\s*|\s*```$/g,''));}catch{throw Error('La IA no devolvió el diálogo con sus evidencias en formato válido.');}turns=data.turns;}
  if(!Array.isArray(turns)||!turns.length)throw Error('Falta el diálogo de este bloque.');
- const resolveEvidence=podcastEvidenceResolver(source,segment),positions=[];const numbers=new Set((source.match(/\d+(?:[.,]\d+)*/g)||[]).map(n=>n.replace(',','.')));const checked=[];
+ const resolveEvidence=podcastEvidenceResolver(source,segment),positions=[];const unsupportedNumbers=podcastNumberChecker(source);const checked=[];
  for(const turn of turns){if(!['Ana','Leo'].includes(turn.speaker)||typeof turn.text!=='string'||!turn.text.trim())throw Error('Cada intervención debe pertenecer a Ana o Leo y contener texto.');const spoken=basic?{text:turn.text,evidence:turn.evidence,detachedReferences:[]}:separatePodcastReferences(turn.text,turn.evidence,source,segment);if(!spoken.text.trim())throw Error('Una intervención solo contiene referencias: falta su explicación hablada.');if(!Array.isArray(spoken.evidence)||!spoken.evidence.length)throw Error('Falta la evidencia literal de una intervención.');
   const evidence=spoken.evidence.map(e=>{const located=resolveEvidence(e);positions.push(located.from/Math.max(1,source.length),located.to/Math.max(1,source.length));return located;});
-  const unsupported=(spoken.text.match(/\d+(?:[.,]\d+)*/g)||[]).filter(n=>!numbers.has(n.replace(',','.')));if(unsupported.length)throw Error('El diálogo incluye cifras que no aparecen en la fuente: '+[...new Set(unsupported)].slice(0,8).join(', ')+'. No inventes valores.');checked.push({speaker:turn.speaker,text:spoken.text.trim(),evidence,...(spoken.detachedReferences.length?{detachedReferences:spoken.detachedReferences}:{})});
+  const unsupported=unsupportedNumbers(spoken.text);if(unsupported.length)throw Error('El diálogo incluye cifras que no aparecen en la fuente: '+[...new Set(unsupported)].slice(0,8).join(', ')+'. No inventes valores.');checked.push({speaker:turn.speaker,text:spoken.text.trim(),evidence,...(spoken.detachedReferences.length?{detachedReferences:spoken.detachedReferences}:{})});
  }
  const text=dialogueText(checked);parseDialogue(text);const words=speechWords(text),{minimum,tolerance}=narrationWindow(segment.targetWords),beginningCovered=source.length<=1800||positions.some(x=>x<.4),endingCovered=source.length<=1800||positions.some(x=>x>.55),shortfall=Math.max(0,minimum-words),issues=[];
  if(!basic&&shortfall>tolerance)issues.push('LENGTH');if(!basic&&(!beginningCovered||!endingCovered))issues.push('SOURCE_SPAN');

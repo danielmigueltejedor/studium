@@ -61,6 +61,17 @@ pendientes, aunque las citas se hayan localizado.
 El registro nativo y la revisión del guion solo avanzan al completar las
 comprobaciones; ninguna tolerancia de audio libera una publicación académica.
 
+Las comprobaciones numéricas reconocen el punto decimal separado por espacios en
+el PDF y los decimales pronunciados en español. Se rechazan valores ausentes,
+ceros perdidos y redondeos que no aparezcan en el bloque original, tanto en el
+servidor como al auditar el guion. Esto comprueba procedencia de valores, no la
+validez de una fórmula, sus hipótesis ni la asociación semántica entre magnitudes.
+
+El audio distingue cuotas diarias, acceso con cuota cero y límites temporales.
+Solo reintenta esperas breves indicadas por el proveedor, con retroceso acotado y
+cancelable, manteniendo el mismo modelo y la misma voz. Una cuota diaria o cero
+detiene la generación y conserva los fragmentos, sin cambiar de modelo.
+
 Los cuadernos y fuentes personales se registran en segundo plano tras una pausa,
 sin detener la tinta. Los trazos se conservan como geometría: no se afirma OCR.
 
