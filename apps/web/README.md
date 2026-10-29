@@ -35,7 +35,9 @@ no prometen cubrir todo un manual con seis tarjetas. Cada bloque se guarda para
 reanudar tras cuota, desconexión o cancelación. Un libro es siempre un borrador.
 Los podcasts seleccionan identificadores de fragmentos precalculados: la app
 recupera la cita exacta y sus offsets del texto original del PDF, sin pedir al
-modelo que la transcriba. Los identificadores ajenos al bloque se rechazan. Las
+modelo que la transcriba. Los identificadores ajenos al bloque se rechazan. Si el modelo inserta códigos de
+citas en el diálogo, se trasladan a las evidencias antes de comprobar las cifras
+y crear el audio; los valores numéricos sin respaldo siguen rechazándose. Las
 respuestas antiguas con citas literales conservan compatibilidad y se restituyen
 a su fragmento original; no se aceptan paráfrasis como citas.
 

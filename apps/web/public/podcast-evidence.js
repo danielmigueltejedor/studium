@@ -19,3 +19,33 @@ export function resolvePodcastEvidence(evidence,source,section,catalog=podcastEv
  const from=normalized.starts[at],to=normalized.ends[at+quoted.length-1];return {id:evidence.id,quote:source.slice(from,to),from,to,status:'EVIDENCE_LOCATED',match:'LITERAL_FORMAT_NORMALIZED',semanticSupport:'PENDING'};
 }
 export function podcastEvidenceResolver(source,section){const catalog=podcastEvidenceCatalog(source,section.evidenceId),normalized=normalizedWithOffsets(source);return evidence=>resolvePodcastEvidence(evidence,source,section,catalog,normalized);}
+
+// Models sometimes put source IDs in speech as well as in the evidence field.
+// Move only validated app references to metadata before checking spoken numbers.
+// Bare numbers, unknown IDs and technical codes present in the source stay subject
+// to validation; there is no blanket exception for zero-padded numeric values.
+export function separatePodcastReferences(text,evidence,source,section){
+ if(evidence!==undefined&&!Array.isArray(evidence))throw Error('La evidencia de una intervención no tiene un formato válido.');
+ const catalog=podcastEvidenceCatalog(source,section.evidenceId),known=new Map(catalog.map(e=>[e.id.toLowerCase(),e.id])),refs=[...(evidence||[])],detached=[];
+ const escaped=section.evidenceId.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+ const tokens=new RegExp('(?<![\\p{L}\\p{N}_-])(?:'+escaped+'(?:-E[0-9]+)?|SRC-[A-Za-z0-9_-]+)(?![\\p{L}\\p{N}_-])','giu');
+ function detach(id){
+  if(source.includes(id))return id;
+  const canonical=known.get(id.toLowerCase());
+  if(canonical){refs.push({id:canonical});detached.push(canonical);return '';}
+  if(id.toLowerCase()===section.evidenceId.toLowerCase()){detached.push(section.evidenceId);return '';}
+  throw Error('Una referencia incluida en el diálogo no existe en este bloque del manual. Usa únicamente sus identificadores.');
+ }
+ const speech=text.replace(/\[([^\[\]\r\n]*)\]|\(([^()\r\n]*)\)|【([^【】\r\n]*)】/g,(whole,...groups)=>{
+  const content=groups.slice(0,3).find(s=>s!==undefined),ids=content.match(tokens)||[];
+  if(!ids.length||ids.some(id=>source.includes(id)))return whole;
+  const withoutFull=content.replace(tokens,''),shorts=withoutFull.match(/(?<![\p{L}\p{N}_-])-?E[0-9]+(?![\p{L}\p{N}_-])/giu)||[];
+  const residue=withoutFull.replace(/(?<![\p{L}\p{N}_-])-?E[0-9]+(?![\p{L}\p{N}_-])/giu,'').replace(/\b(?:fuentes?|refs?|referencias?|evidencias?|source|sources|references?|ver|véase|véanse|y|e|and)\b\.?/giu,'').replace(/[\s,;:|/\[\]()【】–—-]/g,'');
+  if(residue)return whole;
+  for(const id of ids)detach(id);
+  for(const short of shorts)detach(section.evidenceId+'-'+short.replace(/^-/,'').toUpperCase());
+  return '';
+ }).replace(tokens,detach).replace(/[ \t]+([,.;:!?])/g,'$1').replace(/[ \t]{2,}/g,' ').trim();
+ const unique=[...new Map(refs.map(e=>[JSON.stringify(e),e])).values()];
+ return {text:speech,evidence:unique,detachedReferences:[...new Set(detached)]};
+}
