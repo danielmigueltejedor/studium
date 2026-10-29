@@ -11,6 +11,7 @@ export function podcastCoverageGuide(source,section){
  const continuation=section.continuation,groups=[];
  if(!continuation||continuation.needsBeginning)groups.push({name:'PRINCIPIO',entries:beginning});
  if(!continuation||continuation.needsEnding)groups.push({name:'FINAL',entries:ending});
+ if(!groups.length&&continuation&&continuation.words<continuation.minimumWords)groups.push({name:'DESARROLLO',entries:spread(entries.filter(e=>e.from/length>=.25&&e.to/length<=.75))});
  if(!groups.length)return {instruction:'',focus:''};
  const instruction='COBERTURA DE LA FUENTE: '+groups.map(g=>g.name+': '+g.entries.map(e=>e.id).join(', ')).join('; ')+'. '+
   (continuation?'Desarrolla los apartados pendientes indicados, en lugar de seguir ampliando los conceptos del principio. Añade intervenciones nuevas que expliquen el contenido de esos fragmentos y citen sus identificadores reales en evidence. No basta con añadir una cita del final a un texto que habla de otra cosa. ':'Explica contenido del principio y del final del bloque, con sus referencias correspondientes. ')+
