@@ -1,0 +1,13 @@
+export const PROVIDER_CATALOG={
+ openrouter:{name:'OpenRouter Free',short:'OpenRouter',model:'openrouter/free',url:'https://openrouter.ai/settings/keys',base:'https://openrouter.ai/api/v1',desc:'Accede a modelos gratuitos con tu clave o iniciando sesión. Se usan solo variantes gratuitas; hay cuotas y disponibilidad variable.'},
+ gemini:{name:'Google Gemini',short:'Gemini',model:'auto',url:'https://aistudio.google.com/apikey',transport:'gemini',quota:true,desc:'Texto y audio de IA. Algunos modelos tienen nivel gratuito con cuotas. Revisa la facturación de tu cuenta.'},
+ groq:{name:'Groq',short:'Groq',model:'auto',url:'https://console.groq.com/keys',base:'https://api.groq.com/openai/v1',quota:true,desc:'Modelos de texto rápidos. Catálogo y cuota según tu cuenta.'},
+ cerebras:{name:'Cerebras',short:'Cerebras',model:'auto',url:'https://cloud.cerebras.ai',base:'https://api.cerebras.ai/v1',quota:true,desc:'Inferencia de texto. Usa el catálogo real de tu cuenta y comprueba sus créditos y límites.'},
+ huggingface:{name:'Hugging Face',short:'Hugging Face',model:'auto',url:'https://huggingface.co/settings/tokens',base:'https://router.huggingface.co/v1',quota:true,desc:'Modelos abiertos mediante Inference Providers. Requiere un token con permiso de inferencia y créditos disponibles.'},
+ openai:{name:'OpenAI',short:'OpenAI',model:'gpt-4.1-mini',url:'https://platform.openai.com/api-keys',base:'https://api.openai.com/v1',paid:true,desc:'Texto y audio mediante API de pago. Las suscripciones de ChatGPT no sustituyen una clave API.'},
+ anthropic:{name:'Anthropic · Claude',short:'Claude',model:'auto',url:'https://platform.claude.com/settings/keys',base:'https://api.anthropic.com/v1',transport:'anthropic',paid:true,desc:'Modelos Claude mediante API. Requiere clave y saldo; una suscripción de Claude no es una conexión API.'},
+ mistral:{name:'Mistral AI',short:'Mistral',model:'auto',url:'https://console.mistral.ai',base:'https://api.mistral.ai/v1',paid:true,desc:'Texto y modelos abiertos mediante la API de Mistral. Comprueba el plan y los permisos de tu cuenta.'},
+ deepseek:{name:'DeepSeek',short:'DeepSeek',model:'auto',url:'https://platform.deepseek.com/api_keys',base:'https://api.deepseek.com',paid:true,desc:'Modelos DeepSeek con catálogo actualizado desde tu cuenta. Conexión API de pago según el proveedor.'},
+ xai:{name:'xAI · Grok',short:'Grok',model:'auto',url:'https://console.x.ai',base:'https://api.x.ai/v1',transport:'responses',paid:true,desc:'Grok mediante la API Responses de xAI. Requiere clave y facturación API.'}
+};
+export const ONLINE_ENGINES=Object.keys(PROVIDER_CATALOG);

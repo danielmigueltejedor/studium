@@ -1,0 +1,27 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1793207774930,
+      "tag": "0000_fast_blazing_skull",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1793230228946,
+      "tag": "0001_harsh_mystique",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1793230855405,
+      "tag": "0002_silly_kulan_gath",
+      "breakpoints": true
+    }
+  ]
+}
