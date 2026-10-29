@@ -41,6 +41,18 @@ y crear el audio; los valores numéricos sin respaldo siguen rechazándose. Las
 respuestas antiguas con citas literales conservan compatibilidad y se restituyen
 a su fragmento original; no se aceptan paráfrasis como citas.
 
+La planificación de audio distingue contenido técnico, presentaciones e índices;
+los puntos de un índice no cuentan como palabras explicativas. El objetivo de
+extensión es orientativo: una diferencia de hasta el 2,5 % del mínimo (máximo
+24 palabras) se registra como `NEAR_PLANNED_SCOPE`, con recuento real y sin relleno.
+La cobertura de la fuente, las citas, los números y los personajes siguen siendo
+obligatorios. Los bloques claramente insuficientes se conservan aparte como
+borradores incompletos y se amplían con intervenciones nuevas, sin reescribir el
+avance: hasta tres ampliaciones por ejecución, con reintentos de formato acotados.
+La cuota o un fallo temporal del framework no descartan el texto ya validado.
+El registro nativo y la revisión del guion solo avanzan al completar las
+comprobaciones; ninguna tolerancia de audio libera una publicación académica.
+
 Los cuadernos y fuentes personales se registran en segundo plano tras una pausa,
 sin detener la tinta. Los trazos se conservan como geometría: no se afirma OCR.
 
