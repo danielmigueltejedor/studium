@@ -8,7 +8,7 @@ export function narrationSourceProfile(text){
  return {kind,sourceWords,rawSourceWords:tokens.length};
 }
 export function narrationTarget(text,{engine,perConcept}){const profile=narrationSourceProfile(text),procedures=(text.match(/procedimiento|inspecci[oó]n|mantenimiento|criterio|precauci[oó]n|paso\s+\d/gi)||[]).length;
- const targetWords=profile.kind==='navigation'?Math.max(40,Math.min(160,Math.round(profile.sourceWords*.18))):profile.kind==='orientation'?Math.max(80,Math.min(450,Math.round(profile.sourceWords*.35))):Math.max(20,Math.min(engine==='ai'?430:1250,Math.round(profile.sourceWords*(.3+.8*perConcept)+Math.min(procedures,5)*12)));
+ const targetWords=profile.kind==='navigation'?Math.max(20,Math.min(70,Math.round(profile.sourceWords*.08))):profile.kind==='orientation'?Math.max(50,Math.min(140,Math.round(profile.sourceWords*.14))):Math.max(20,Math.min(engine==='ai'?430:1250,Math.round(profile.sourceWords*(.38+.35*perConcept)+Math.min(procedures,5)*8)));
  return {...profile,concepts:Math.max(1,Math.ceil(profile.sourceWords/160)),targetWords};
 }
 export function narrationWindow(targetWords){const minimum=Math.ceil(targetWords*.75),tolerance=Math.min(24,Math.floor(minimum*.025));return {minimum,tolerance};}

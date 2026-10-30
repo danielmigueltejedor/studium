@@ -168,3 +168,9 @@ copias/sincronización, nunca de una publicación comunitaria.
 y la marca proceden del framework bajo Apache-2.0. Los iconos de proveedores son
 sus marcas de Simple Icons/Lobe Icons, sin afiliación. No se distribuyen datos de
 usuarios, claves, materiales privados, dependencias, `work/` ni temporales.
+
+### Conversational podcasts
+
+New AI podcasts use a conversational editorial brief, variable short host exchanges and bounded context from the previous source block. Analogies must be identified as analogies; external anecdotes, numerical examples and technical recommendations are not invented. Evidence remains exact internal metadata while speech explains and connects the source in original language. Spoken scope selects and develops ideas according to source size and native concept depth; it does not equate narration length with reading every word. Existing jobs keep their saved targets and completed text. Use “Crear versión conversacional desde las fuentes” to start a separate version without overwriting an earlier script or audio. Basic mode remains explicitly labelled as literal reading.
+
+For new conversation-version requests, the server and local AI adapter reject predominantly copied source prose, a one-host monologue of substantial length, or an excessively long individual turn. This is a limited editorial heuristic, not proof of entertainment, originality, semantic support or scientific correctness. Fixed speaker voices/model and original-framework verification/release gates are unchanged. Synthetic regressions cover these failures and grounded dialogue, schema turn budgets and cross-block continuity.

@@ -1,0 +1,34 @@
+import assert from 'node:assert/strict';
+import worker from '../worker/index.js';
+import {podcastSectionPrompt,validPodcastSection} from '../public/dialogue.js';
+import {createPodcastPlan,writePodcastChapters} from '../public/podcast-plan.js';
+import {inspectPodcastStory,requirePodcastStory,podcastTurnPlan} from '../public/podcast-story.js';
+import {narrationTarget} from '../public/podcast-scope.js';
+import {podcastResponseSchema} from '../public/podcast-schema.js';
+import {podcastEvidenceCatalog} from '../public/podcast-evidence.js';
+const source='La fluencia es una deformación progresiva bajo carga sostenida a temperatura elevada. El tiempo de exposición influye en la deformación acumulada. La fatiga se relaciona con cargas cíclicas y la propagación de grietas. La oxidación afecta a las superficies expuestas. El comportamiento depende del material y de sus condiciones de servicio. Las inspecciones deben ajustarse a los procedimientos autorizados. '.repeat(6);
+const plan=createPodcastPlan({text:source,title:'Materiales',engine:'gemini'}),section={...plan.segments[0],total:1,evidenceVersion:2,targetWords:400};
+assert.equal(plan.narrationFormat,'conversational-podcast-v1');assert.equal(section.storyVersion,1);assert(validPodcastSection(section));assert(!validPodcastSection({...section,storyVersion:9}));assert(!validPodcastSection({...section,previousDialogue:'x'.repeat(4001)}));
+const prompt=podcastSectionPrompt(section);for(const phrase of ['no la leas','copresentadores','analogía cotidiana','no inventes','evidence'])assert(prompt.toLocaleLowerCase().includes(phrase.toLocaleLowerCase()));assert(!prompt.includes('curso hablado'));
+assert.equal(podcastTurnPlan(section).count,7);assert.equal(podcastResponseSchema(source,section).properties.turns.minItems,7);assert.equal(podcastTurnPlan({...section,storyVersion:undefined}).count,7);
+const front='Presentación y modo de estudio\n'+source+'\nEstado de revisión\n'+source;assert(narrationTarget(front,{engine:'gemini',perConcept:.75}).targetWords<=140);const index='Índice\n'+Array.from({length:20},()=> 'Materiales . . . . . . . . . . . . . 12').join('\n');assert(narrationTarget(index,{engine:'gemini',perConcept:.75}).targetWords<=70);
+const catalog=podcastEvidenceCatalog(source,section.evidenceId),evidence=[{id:catalog[0].id}],copied={turns:[{speaker:'Ana',text:source.slice(0,source.length/2),evidence},{speaker:'Leo',text:source.slice(source.length/2),evidence}]};
+assert(inspectPodcastStory(copied.turns,source).copiedRatio>.9);assert.throws(()=>requirePodcastStory(copied.turns,source,section),/reproduce demasiadas/);assert.equal(requirePodcastStory(copied.turns,source,{...section,storyVersion:undefined}),undefined);
+const conversation={turns:[{speaker:'Ana',text:'¿Cómo puede cambiar una pieza aunque la carga no cambie? Imagina sostener algo durante un buen rato: como comparación, lo interesante no es solo el esfuerzo del instante, sino lo que ocurre mientras pasa el tiempo.',evidence},{speaker:'Leo',text:'Ahí está la pregunta de la fluencia. El material puede ir deformándose cuando coinciden una carga sostenida y una temperatura elevada. El tiempo de exposición forma parte del problema; mirar solo la carga nos deja una parte de la explicación fuera.',evidence},{speaker:'Ana',text:'Y eso nos ayuda a distinguirla de la fatiga. ¿Estamos hablando de mantener el esfuerzo o de repetirlo? No es una diferencia de vocabulario: cambia el mecanismo que queremos comprender.',evidence},{speaker:'Leo',text:'En la fatiga entran las cargas cíclicas y el avance de grietas. La idea que conviene recordar es esa diferencia entre sostener y repetir, manteniendo las condiciones de cada material. Para inspeccionar una pieza real hacen falta sus procedimientos autorizados.',evidence}]};
+assert.equal(requirePodcastStory(conversation.turns,source,section).issues.length,0);assert(inspectPodcastStory(conversation.turns,source).copiedRatio<.55);
+assert.throws(()=>requirePodcastStory([{speaker:'Ana',text:conversation.turns.map(t=>t.text).join(' ')}],source,section),/monólogo/);
+assert.throws(()=>requirePodcastStory([{speaker:'Ana',text:'palabra '.repeat(221)}],source,section),/220 palabras/);
+const alternatingLectures=[{speaker:'Ana',text:conversation.turns.map(t=>t.text).join(' ').repeat(2)},{speaker:'Leo',text:conversation.turns[1].text.repeat(3)}];assert.throws(()=>requirePodcastStory(alternatingLectures,source,section),/sucesión de explicaciones|Todas las réplicas/);
+const oldFetch=globalThis.fetch;let sent,reply=copied;
+try{
+ globalThis.fetch=async(url,options)=>{sent=JSON.parse(options.body);return Response.json({candidates:[{content:{parts:[{text:JSON.stringify(reply)}]}}]});};
+ const request=()=>new Request('https://studium.test/api/generate',{method:'POST',headers:{'Content-Type':'application/json',Origin:'https://studium.test',Authorization:'Bearer synthetic-key'},body:JSON.stringify({provider:'gemini',model:'gemini-test-flash',mode:'podcast',num:6,title:'Materiales',text:source,podcastSection:section})});
+ const rejected=await worker.fetch(request());assert.equal(rejected.status,422);assert.match((await rejected.json()).error,/reproduce demasiadas/);reply=conversation;
+ const accepted=await worker.fetch(request());assert.equal(accepted.status,200);assert.deepEqual(JSON.parse((await accepted.json()).text),conversation);assert(sent.systemInstruction.parts[0].text.includes('no la leas'));assert.equal(sent.generationConfig.responseFormat.text.schema.properties.turns.minItems,7);
+}finally{globalThis.fetch=oldFetch;}
+// Completed speech is carried as bounded continuity, never as the current source.
+const prior={id:'chapter-1',text:'Ana: '+('Contexto anterior. '.repeat(400)),turns:[]},next={...section,id:'chapter-2',index:1,targetWords:20,from:0,to:source.length};
+const job={input:{engine:'gemini',text:source},plan:{version:2,segments:[{id:'chapter-1'},next],profile:'UNDERGRADUATE',framework:{}},chapters:[prior]};
+await writePodcastChapters(job,{generate:async block=>{assert.equal(block.podcastSection.previousDialogue.length,4000);assert(block.podcastSection.previousDialogue.endsWith('Contexto anterior. '));assert.equal(block.text,source);assert.match(podcastSectionPrompt(block.podcastSection),/CONTINUIDAD DEL EPISODIO/);return JSON.stringify({turns:conversation.turns.map(t=>({...t,evidence:[{id:catalog[0].id},{id:catalog.at(-1).id}]}))});}});
+assert(job.complete);assert.equal(job.chapters[0],prior);
+console.log('Conversational planning/schema, grounded non-literal dialogue, copied-source and monologue rejection, Worker transport and bounded cross-block continuity passed. Provider responses are synthetic; narrative quality remains an editorial judgment.');
