@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import worker from '../worker/index.js';
-import {podcastSectionPrompt,validPodcastSection} from '../public/dialogue.js';
+import {podcastSectionPrompt,validPodcastSection,dialogueText,speechWords} from '../public/dialogue.js';
 import {createPodcastPlan,writePodcastChapters} from '../public/podcast-plan.js';
 import {inspectPodcastStory,requirePodcastStory,podcastTurnPlan} from '../public/podcast-story.js';
 import {narrationTarget} from '../public/podcast-scope.js';
@@ -22,9 +22,10 @@ const alternatingLectures=[{speaker:'Ana',text:conversation.turns.map(t=>t.text)
 const oldFetch=globalThis.fetch;let sent,reply=copied;
 try{
  globalThis.fetch=async(url,options)=>{sent=JSON.parse(options.body);return Response.json({candidates:[{content:{parts:[{text:JSON.stringify(reply)}]}}]});};
- const request=()=>new Request('https://studium.test/api/generate',{method:'POST',headers:{'Content-Type':'application/json',Origin:'https://studium.test',Authorization:'Bearer synthetic-key'},body:JSON.stringify({provider:'gemini',model:'gemini-test-flash',mode:'podcast',num:6,title:'Materiales',text:source,podcastSection:section})});
+ const request=(sectionOverride=section)=>new Request('https://studium.test/api/generate',{method:'POST',headers:{'Content-Type':'application/json',Origin:'https://studium.test',Authorization:'Bearer synthetic-key'},body:JSON.stringify({provider:'gemini',model:'gemini-test-flash',mode:'podcast',num:6,title:'Materiales',text:source,podcastSection:sectionOverride})});
  const rejected=await worker.fetch(request());assert.equal(rejected.status,422);assert.match((await rejected.json()).error,/reproduce demasiadas/);reply=conversation;
  const accepted=await worker.fetch(request());assert.equal(accepted.status,200);assert.deepEqual(JSON.parse((await accepted.json()).text),conversation);assert(sent.systemInstruction.parts[0].text.includes('no la leas'));assert.equal(sent.generationConfig.responseFormat.text.schema.properties.turns.minItems,7);
+ const combinedSection={...section,continuation:{text:dialogueText(conversation.turns),words:speechWords(dialogueText(conversation.turns)),minimumWords:300,needsBeginning:false,needsEnding:false}};assert.equal((await worker.fetch(request(combinedSection))).status,422);reply={turns:[...conversation.turns,{speaker:'Leo',text:'¿Entonces importa tanto cómo repetimos el esfuerzo como mantenerlo?',evidence}]};assert.equal((await worker.fetch(request(combinedSection))).status,200);
  const attempts=[];globalThis.fetch=async(url,options)=>{const body=JSON.parse(options.body);attempts.push({url,body});return Response.json({candidates:[{finishReason:attempts.length===1?'MAX_TOKENS':'STOP',content:{parts:[{text:JSON.stringify(conversation)}]}}]});};
  assert.equal((await worker.fetch(request())).status,200);assert.equal(attempts.length,2);assert.equal(attempts[0].url,attempts[1].url);assert(attempts[1].body.generationConfig.maxOutputTokens>attempts[0].body.generationConfig.maxOutputTokens);assert.deepEqual(attempts[0].body.contents,attempts[1].body.contents);
  let limits=0;globalThis.fetch=async()=>{limits++;return Response.json({candidates:[{finishReason:'MAX_TOKENS'}]});};const incomplete=await worker.fetch(request());assert.equal(incomplete.status,422);assert.equal(limits,2);assert.match((await incomplete.json()).error,/avance anterior está guardado/);
