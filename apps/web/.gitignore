@@ -1,0 +1,13 @@
+dist/
+node_modules/
+.DS_Store
+*.log
+.env*
+
+work/
+
+__pycache__/
+*.pyc
+
+# Pyodide Node wheel cache
+https:/

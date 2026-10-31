@@ -1,0 +1,220 @@
+# Browser adapter. Framework modules are imported unchanged from the pinned archive.
+import base64
+import hashlib
+import io
+import json
+import math
+import re
+import shutil
+import zipfile
+from pathlib import Path
+
+from studium.storage.init_project import build_create_request, create_project
+from studium.research.sources import source_add
+from studium.authoring.excerpts import record_excerpt
+from studium.authoring.blueprint import store_blueprint
+from studium.authoring.academic_blueprint import store_academic_blueprint
+from studium.authoring.depth.planner import build_depth_plan
+from studium.authoring.context import chapter_context
+from studium.authoring.paragraphs import record_paragraph
+from studium.authoring.audit import book_review
+from studium.authoring.verify import verify_book
+from studium.authoring.book_next import book_next
+from studium.authoring.grounding import grounding_summary
+
+_WEB_PARENT = Path('/studium-projects')
+_WEB_PARENT.mkdir(exist_ok=True)
+_WEB_BRIDGE_VERSION = 2
+
+
+def _web_root(identifier):
+    if not isinstance(identifier, str) or re.fullmatch(r'[a-z0-9][a-z0-9-]{0,120}', identifier) is None:
+        raise ValueError('Invalid Studium project id')
+    return _WEB_PARENT / identifier
+
+
+def _web_safe(function, *args, **kwargs):
+    try:
+        return function(*args, **kwargs)
+    except Exception as error:
+        return {'status': 'unavailable', 'error': type(error).__name__, 'message': str(error), 'verified': False}
+
+
+def _web_files(root):
+    return {str(path.relative_to(root)): base64.b64encode(path.read_bytes()).decode()
+            for path in sorted(root.rglob('*')) if path.is_file() and not path.is_symlink()}
+
+
+def _web_restore(root, files):
+    if not isinstance(files, dict):
+        raise ValueError('Invalid project snapshot')
+    for name, encoded in files.items():
+        relative = Path(name)
+        if relative.is_absolute() or '..' in relative.parts or len(name) > 500:
+            raise ValueError('Project path is outside its directory')
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(base64.b64decode(encoded, validate=True))
+
+
+def _web_report(root):
+    return {'review': _web_safe(book_review, root),
+            'verification': _web_safe(verify_book, root, mode='full'),
+            'grounding': _web_safe(grounding_summary, root),
+            'next': _web_safe(book_next, root),
+            'released': False,
+            'semanticReview': 'PENDING',
+            'expertReview': 'PENDING',
+            'executionLimits': ['NO_TEX_COMPILER', 'NO_PYTHON_THREADS', 'PDF_TEXT_IS_DERIVED']}
+
+
+def _web_prepare(payload):
+    root = _web_root(payload['id'])
+    if root.exists():
+        shutil.rmtree(root)
+    request, _ = build_create_request(slug=payload['id'], parent=_WEB_PARENT,
+        course=payload.get('subject') or payload.get('title') or 'Estudio personal',
+        university=payload.get('institution') or 'Estudio personal',
+        degree=payload.get('program') or 'Biblioteca personal',
+        language='es', profile=payload.get('domain') or 'GENERAL')
+    created = create_project(request)
+    if created.root is None:
+        raise ValueError('Studium rejected project creation: ' + str(created.failure))
+    source_text = payload.get('text') or ''
+    source_id = None
+    intake = None
+    source_path = root / 'materials' / 'source-extracted.txt'
+    if source_text.strip():
+        source_path.parent.mkdir(exist_ok=True)
+        source_path.write_text(source_text, encoding='utf-8')
+        intake = source_add(root, [str(source_path)], origin='user_uploaded', provided_by='Studium app')
+        sources = intake.get('sources') or []
+        if sources:
+            source_id = sources[0].get('id') or sources[0].get('source_id')
+        source_id = source_id or intake.get('source_id')
+        if not source_id:
+            raise ValueError('Studium rejected the source: ' + json.dumps(intake))
+    segments = payload.get('segments') or [{'id': 'unit-1', 'title': payload.get('title') or 'Apuntes', 'from': 0, 'to': len(source_text)}]
+    group_size = max(1, math.ceil(len(segments) / 200))
+    chapters = []
+    placements = []
+    excerpts = []
+    for index, segment in enumerate(segments):
+        chapter_index = index // group_size
+        chapter_id = 'ch-' + str(chapter_index + 1)
+        title = str(segment.get('title') or 'Tema ' + str(index + 1))[:180]
+        if index % group_size == 0:
+            chapters.append({'id': chapter_id, 'title': title})
+        placements.append({'id': str(segment.get('id') or index), 'chapter': chapter_id,
+                           'section': 'sec-' + str(index + 1), 'concept': 'concept-' + str(index + 1),
+                           'from': segment.get('from', 0), 'to': segment.get('to', 0), 'title': title})
+    blueprint = store_blueprint(root, chapters)
+    if blueprint.get('status') != 'recorded':
+        raise ValueError('Studium rejected the outline: ' + json.dumps(blueprint))
+    academic = [{'id': chapter['id'], 'title': chapter['title'], 'sections': [
+        {'id': placement['section'], 'title': placement['title'], 'concepts': [
+            {'id': placement['concept'], 'title': placement['title'],
+             'sources': [source_id] if source_id else [],
+             'learning_objectives': ['Comprender y repasar el contenido de esta unidad']}]} for placement in placements
+        if placement['chapter'] == chapter['id']]} for chapter in chapters]
+    # The original framework permits at most 40 chapters per part. Keep every
+    # source placement and distribute large manuals across valid parts.
+    parts = [{'id': 'part-' + str(index // 40 + 1), 'title': 'Material de estudio · parte ' + str(index // 40 + 1),
+              'chapters': academic[index:index + 40]} for index in range(0, len(academic), 40)]
+    academic_result = store_academic_blueprint(root, subject=payload.get('subject') or payload.get('title') or 'Apuntes',
+        profile_key=payload.get('depth') or 'UNDERGRADUATE', parts=parts)
+    if academic_result.get('status') != 'recorded':
+        raise ValueError('Studium rejected the academic structure: ' + json.dumps(academic_result))
+    plan = build_depth_plan(root, academic_depth=payload.get('depth') or 'UNDERGRADUATE', length='COMPREHENSIVE')
+    if plan.get('status') != 'planned':
+        raise ValueError('Studium rejected the depth plan: ' + json.dumps(plan))
+    for placement in placements:
+        quote = source_text[placement['from']:placement['to']]
+        if source_id and quote.strip():
+            # Each source segment is a real stored excerpt; no fabricated bibliography.
+            excerpts.append(_web_safe(record_excerpt, root, source_id=source_id, url=None,
+                text=quote, path=str(source_path), locator='Texto extraído, caracteres ' + str(placement['from']) + '-' + str(placement['to'])))
+    context = {chapter['id']: _web_safe(chapter_context, root, chapter['id']) for chapter in chapters}
+    metadata = {'source_id': source_id, 'source_path': str(source_path), 'source_sha256': hashlib.sha256(source_text.encode()).hexdigest(),
+                'originals': payload.get('originals') or [], 'source_kind': payload.get('sourceKind') or 'DERIVED_TEXT',
+                'placements': placements, 'title': payload.get('title'), 'units': []}
+    (root / 'web-provenance.json').write_text(json.dumps(metadata, ensure_ascii=False), encoding='utf-8')
+    return {'id': payload['id'], 'bridgeVersion': _WEB_BRIDGE_VERSION, 'intake': intake, 'blueprint': blueprint, 'academicBlueprint': academic_result,
+            'plan': plan, 'placements': placements, 'context': context, 'excerpts': excerpts, 'files': _web_files(root)}
+
+
+def _web_record(root, payload):
+    metadata = json.loads((root / 'web-provenance.json').read_text())
+    results = []
+    for unit in payload.get('units') or []:
+        placement = next((p for p in metadata['placements'] if p['id'] == unit.get('segmentId')), metadata['placements'][0])
+        quotes = unit.get('quotes', [unit.get('quote')])
+        if not isinstance(quotes, list) or not quotes or any(not isinstance(q, str) or not q.strip() for q in quotes) or not metadata.get('source_id'):
+            result = {'status': 'unverified', 'message': 'No exact source quote supplied', 'verified': False}
+        else:
+            identifiers = []
+            failure = None
+            for quote in dict.fromkeys(quotes):
+                excerpt = _web_safe(record_excerpt, root, source_id=metadata['source_id'], url=None, text=quote,
+                    path=metadata['source_path'], locator=str(unit.get('locator') or 'Unidad ' + placement['id']))
+                identifier = (excerpt.get('excerpt') or {}).get('id')
+                if not identifier:
+                    failure = {'status': 'rejected', 'excerpt': excerpt, 'verified': False}
+                    break
+                if identifier not in identifiers:
+                    identifiers.append(identifier)
+            if failure:
+                result = failure
+            else:
+                result = record_paragraph(root, section=placement['chapter'], text=unit.get('text'), excerpts=identifiers,
+                    role='self_check' if unit.get('kind') == 'card' else 'explanation',
+                    concepts=[placement['concept']], subsection=placement['section'])
+        results.append(result)
+        metadata['units'].append({'id': unit.get('id'), 'kind': unit.get('kind'), 'result': result})
+    (root / 'web-provenance.json').write_text(json.dumps(metadata, ensure_ascii=False), encoding='utf-8')
+    return {'results': results, 'report': _web_report(root), 'files': _web_files(root)}
+
+
+def studium_web_call(raw):
+    request = json.loads(raw)
+    action = request['action']
+    payload = request.get('payload') or {}
+    if action == 'scope':
+        from dataclasses import asdict
+        from studium.authoring.depth.profiles import PROFILES, profile_requirements
+        from studium.authoring.depth.length import estimate_book_scope
+        spec = dict(payload)
+        profile = PROFILES[spec.pop('profile')]
+        result = {'scope': asdict(estimate_book_scope(profile=profile, **spec)), 'profile': profile_requirements(profile)}
+    elif action == 'prepare':
+        result = _web_prepare(payload)
+    else:
+        root = _web_root(payload['id'])
+        if payload.get('files'):
+            if root.exists():
+                shutil.rmtree(root)
+            _web_restore(root, payload['files'])
+        if not root.exists():
+            raise ValueError('The native Studium project is not available')
+        if action == 'record':
+            result = _web_record(root, payload)
+        elif action == 'review':
+            result = {'report': _web_report(root), 'files': _web_files(root)}
+        elif action == 'export':
+            from studium.authoring.render import render_draft
+            rendered = _web_safe(render_draft, root)
+            buffer = io.BytesIO()
+            with zipfile.ZipFile(buffer, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
+                for path in sorted(root.rglob('*')):
+                    if path.is_file() and not path.is_symlink():
+                        archive.write(path, arcname=str(path.relative_to(root)))
+            result = {'archive': base64.b64encode(buffer.getvalue()).decode(), 'render': rendered,
+                      'report': _web_report(root), 'files': _web_files(root)}
+        elif action == 'dimensions':
+            from studium.authoring.math_verify import verify_math
+            result = {'result': _web_safe(verify_math, root, kind='dimensions', section=payload.get('section', 'ch-1'),
+                expression=payload['expression'], symbol_units=payload['symbolUnits'], expected_unit=payload['expectedUnit']),
+                'report': _web_report(root), 'files': _web_files(root)}
+        else:
+            raise ValueError('Unsupported Studium operation')
+    return json.dumps(result, ensure_ascii=False, default=str)

@@ -454,8 +454,8 @@ However, it does not yet provide a complete end-user application or a publicatio
 | Evidence audits and contradiction checks | Implemented |
 | LaTeX/PDF draft generation | Implemented |
 | Desktop application | Planned |
-| Built-in AI provider management | Planned |
-| Flashcards and study resources | Planned |
+| AI provider management | Available in the [web client](./apps/web/README.md); separate from CLI/MCP |
+| Flashcards and study resources | Available in the [web client](./apps/web/README.md), with pending academic review |
 | Academic publication workflow | Not implemented |
 
 ### Roadmap
@@ -470,7 +470,7 @@ Development priorities include:
 - Building an accessible graphical application
 - Supporting additional AI-powered study formats
 
-The planned Studium application will extend the framework with subject libraries, book management, flashcards, summaries, diagrams, and audio lessons.
+The browser application in `apps/web` extends the framework with subject libraries, academic book drafts, flashcards, summaries and audio lessons. Native desktop work and further study formats remain on the roadmap.
 
 See [the application proposal](https://github.com/danielmigueltejedor/studium/issues/39) for the proposed scope.
 
@@ -593,3 +593,20 @@ and explicit evidence-review copies are documented in
 [`docs/programming-books.md`](docs/programming-books.md). The additive Python
 APIs do not replace the existing mathematical contracts or introduce automatic
 academic approval.
+
+## Web application
+
+The Spanish browser client lives in [`apps/web`](apps/web/README.md). It includes
+notebooks with ink and original PDF pages, study cards with FSRS, source-sized
+podcasts, academic book drafts, calendar planning and an opt-in public community.
+The client executes the pinned original Python framework under Pyodide for project
+creation, source intake, hierarchy/depth, excerpts, paragraphs and review reports.
+It preserves pending academic gates: browser-generated material is a draft, and
+TeX compilation and checks that need threads/subprocesses require the native CLI.
+
+Own accounts provide profiles, encrypted provider connections and private library
+synchronization. The optional iPad container supplies native Pencil gestures and
+account-scoped folder synchronization through Files/iCloud Drive. It still needs
+Xcode signing and hardware validation; Safari supports manual Files backups.
+See the web README for setup, deployment secrets, storage limits and test evidence.
+The graphical desktop roadmap remains separate from this browser client.

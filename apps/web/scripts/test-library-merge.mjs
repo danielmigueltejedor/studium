@@ -1,0 +1,10 @@
+import assert from 'node:assert/strict';
+import {mergeLibraryManifests} from '../public/library-merge.js';
+const item=id=>({id,title:id,text:'Original'}),asset=(id,revision)=>({id:'text:'+id,ownerId:id,kind:'text',revision,dataChunks:[revision],blobChunks:[]});
+const base={version:1,index:{version:1,items:[item('a'),item('b')],settings:{name:'Personal',accountSync:true},sessions:[],subjects:[],calendar:{events:[],sources:[]}},assets:[asset('a','base-a'),asset('b','base-b')]};
+const local=structuredClone(base),remote=structuredClone(base);local.index.items[0].text='Edición local';local.assets[0]=asset('a','local-a');remote.index.items[1].text='Otro dispositivo';remote.assets[1]=asset('b','remote-b');let merged=mergeLibraryManifests(base,local,remote);assert.equal(merged.conflicts.length,0);assert.equal(merged.manifest.index.items[0].text,'Edición local');assert.equal(merged.manifest.index.items[1].text,'Otro dispositivo');assert.equal(merged.manifest.assets[0].revision,'local-a');assert.equal(merged.manifest.assets[1].revision,'remote-b');
+remote.index.items[0].text='Edición remota';remote.assets[0]=asset('a','remote-a');assert.equal(mergeLibraryManifests(base,local,remote).conflicts[0].id,'a');
+const deleted=structuredClone(base);deleted.index.items.shift();deleted.assets.shift();merged=mergeLibraryManifests(base,deleted,base);assert.equal(merged.manifest.index.items.length,1);assert.equal(merged.manifest.assets.length,1);assert(mergeLibraryManifests(base,deleted,remote).conflicts.length);
+const settingsLocal=structuredClone(base),settingsRemote=structuredClone(base);settingsLocal.index.settings.name='Portátil';settingsRemote.index.settings.name='iPad';assert.equal(mergeLibraryManifests(base,settingsLocal,settingsRemote).conflicts[0].type,'ajustes');
+const reordered=structuredClone(base);reordered.assets.reverse();assert.equal(mergeLibraryManifests(base,reordered,local).conflicts.length,0);
+console.log('Three-way library merge: independent note/asset edits, simultaneous conflicts, deletion, changed settings and stable asset ordering passed.');

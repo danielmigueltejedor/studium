@@ -1,0 +1,22 @@
+import assert from 'node:assert/strict';
+import {readFile} from 'node:fs/promises';
+const adapter=`export const assets=new Map();export async function getAsset(key){return assets.get(key);}export async function putAsset(id,kind,data){assets.set(id,{id,kind,data});}export async function deleteAssets(ids){for(const id of ids)assets.delete(id);}`;
+const storageURL='data:text/javascript;base64,'+Buffer.from(adapter).toString('base64');
+const source=(await readFile(new URL('../public/document-text.js',import.meta.url),'utf8')).replace("'./storage.js'",JSON.stringify(storageURL));
+const {readDocumentText,hydrateDocument,compactText,saveDocument,TEXT_PREVIEW}=await import('data:text/javascript;base64,'+Buffer.from(source).toString('base64'));
+const {assets,putAsset}=await import(storageURL);
+const text='Documento sin recortes. '.repeat(200000)+'ULTIMO_DATO_COMPLETO.';
+const note={id:'long-note',type:'note',text,title:'Largo'};let index;
+await saveDocument(note,item=>{index=JSON.parse(JSON.stringify(item));return true;});
+assert.equal(index.text.length,TEXT_PREVIEW);assert.equal(index.chars,text.length);assert.equal(index.words,600001);assert(JSON.stringify(index).length<5000);
+assert.equal(await readDocumentText(index),text);assert.equal((await hydrateDocument(index)).text,text);
+await assert.rejects(saveDocument({...note,text:text+'CAMBIO'},()=>false),/No se pudo guardar/);
+assert.equal(await readDocumentText(index),text,'failed index commits must restore the previous text');
+await assert.rejects(saveDocument({...note,id:'new-note'},()=>false));assert(!assets.has('text:new-note'));
+await putAsset('file:source','file',{blob:new Blob([text]),text});
+const original=compactText({...note,id:'source'},'file:source');assert.equal(await readDocumentText(original),text);
+await assert.rejects(readDocumentText({...index,textKey:'text:missing'}),/texto completo/);
+const short=await saveDocument({...note,text:'Un apunte corto que también se conserva completo.'},()=>true);assert(!short.textKey);assert(!assets.has('text:long-note'));assert.equal(await readDocumentText(short),short.text);
+console.log('Document storage checks passed: multi-million character round trip, compact index, original sources, failed-save rollback, missing-body errors, short edits.');
+
+const book=await saveDocument({id:'large-book',type:'book',text,chapters:[{id:'chapter-1',title:'Capítulo',text}]},()=>true);assert(!book.chapters[0].text);assert(JSON.stringify(book).length<5000);assert.equal((await hydrateDocument(book)).chapters[0].text,text);

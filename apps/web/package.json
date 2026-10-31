@@ -1,0 +1,26 @@
+{
+  "name": "studium",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "build": "node scripts/build.mjs",
+    "validate": "node scripts/validate-artifact.mjs",
+    "test": "node --test scripts/test-*.mjs",
+    "vendor": "node scripts/build-vendor.mjs"
+  },
+  "devDependencies": {
+    "@napi-rs/canvas": "^1.0.13",
+    "@noble/hashes": "2.4.0",
+    "drizzle-kit": "^0.31.10",
+    "drizzle-orm": "^0.45.2",
+    "esbuild": "0.25.12",
+    "fake-indexeddb": "6.2.5",
+    "ical.js": "2.2.1",
+    "katex": "0.19.1",
+    "linkedom": "0.18.12",
+    "mathjax-full": "3.2.2",
+    "pyodide": "0.29.3",
+    "ts-fsrs": "6.0.0"
+  }
+}

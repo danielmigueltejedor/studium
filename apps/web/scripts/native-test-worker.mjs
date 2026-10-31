@@ -1,0 +1,6 @@
+// IPC adapter for Node tests. All authoring/validation runs in the original Python
+// framework under real Pyodide/WASM; only the browser Worker transport is adapted.
+import {readFile} from 'node:fs/promises';
+import {loadPyodide} from 'pyodide';
+import {initializeStudiumCore} from '../public/studium-core-native.js';
+export async function nativeTestWorker(){const core=await initializeStudiumCore(loadPyodide,new URL('../node_modules/pyodide/',import.meta.url).pathname,{packageBaseUrl:'https://cdn.jsdelivr.net/pyodide/v0.29.3/full/',bridgeSource:await readFile(new URL('../public/studium-core-bridge.txt',import.meta.url),'utf8')});let chain=Promise.resolve();return class {constructor(url){this.url=String(url);}postMessage(m){chain=chain.catch(()=>{}).then(async()=>{try{let result;if(this.url.includes('studium-core-worker'))result=await core.call(m.action,m.payload);else if(this.url.includes('studium-engine-worker'))result=await core.call('scope',m.spec);else if(this.url.includes('notebook-save-worker'))result=await(await import('../public/notebook-persistence.js')).persistNotebookChanges(m.job);else throw Error('Unadapted Worker '+this.url);this.onmessage?.({data:{id:m.id,result}});}catch(error){this.onmessage?.({data:{id:m.id,error:error.message}});}});}terminate(){}};}

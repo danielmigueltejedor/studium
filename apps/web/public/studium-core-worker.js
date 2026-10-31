@@ -1,0 +1,3 @@
+import {initializeStudiumCore} from './studium-core-native.js';
+let runtime,chain=Promise.resolve();
+self.onmessage=({data:{id,action,payload}})=>{chain=chain.catch(()=>{}).then(async()=>{try{runtime||=(async()=>{const base='https://cdn.jsdelivr.net/pyodide/v0.29.3/full/';const {loadPyodide}=await import(base+'pyodide.mjs');return initializeStudiumCore(loadPyodide,base);})();const core=await runtime;if(action==='dimensions')await core.science();self.postMessage({id,result:await core.call(action,payload)});}catch(error){runtime=null;self.postMessage({id,error:error.message||'No se pudo ejecutar Studium.'});}});};
