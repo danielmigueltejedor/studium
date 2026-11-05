@@ -1,0 +1,31 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+# Review configuration for public open-source pull requests.
+# Requires installation of the CodeRabbit GitHub App; this file alone does not activate reviews.
+language: "en-US"
+early_access: false
+reviews:
+  profile: "chill"
+  request_changes_workflow: false
+  high_level_summary: true
+  poem: false
+  review_status: false
+  auto_review:
+    enabled: true
+    drafts: false
+    auto_incremental_review: true
+  path_filters:
+    - "!**/node_modules/**"
+    - "!**/.venv/**"
+    - "!**/vendor/**"
+    - "!**/build/**"
+    - "!**/dist/**"
+  path_instructions:
+    - path: "src/**"
+      instructions: |
+        Preserve evidence provenance and fail-closed verification. Look for citation
+        mismatch, unsafe path operations, LaTeX escaping, untrusted source handling,
+        deterministic outputs, and errors silently converted into success.
+    - path: "tests/**"
+      instructions: |
+        Prefer deterministic tests of verification, source traceability and
+        error handling; do not treat generative output as proof of correctness.
