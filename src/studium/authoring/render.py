@@ -685,7 +685,7 @@ _MATH_ENVS = frozenset(
         "eqnarray",
     }
 )
-_FENCE_OPEN = re.compile(r"^[ ]{0,3}(`{3,}|~{3,})[ \t]*([A-Za-z0-9_+#.\-]*)[ \t]*$")
+_FENCE_OPEN = re.compile(r"^[ ]{0,3}(`{3,}+|~{3,}+)[ \t]*+([A-Za-z0-9_+#.\-]*)[ \t]*+$")
 _ACCENTS = {
     "á": r"\'a",
     "é": r"\'e",

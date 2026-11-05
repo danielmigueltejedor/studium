@@ -212,7 +212,7 @@ def test_generated_revision_can_update_without_erasing_other_book_records(tmp_pa
 
 def test_cli_json_markdown_and_catalog(tmp_path, monkeypatch, capsys):
     _session, root, claim_id, data, _stored = setup_contract(tmp_path, monkeypatch)
-    file = tmp_path / "contract.json"
+    file = root / "contract.json"
     file.write_text(json.dumps(data))
     assert (
         main(
@@ -244,6 +244,24 @@ def test_cli_json_markdown_and_catalog(tmp_path, monkeypatch, capsys):
     file.write_text("not JSON")
     assert (
         main(["scientific-contract", "record", "--project", str(root), "--claim", claim_id, "--file", str(file)]) != 0
+    )
+    outside = tmp_path / "outside-contract.json"
+    outside.write_text(json.dumps(data), encoding="utf-8")
+    assert (
+        main(
+            [
+                "scientific-contract",
+                "record",
+                "--project",
+                str(root),
+                "--claim",
+                claim_id,
+                "--file",
+                str(outside),
+                "--json",
+            ]
+        )
+        != 0
     )
 
 

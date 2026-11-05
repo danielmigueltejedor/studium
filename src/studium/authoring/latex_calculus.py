@@ -132,7 +132,11 @@ def tokenize(text: str) -> list[Token]:
     cleaned = re.sub(r"\\mathrm\s*\{\s*d\s*\}", "d", cleaned)
     if _SLASH_DIFFERENTIAL.search(cleaned):
         raise Unsupported("a slash differential requires explicit derivative fraction notation")
-    cleaned = re.sub(r"\^\s*\{?\s*((?:\\prime\s*)+)\}?", lambda match: "'" * match.group(1).count("\\prime"), cleaned)
+    cleaned = re.sub(
+        r"\^\s*+(?:\{\s*+)?((?:\\prime\s*+)+)\}?",
+        lambda match: "'" * match.group(1).count("\\prime"),
+        cleaned,
+    )
     tokens: list[Token] = []
     spaced = False
     for match in _TOKEN.finditer(cleaned):

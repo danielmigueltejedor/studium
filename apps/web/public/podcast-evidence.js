@@ -24,6 +24,18 @@ export function podcastEvidenceResolver(source,section){const catalog=podcastEvi
 // Move only validated app references to metadata before checking spoken numbers.
 // Bare numbers, unknown IDs and technical codes present in the source stay subject
 // to validation; there is no blanket exception for zero-padded numeric values.
+function collapseSpeechSpaces(text){
+ let out='',index=0;
+ while(index<text.length){
+  const character=text[index];
+  if(character!==' '&&character!=='\t'){out+=character;index++;continue;}
+  let end=index+1;
+  while(end<text.length&&(text[end]===' '||text[end]==='\t'))end++;
+  if(!',.;:!?'.includes(text[end]||''))out+=' ';
+  index=end;
+ }
+ return out;
+}
 export function separatePodcastReferences(text,evidence,source,section){
  if(evidence!==undefined&&!Array.isArray(evidence))throw Error('La evidencia de una intervención no tiene un formato válido.');
  const catalog=podcastEvidenceCatalog(source,section.evidenceId),known=new Map(catalog.map(e=>[e.id.toLowerCase(),e.id])),refs=[...(evidence||[])],detached=[];
@@ -36,7 +48,7 @@ export function separatePodcastReferences(text,evidence,source,section){
   if(id.toLowerCase()===section.evidenceId.toLowerCase()){detached.push(section.evidenceId);return '';}
   throw Error('Una referencia incluida en el diálogo no existe en este bloque del manual. Usa únicamente sus identificadores.');
  }
- const speech=text.replace(/\[([^\[\]\r\n]*)\]|\(([^()\r\n]*)\)|【([^【】\r\n]*)】/g,(whole,...groups)=>{
+ const marked=text.replace(/\[([^\[\]\r\n]*)\]|\(([^()\r\n]*)\)|【([^【】\r\n]*)】/g,(whole,...groups)=>{
   const content=groups.slice(0,3).find(s=>s!==undefined),ids=content.match(tokens)||[];
   if(!ids.length||ids.some(id=>source.includes(id)))return whole;
   const withoutFull=content.replace(tokens,''),shorts=withoutFull.match(/(?<![\p{L}\p{N}_-])-?E[0-9]+(?![\p{L}\p{N}_-])/giu)||[];
@@ -45,7 +57,8 @@ export function separatePodcastReferences(text,evidence,source,section){
   for(const id of ids)detach(id);
   for(const short of shorts)detach(section.evidenceId+'-'+short.replace(/^-/,'').toUpperCase());
   return '';
- }).replace(tokens,detach).replace(/[ \t]+([,.;:!?])/g,'$1').replace(/[ \t]{2,}/g,' ').trim();
+ }).replace(tokens,detach);
+ const speech=collapseSpeechSpaces(marked).trim();
  const unique=[...new Map(refs.map(e=>[JSON.stringify(e),e])).values()];
  return {text:speech,evidence:unique,detachedReferences:[...new Set(detached)]};
 }

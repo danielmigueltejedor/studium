@@ -6,6 +6,7 @@ Counters only grow. An issued id is never reused.
 from collections.abc import Mapping
 from types import MappingProxyType
 
+_MAX_COUNTER = 1_000_000_000
 PREFIXES: frozenset[str] = frozenset(
     {
         "SRC",
@@ -54,9 +55,9 @@ class IdAllocator:
         if prefix not in PREFIXES:
             raise ValueError("id.unknown_prefix")
         current = self._counters.get(prefix, 0)
-        issued = current + 1
-        if issued <= current:
+        if current >= _MAX_COUNTER:
             raise ValueError("id.counter_invalid")
+        issued = current + 1
         width = max(4, len(str(issued)))
         identifier = f"{prefix}-{issued:0{width}d}"
         updated = dict(self._counters)

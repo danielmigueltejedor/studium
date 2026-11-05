@@ -16,14 +16,16 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+      - uses: astral-sh/setup-uv@v5
       - name: Install LaTeX
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq texlive-latex-base texlive-latex-extra texlive-latex-recommended texlive-fonts-recommended texlive-lang-spanish texlive-lang-european texlive-lang-french texlive-lang-portuguese texlive-lang-italian poppler-utils
       - name: Install
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install -e ".[dev]"
+          uv export --frozen --extra dev --no-emit-project --output-file "${RUNNER_TEMP}/requirements.txt"
+          python -m pip install --only-binary :all: --require-hashes -r "${RUNNER_TEMP}/requirements.txt"
+          python -m pip install --only-binary :all: --no-deps .
       - name: Ruff
         run: ruff check src tests
       - name: Pyright

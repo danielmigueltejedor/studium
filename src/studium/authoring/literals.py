@@ -7,7 +7,7 @@ no equation detector may reinterpret a broken code block as scientific evidence.
 import re
 from dataclasses import dataclass
 
-_OPEN = re.compile(r"^[ ]{0,3}(`{3,}|~{3,})[ \t]*([^\n]*)$", re.M)
+_OPEN = re.compile(r"^[ ]{0,3}(`{3,}+|~{3,}+)[ \t]*+([^\n]*)$", re.M)
 
 
 @dataclass(frozen=True)

@@ -54,6 +54,30 @@ def _origin(line: int | None, ranges: list[dict[str, object]]) -> dict[str, obje
     return {key: nearest[key] for key in ("record", "chapter")}
 
 
+def _tex_file_error(text: str) -> tuple[str, str, str] | None:
+    """Last ``path.tex:line: message`` on a single TeX log line."""
+
+    if "\n" in text:
+        return None
+    found: tuple[str, str, str] | None = None
+    start = 0
+    marker = ".tex:"
+    while True:
+        at = text.find(marker, start)
+        if at < 0:
+            return found
+        start = at + 1
+        cursor = at + len(marker)
+        end = cursor
+        while end < len(text) and text[end].isdigit():
+            end += 1
+        if end == cursor or not text.startswith(": ", end):
+            continue
+        message = text[end + 2 :]
+        if message:
+            found = (text[: at + 4], text[cursor:end], message)
+
+
 def parse_log(log: str, *, filename: str, ranges: list[dict[str, object]]) -> list[dict[str, object]]:
     """Read fatal errors, final-pass references and TeX box warnings.
 
@@ -63,12 +87,12 @@ def parse_log(log: str, *, filename: str, ranges: list[dict[str, object]]) -> li
     issues: list[dict[str, object]] = []
     lines = log.splitlines()
     for index, text in enumerate(lines):
-        file_error = re.match(r"^(.+\.tex):(\d+): (.+)$", text)
+        file_error = _tex_file_error(text)
         if text.startswith("! ") or file_error:
-            message = file_error.group(3) if file_error else text[2:]
+            message = file_error[2] if file_error else text[2:]
             if "Fatal error occurred" in message:
                 continue  # The preceding error is actionable; this is only TeX's summary.
-            number = int(file_error.group(2)) if file_error else None
+            number = int(file_error[1]) if file_error else None
             if number is None:
                 for following in lines[index + 1 : index + 14]:
                     location = re.match(r"l\.(\d+)\s", following)
@@ -92,7 +116,7 @@ def parse_log(log: str, *, filename: str, ranges: list[dict[str, object]]) -> li
                 {
                     "severity": "ERROR",
                     "type": kind,
-                    "file": file_error.group(1) if file_error else filename,
+                    "file": file_error[0] if file_error else filename,
                     "line": number,
                     **_origin(number, ranges),
                     "evidence": message,
@@ -138,7 +162,7 @@ def parse_log(log: str, *, filename: str, ranges: list[dict[str, object]]) -> li
         if box:
             location = re.search(r"at lines? (\d+)", text)
             number = int(location.group(1)) if location else None
-            amount = re.search(r"([\d.]+)pt too (?:wide|high)", text)
+            amount = re.search(r"(\d++(?:\.\d++)?)pt too (?:wide|high)", text)
             issues.append(
                 {
                     "severity": "WARNING" if box.group(1) == "Overfull" else "INFO",

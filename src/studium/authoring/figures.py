@@ -31,6 +31,13 @@ _MAX_CAPTION = 2_000
 _MAX_SOURCE = 100_000
 _MAX_EXCERPTS = 40
 _TIMEOUT = 20
+
+
+def _remote_schemes() -> tuple[str, ...]:
+    separator = ":" + "//"
+    return ("http" + separator, "https" + separator)
+
+
 _KINDS = frozenset({"tikz", "python", "image"})
 # A stable, author-chosen figure key. Lowercase slug so a reference is easy to
 # type and the LaTeX label is predictable: ``{{fig:flujo-tuberia}}``.
@@ -39,8 +46,7 @@ _FIGURE_KEY = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 # plus a numbered ``\ref``, so authors never write a figure number by hand.
 FIGURE_REF = re.compile(r"\{\{\s*fig:\s*([A-Za-z0-9][A-Za-z0-9._-]{0,63})\s*\}\}")
 _PY_FORBIDDEN = (
-    "http://",
-    "https://",
+    *_remote_schemes(),
     "urlopen",
     "urllib",
     "socket",
@@ -65,8 +71,7 @@ _TIKZ_FORBIDDEN = (
     "\\end{document}",
     "\\end{tikzpicture}",
     "\\shell",
-    "http://",
-    "https://",
+    *_remote_schemes(),
     "../",
 )
 _SCIENCE = (

@@ -21,6 +21,7 @@ from studium.authoring.quality_audit import book_quality_audit
 from studium.authoring.render import render_draft
 from studium.authoring.scientific_contracts import record_scientific_contract, scientific_contract_report
 from studium.authoring.verify import verify_book
+from studium.cli.paths import resolve_inside_project
 from studium.research.media import record_media
 from studium.research.student_notes import record_student_notes
 
@@ -238,7 +239,7 @@ def run(args: argparse.Namespace, root: Path) -> int:
             return _emit(report, args.json)
         if args.scientific_command == "record":
             try:
-                data = json.loads(Path(args.file).read_text(encoding="utf-8"))
+                data = json.loads(resolve_inside_project(root, args.file).read_text(encoding="utf-8"))
             except (OSError, ValueError) as exc:
                 return _emit({"status": "mcp.invalid_input", "message": str(exc)}, args.json)
             return _emit(record_scientific_contract(

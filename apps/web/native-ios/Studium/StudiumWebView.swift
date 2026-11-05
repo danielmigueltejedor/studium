@@ -7,9 +7,13 @@ struct StudiumWebView: UIViewControllerRepresentable {
     func updateUIViewController(_ controller: StudiumViewController, context: Context) {}
 }
 
-final class StudiumViewController: UIViewController, UIPencilInteractionDelegate {
+final class StudiumViewController: UIViewController, WKNavigationDelegate, UIPencilInteractionDelegate {
     private let trustedHost = "studium-estudio-daniel.violetpark17.chatgpt.site"
-    private let webView = WKWebView(frame: .zero)
+    private lazy var webView: WKWebView = {
+        let view = WKWebView(frame: .zero)
+        view.navigationDelegate = self
+        return view
+    }()
     private var cloudBridge: StudiumCloudBridge?
 
     override func loadView() { view = webView }
@@ -27,6 +31,27 @@ final class StudiumViewController: UIViewController, UIPencilInteractionDelegate
         if let url = URL(string: "https://\(trustedHost)/") {
             webView.load(URLRequest(url: url))
         }
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        decidePolicyFor navigationAction: WKNavigationAction,
+        decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
+    ) {
+        decisionHandler(allows(navigationAction.request.url) ? .allow : .cancel)
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        decidePolicyFor navigationResponse: WKNavigationResponse,
+        decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void
+    ) {
+        decisionHandler(allows(navigationResponse.response.url) ? .allow : .cancel)
+    }
+
+    private func allows(_ url: URL?) -> Bool {
+        guard let url, url.scheme == "https", url.host == trustedHost else { return false }
+        return url.port == nil || url.port == 443
     }
 
     @available(iOS 17.5, *)

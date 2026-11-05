@@ -2,8 +2,8 @@
 
 import argparse
 import json
-from pathlib import Path
 
+from studium.cli.paths import OutsideProjectError, resolve_inside_project
 from studium.domain.enums import LOCAL_SOURCE_STATUSES
 from studium.research.sources import (
     release_safe_metadata,
@@ -140,11 +140,12 @@ def _add(args: argparse.Namespace, root) -> dict[str, object]:
     if args.handle:
         if not args.content or not args.filename:
             return {"status": "mcp.invalid_input", "message": "handle intake needs filename and content"}
-        content_path = Path(args.content)
-        if content_path.name in {".env", "id_rsa", "id_ed25519", "credentials.json"}:
-            return {"status": "security.credentials_forbidden", "message": "refusing a credential path"}
         try:
+            content_path = resolve_inside_project(root, args.content)
             data = content_path.read_bytes()
+        except OutsideProjectError as exc:
+            status = "security.credentials_forbidden" if "credential" in str(exc) else "security.path_escape"
+            return {"status": status, "message": str(exc)}
         except OSError:
             return {"status": "sources.path_not_found", "message": "content file could not be read"}
         return source_intake_attachment(

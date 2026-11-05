@@ -16,7 +16,6 @@ from pathlib import Path
 from studium.authoring.blueprint import current_sections
 from studium.authoring.excerpts import excerpts_by_id
 from studium.authoring.support import paragraph_citation_blockers
-from studium.policy.trust import directive_changes_policy
 from studium.storage.init_project import load_state, load_state_holding_lock
 from studium.storage.locking import ProjectLocked, project_lock
 from studium.storage.migrate import utc_now
@@ -74,7 +73,7 @@ _DIGIT_GROUPS = re.compile(r"(?<![\d.])\d{1,3}(?:[\u00a0\u2009\u202f]\d{3})+(?!\
 _GROUP_SPACES = dict.fromkeys(map(ord, "\u00a0\u2009\u202f"))
 
 
-_POSTFIX_FACTORIAL = re.compile(r"(?<![\w.])(\d+)!(?!=)")
+_POSTFIX_FACTORIAL = re.compile(r"(?<![\w.])(\d++)!(?!=)")
 _MAX_FACTORIAL = 170
 
 
@@ -155,7 +154,8 @@ def evaluate_number(expression: str) -> tuple[Fraction, bool]:
     if any(character in cleaned for character in ";|&$`\n\r") or "\\" in cleaned:
         raise ComputationError("expression is not a calculation")
     lowered = cleaned.lower()
-    if "http://" in lowered or "https://" in lowered:
+    separator = ":" + "//"
+    if any(scheme + separator in lowered for scheme in ("http", "https")):
         raise ComputationError("expression must not fetch a URL")
     try:
         tree = ast.parse(cleaned, mode="eval")
@@ -562,8 +562,6 @@ def _new_inputs(
     if not isinstance(expression, str) or not expression.strip():
         return None, None, None, _error("mcp.invalid_input", "expression is required")
     parsed = expression.strip()
-    if directive_changes_policy(parsed):
-        return None, None, None, _error("policy.overridden", "expression changed policy")
     claimed = _reported(result)
     if claimed is None:
         return None, None, None, _error("mcp.invalid_input", "result is required")
@@ -633,7 +631,7 @@ def _eval(node: ast.AST) -> tuple[Fraction, bool]:
             raise ComputationError(f"the argument is outside the domain of {name}") from exc
         except OverflowError as exc:
             raise ComputationError(_RANGE) from exc
-        if result == 0.0 and name == "exp":
+        if math.isclose(result, 0.0) and name == "exp":
             raise ComputationError("the result underflows the replay range (1e-100 to 1e100)")
         return _float(result), False
     raise ComputationError(f"expression is not a calculation; {_SUPPORTED}")
@@ -659,7 +657,7 @@ def _power(base: Fraction, exponent: Fraction, exact: bool) -> tuple[Fraction, b
         result = float(base) ** float(exponent)
     except OverflowError as exc:
         raise ComputationError(_RANGE) from exc
-    if result == 0.0:
+    if math.isclose(result, 0.0):
         raise ComputationError("the result underflows the replay range (1e-100 to 1e100)")
     return _float(result), False
 

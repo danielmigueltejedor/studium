@@ -539,7 +539,7 @@ def _requested_quantities(prompt: str) -> int:
         if _COMBINED.search(clause):
             total += 1
             continue
-        parts = [part.strip() for part in re.split(r",\s*and\s+|\s+and\s+", clause) if part.strip()]
+        parts = [part.strip() for part in re.split(r",\s*+and\s++|\s++and\s++", clause) if part.strip()]
         extra = sum(1 for part in parts[1:] if _SECOND_PART.match(part))
         if (
             extra == 0
