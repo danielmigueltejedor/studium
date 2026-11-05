@@ -18,7 +18,7 @@
     "fake-indexeddb": "6.2.5",
     "ical.js": "2.2.1",
     "katex": "0.19.1",
-    "linkedom": "0.18.12",
+    "linkedom": "0.18.15",
     "mathjax-full": "3.2.2",
     "pyodide": "0.29.3",
     "ts-fsrs": "6.0.0"
