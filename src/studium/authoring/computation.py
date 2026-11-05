@@ -73,8 +73,29 @@ _DIGIT_GROUPS = re.compile(r"(?<![\d.])\d{1,3}(?:[\u00a0\u2009\u202f]\d{3})+(?!\
 _GROUP_SPACES = dict.fromkeys(map(ord, "\u00a0\u2009\u202f"))
 
 
-_POSTFIX_FACTORIAL = re.compile(r"(?<![\w.])(\d++)!(?!=)")
 _MAX_FACTORIAL = 170
+_FACTORIAL_PREFIX = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.")
+
+
+def _rewrite_postfix_factorial(expression: str) -> str:
+    """Turn ``n!`` into ``factorial(n)`` without a backtracking regular expression."""
+
+    pieces: list[str] = []
+    index = 0
+    length = len(expression)
+    while index < length:
+        character = expression[index]
+        if character.isdigit() and (index == 0 or expression[index - 1] not in _FACTORIAL_PREFIX):
+            end = index + 1
+            while end < length and expression[end].isdigit():
+                end += 1
+            if end < length and expression[end] == "!" and not (end + 1 < length and expression[end + 1] == "="):
+                pieces.append(f"factorial({expression[index:end]})")
+                index = end + 1
+                continue
+        pieces.append(character)
+        index += 1
+    return "".join(pieces)
 
 
 _IMPLICIT_TOKEN = re.compile(
@@ -122,7 +143,7 @@ def normalize_operators(expression: str) -> str:
 
     grouped = _DIGIT_GROUPS.sub(lambda found: found.group().translate(_GROUP_SPACES), expression)
     powers = _SUPERSCRIPT_RUN.sub(lambda found: f"**({found.group().translate(_SUPERSCRIPT)})", grouped)
-    return _POSTFIX_FACTORIAL.sub(r"factorial(\1)", powers.translate(_TYPOGRAPHIC))
+    return _rewrite_postfix_factorial(powers.translate(_TYPOGRAPHIC))
 
 
 def normalize_expression(expression: str) -> str:

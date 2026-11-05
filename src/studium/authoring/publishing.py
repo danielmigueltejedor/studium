@@ -54,6 +54,25 @@ def _origin(line: int | None, ranges: list[dict[str, object]]) -> dict[str, obje
     return {key: nearest[key] for key in ("record", "chapter")}
 
 
+def _overflow_points(text: str) -> float | None:
+    """Points reported by an Overfull/Underfull box line, if present."""
+
+    marker = "pt too "
+    at = text.find(marker)
+    if at <= 0 or not text.startswith(("wide", "high"), at + len(marker)):
+        return None
+    end = at
+    start = end
+    while start > 0 and (text[start - 1].isdigit() or text[start - 1] == "."):
+        start -= 1
+    if start == end or text[start] == ".":
+        return None
+    try:
+        return float(text[start:end])
+    except ValueError:
+        return None
+
+
 def _tex_file_error(text: str) -> tuple[str, str, str] | None:
     """Last ``path.tex:line: message`` on a single TeX log line."""
 
@@ -162,7 +181,6 @@ def parse_log(log: str, *, filename: str, ranges: list[dict[str, object]]) -> li
         if box:
             location = re.search(r"at lines? (\d+)", text)
             number = int(location.group(1)) if location else None
-            amount = re.search(r"(\d++(?:\.\d++)?)pt too (?:wide|high)", text)
             issues.append(
                 {
                     "severity": "WARNING" if box.group(1) == "Overfull" else "INFO",
@@ -170,7 +188,7 @@ def parse_log(log: str, *, filename: str, ranges: list[dict[str, object]]) -> li
                     "file": filename,
                     "line": number,
                     **_origin(number, ranges),
-                    "overflow_pt": float(amount.group(1)) if amount else None,
+                    "overflow_pt": _overflow_points(text),
                     "evidence": text.strip(),
                     "method": "latex_final_pass",
                     "verification": "observed",

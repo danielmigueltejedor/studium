@@ -1538,11 +1538,70 @@ def _arithmetic_text(side: str) -> str | None:
         return None
     # A typeset number in scientific notation is one value: 6.63×10^{-8}/1.0×10^{-5}
     # divides two numbers, it does not multiply the quotient by 10^{-5}.
-    return re.sub(
-        r"(\d++(?:\.\d++)?)\s*+\*\s*+10\s*+\*\*\s*+(?:\(\s*+)?([+-]?\d++)\s*+\)?",
-        r"(\1e\2)",
-        text,
-    )
+    return _join_scientific_notation(text)
+
+
+def _join_scientific_notation(text: str) -> str:
+    """Rewrite ``6.63 * 10 ** (-8)`` as ``(6.63e-8)`` with a linear scan."""
+
+    pieces: list[str] = []
+    index = 0
+    length = len(text)
+    while index < length:
+        if text[index].isdigit():
+            number_end = index + 1
+            while number_end < length and text[number_end].isdigit():
+                number_end += 1
+            if number_end < length and text[number_end] == ".":
+                fraction = number_end + 1
+                while fraction < length and text[fraction].isdigit():
+                    fraction += 1
+                if fraction > number_end + 1:
+                    number_end = fraction
+            cursor = number_end
+            while cursor < length and text[cursor].isspace():
+                cursor += 1
+            if cursor < length and text[cursor] == "*":
+                cursor += 1
+                while cursor < length and text[cursor].isspace():
+                    cursor += 1
+                if text.startswith("10", cursor):
+                    cursor += 2
+                    while cursor < length and text[cursor].isspace():
+                        cursor += 1
+                    if text.startswith("**", cursor):
+                        cursor += 2
+                        while cursor < length and text[cursor].isspace():
+                            cursor += 1
+                        parenthesized = False
+                        if cursor < length and text[cursor] == "(":
+                            parenthesized = True
+                            cursor += 1
+                            while cursor < length and text[cursor].isspace():
+                                cursor += 1
+                        sign = ""
+                        if cursor < length and text[cursor] in "+-":
+                            sign = text[cursor]
+                            cursor += 1
+                        if cursor < length and text[cursor].isdigit():
+                            exponent_end = cursor + 1
+                            while exponent_end < length and text[exponent_end].isdigit():
+                                exponent_end += 1
+                            end = exponent_end
+                            if parenthesized:
+                                while end < length and text[end].isspace():
+                                    end += 1
+                                if end >= length or text[end] != ")":
+                                    pieces.append(text[index])
+                                    index += 1
+                                    continue
+                                end += 1
+                            pieces.append(f"({text[index:number_end]}e{sign}{text[cursor:exponent_end]})")
+                            index = end
+                            continue
+        pieces.append(text[index])
+        index += 1
+    return "".join(pieces)
 
 
 _MATRIX = re.compile(r"\\begin\{([bpvBV]?matrix)\}(.*?)\\end\{\1\}", re.S)
