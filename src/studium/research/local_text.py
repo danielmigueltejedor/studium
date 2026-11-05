@@ -5,6 +5,7 @@ proves where the words come from, not that they are correct.
 """
 
 import html
+import os
 import re
 import shutil
 import subprocess
@@ -54,7 +55,7 @@ def normalize(text: str) -> str:
     """Comparison form: NFKC (ligatures), joined line-break hyphens, plain dashes and quotes, one space."""
 
     folded = unicodedata.normalize("NFKC", text).translate(_DASHES).translate(_QUOTES)
-    folded = re.sub(r"(\w)-\s*\n\s*(\w)", r"\1\2", folded)
+    folded = re.sub(r"(\w)-[^\S\n]*+\n[^\S\n]*+(\w)", r"\1\2", folded)
     return re.sub(r"\s+", " ", folded).strip()
 
 
@@ -76,8 +77,7 @@ def _pdf_pages(data: bytes) -> tuple[list[str] | None, str, str | None]:
     if tool is None:
         return None, "pdftotext", "pdftotext (poppler) is not installed, so the PDF text cannot be checked"
     with tempfile.TemporaryDirectory(prefix="studium-local-") as folder:
-        path = Path(folder) / "source.pdf"
-        path.write_bytes(data)
+        path = _stage_pdf(folder, data)
         try:
             run = subprocess.run(
                 [tool, "-enc", "UTF-8", str(path), "-"],
@@ -129,6 +129,21 @@ def _natural(name: str) -> list[object]:
     return [int(part) if part.isdigit() else part for part in re.split(r"(\d+)", name)]
 
 
+def _stage_pdf(folder: str, data: bytes) -> Path:
+    """Write PDF bytes under a fixed name inside an existing temporary directory.
+
+    The destination is not derived from the file contents.
+    """
+
+    destination = os.path.join(folder, "source.pdf")
+    descriptor = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        os.write(descriptor, data)
+    finally:
+        os.close(descriptor)
+    return Path(destination)
+
+
 def pdf_page_count(data: bytes) -> int | None:
     """Number of pages of a PDF (poppler ``pdfinfo``), or ``None`` when it cannot be read."""
 
@@ -136,8 +151,7 @@ def pdf_page_count(data: bytes) -> int | None:
     if tool is None:
         return None
     with tempfile.TemporaryDirectory(prefix="studium-local-") as folder:
-        path = Path(folder) / "source.pdf"
-        path.write_bytes(data)
+        path = _stage_pdf(folder, data)
         try:
             run = subprocess.run([tool, str(path)], capture_output=True, timeout=_PDFTOTEXT_TIMEOUT, check=False)
         except (OSError, subprocess.TimeoutExpired):
@@ -155,8 +169,7 @@ def render_pdf_page(data: bytes, page: int, dpi: int = DEFAULT_DPI) -> tuple[byt
     if tool is None:
         return None, "pdftoppm (poppler) is not installed, so a page cannot be rendered"
     with tempfile.TemporaryDirectory(prefix="studium-page-") as folder:
-        source = Path(folder) / "source.pdf"
-        source.write_bytes(data)
+        source = _stage_pdf(folder, data)
         target = Path(folder) / "page"
         try:
             run = subprocess.run(

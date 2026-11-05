@@ -103,7 +103,7 @@ def _clean_symbolic(symbolic: str) -> str:
         raise MathError("symbolic must be a short non-empty expression")
     if not _ALLOWED_EXPRESSION.match(cleaned):
         raise MathError("symbolic contains a character that is not allowed")
-    without_numbers = re.sub(r"\d+\.\d*|\.\d+|\d+", "N", cleaned)
+    without_numbers = re.sub(r"\d++\.\d*+|\.\d++|\d++", "N", cleaned)
     if "." in without_numbers:
         raise MathError("a decimal point must be part of a number")
     return cleaned

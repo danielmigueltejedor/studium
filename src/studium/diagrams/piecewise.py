@@ -38,7 +38,7 @@ def exact(value: object, name: str = "value", symbols: dict[str, sympy.Symbol] |
     if isinstance(value, Fraction):
         return sympy.Rational(value.numerator, value.denominator)
     if isinstance(value, float):
-        if value != value or value in (float("inf"), float("-inf")):
+        if math.isnan(value) or math.isinf(value):
             raise DataError(f"{name} must be finite")
         return sympy.Rational(repr(value))
     if isinstance(value, str):

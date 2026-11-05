@@ -12,6 +12,7 @@ computation.
 from __future__ import annotations
 
 import ast
+import math
 from dataclasses import dataclass
 
 import sympy
@@ -236,7 +237,7 @@ def _constant(value: object) -> sympy.Expr:
             raise ExpressionError("integer literal is too large")
         return sympy.Integer(value)
     if isinstance(value, float):
-        if value != value or value in (float("inf"), float("-inf")):
+        if math.isnan(value) or math.isinf(value):
             raise ExpressionError("non-finite numbers are not allowed")
         exact = sympy.Rational(str(value))
         if not isinstance(exact, sympy.Rational):

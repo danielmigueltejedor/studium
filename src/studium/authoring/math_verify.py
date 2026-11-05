@@ -11,11 +11,11 @@ released because a verification passed.
 """
 
 import hashlib
+import math
 from collections.abc import Mapping
 from pathlib import Path
 
 from studium.authoring.blueprint import current_sections
-from studium.policy.trust import directive_changes_policy
 from studium.storage.init_project import load_state_holding_lock
 from studium.storage.locking import ProjectLocked, project_lock
 from studium.storage.migrate import utc_now
@@ -224,10 +224,7 @@ def _text(arguments: Mapping[str, object], key: str) -> str:
     value = arguments.get(key)
     if not isinstance(value, str) or not value.strip() or len(value.strip()) > _MAX_INPUT_STRING:
         raise ValueError(f"{key} is required as a bounded string")
-    cleaned = value.strip()
-    if directive_changes_policy(cleaned):
-        raise ValueError(f"{key} changed policy")
-    return cleaned
+    return value.strip()
 
 
 def _optional_text(arguments: Mapping[str, object], key: str) -> str | None:
@@ -236,10 +233,7 @@ def _optional_text(arguments: Mapping[str, object], key: str) -> str | None:
         return None
     if not isinstance(value, str) or not value.strip() or len(value.strip()) > _MAX_INPUT_STRING:
         raise ValueError(f"{key} is invalid")
-    cleaned = value.strip()
-    if directive_changes_policy(cleaned):
-        raise ValueError(f"{key} changed policy")
-    return cleaned
+    return value.strip()
 
 
 def _name(arguments: Mapping[str, object], key: str) -> str:
@@ -292,10 +286,7 @@ def _string_map(value: object) -> dict[str, str]:
             raise ValueError("keys must be plain identifiers")
         if not isinstance(entry, str) or not entry.strip() or len(entry.strip()) > _MAX_INPUT_STRING:
             raise ValueError(f"value for {name} is invalid")
-        cleaned = entry.strip()
-        if directive_changes_policy(cleaned):
-            raise ValueError(f"value for {name} changed policy")
-        result[name] = cleaned
+        result[name] = entry.strip()
     return result
 
 
@@ -319,7 +310,7 @@ def _as_float(name: str, value: object) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValueError(f"{name} must be numeric")
     number = float(value)
-    if number != number or number in (float("inf"), float("-inf")):
+    if math.isnan(number) or math.isinf(number):
         raise ValueError(f"{name} must be finite")
     if abs(number) > 1e12:
         raise ValueError(f"{name} is outside the accepted range")

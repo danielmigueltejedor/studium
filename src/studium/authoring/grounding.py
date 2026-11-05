@@ -442,7 +442,7 @@ def _sympy_text(equation: str) -> str | None:
     if re.search(r"[A-Za-z0-9_]\s*\[", text):
         return None
     text = text.replace("[", "(").replace("]", ")")
-    text = re.sub(r"\s+_", "_", text)
+    text = re.sub(r"\s++_", "_", text)
     text = re.sub(r"_\s+", "_", text)
     text = re.sub(r"\^\s+", "^", text)
     text = re.sub(r"_\(([A-Za-z0-9]+)\)", r"_\1", text)
@@ -947,7 +947,7 @@ def _span_body(match: re.Match[str]) -> str:
 
 #: ``\\,`` and ``\\;`` are thin spaces, not separators: a comma or colon preceded by a backslash never splits.
 _SEPARATORS = re.compile(
-    r"\\q?quad\b|\\\\|(?<!\\);|(?<!\\),(?=\s|\\)|(?<!\\):(?=\s|\\q?quad\b)|\\(?:text|mbox|mathrm)\{[^{}]*\s[^{}]*\}"
+    r"\\q?quad\b|\\\\|(?<!\\);|(?<!\\),(?=\s|\\)|(?<!\\):(?=\s|\\q?quad\b)|\\(?:text|mbox|mathrm)\{[^\s{}]*\s[^{}]*\}"
 )
 
 
@@ -1538,7 +1538,70 @@ def _arithmetic_text(side: str) -> str | None:
         return None
     # A typeset number in scientific notation is one value: 6.63×10^{-8}/1.0×10^{-5}
     # divides two numbers, it does not multiply the quotient by 10^{-5}.
-    return re.sub(r"(\d+(?:\.\d+)?)\s*\*\s*10\s*\*\*\s*\(?\s*([+-]?\d+)\s*\)?", r"(\1e\2)", text)
+    return _join_scientific_notation(text)
+
+
+def _join_scientific_notation(text: str) -> str:
+    """Rewrite ``6.63 * 10 ** (-8)`` as ``(6.63e-8)`` with a linear scan."""
+
+    pieces: list[str] = []
+    index = 0
+    length = len(text)
+    while index < length:
+        if text[index].isdigit():
+            number_end = index + 1
+            while number_end < length and text[number_end].isdigit():
+                number_end += 1
+            if number_end < length and text[number_end] == ".":
+                fraction = number_end + 1
+                while fraction < length and text[fraction].isdigit():
+                    fraction += 1
+                if fraction > number_end + 1:
+                    number_end = fraction
+            cursor = number_end
+            while cursor < length and text[cursor].isspace():
+                cursor += 1
+            if cursor < length and text[cursor] == "*":
+                cursor += 1
+                while cursor < length and text[cursor].isspace():
+                    cursor += 1
+                if text.startswith("10", cursor):
+                    cursor += 2
+                    while cursor < length and text[cursor].isspace():
+                        cursor += 1
+                    if text.startswith("**", cursor):
+                        cursor += 2
+                        while cursor < length and text[cursor].isspace():
+                            cursor += 1
+                        parenthesized = False
+                        if cursor < length and text[cursor] == "(":
+                            parenthesized = True
+                            cursor += 1
+                            while cursor < length and text[cursor].isspace():
+                                cursor += 1
+                        sign = ""
+                        if cursor < length and text[cursor] in "+-":
+                            sign = text[cursor]
+                            cursor += 1
+                        if cursor < length and text[cursor].isdigit():
+                            exponent_end = cursor + 1
+                            while exponent_end < length and text[exponent_end].isdigit():
+                                exponent_end += 1
+                            end = exponent_end
+                            if parenthesized:
+                                while end < length and text[end].isspace():
+                                    end += 1
+                                if end >= length or text[end] != ")":
+                                    pieces.append(text[index])
+                                    index += 1
+                                    continue
+                                end += 1
+                            pieces.append(f"({text[index:number_end]}e{sign}{text[cursor:exponent_end]})")
+                            index = end
+                            continue
+        pieces.append(text[index])
+        index += 1
+    return "".join(pieces)
 
 
 _MATRIX = re.compile(r"\\begin\{([bpvBV]?matrix)\}(.*?)\\end\{\1\}", re.S)
@@ -1790,8 +1853,8 @@ def equation_report(root: Path, *, section: object = None, status: object = None
     wanted = {status} if isinstance(status, str) else ({item for item in status if isinstance(item, str)} if isinstance(status, list) else None)
     if wanted is not None and not wanted <= set(FORMULA_STATUSES):
         return _error("mcp.invalid_input", "status must be one of: " + ", ".join(FORMULA_STATUSES))
-    start = offset if isinstance(offset, int) and not isinstance(offset, bool) and offset >= 0 else 0
-    size = limit if isinstance(limit, int) and not isinstance(limit, bool) and 1 <= limit <= 500 else 100
+    start = int(offset) if type(offset) is int and offset >= 0 else 0
+    size = int(limit) if type(limit) is int and 1 <= limit <= 500 else 100
     context = GroundingContext(root)
     rows: list[dict[str, object]] = []
     for record in supported_paragraphs(root):
