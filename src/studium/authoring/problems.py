@@ -528,6 +528,38 @@ _ENUMERATOR = re.compile(r"\((?:[a-h]|i{1,3}|iv|v)\)", re.IGNORECASE)
 _RESULT_MARK = re.compile(r"=|\\approx|\\to\b|\\simeq")
 
 
+def _split_and_parts(clause: str) -> list[str]:
+    """Split ``a, and b`` / ``a and b`` without a backtracking regular expression."""
+
+    parts: list[str] = []
+    start = 0
+    index = 0
+    length = len(clause)
+    while index < length:
+        if clause.startswith("and", index):
+            left = index
+            while left > start and clause[left - 1].isspace():
+                left -= 1
+            spaces_before = left < index
+            comma = left > start and clause[left - 1] == ","
+            right = index + 3
+            if right < length and clause[right].isspace() and (comma or spaces_before):
+                while right < length and clause[right].isspace():
+                    right += 1
+                cut = left - 1 if comma else left
+                piece = clause[start:cut].strip()
+                if piece:
+                    parts.append(piece)
+                start = right
+                index = right
+                continue
+        index += 1
+    rest = clause[start:].strip()
+    if rest:
+        parts.append(rest)
+    return parts
+
+
 def _requested_quantities(prompt: str) -> int:
     """Count the quantities a prompt asks for. Conservative: an unclear clause counts as one."""
 
@@ -539,7 +571,7 @@ def _requested_quantities(prompt: str) -> int:
         if _COMBINED.search(clause):
             total += 1
             continue
-        parts = [part.strip() for part in re.split(r",\s*+and\s++|\s++and\s++", clause) if part.strip()]
+        parts = [part for part in _split_and_parts(clause) if part]
         extra = sum(1 for part in parts[1:] if _SECOND_PART.match(part))
         if (
             extra == 0

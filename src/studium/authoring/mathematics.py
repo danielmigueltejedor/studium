@@ -103,10 +103,39 @@ def _clean_symbolic(symbolic: str) -> str:
         raise MathError("symbolic must be a short non-empty expression")
     if not _ALLOWED_EXPRESSION.match(cleaned):
         raise MathError("symbolic contains a character that is not allowed")
-    without_numbers = re.sub(r"\d++\.\d*+|\.\d++|\d++", "N", cleaned)
+    without_numbers = _mask_numbers(cleaned)
     if "." in without_numbers:
         raise MathError("a decimal point must be part of a number")
     return cleaned
+
+
+def _mask_numbers(text: str) -> str:
+    """Replace each number token with ``N`` so a leftover ``.`` is easy to spot."""
+
+    pieces: list[str] = []
+    index = 0
+    length = len(text)
+    while index < length:
+        character = text[index]
+        if character.isdigit():
+            pieces.append("N")
+            index += 1
+            while index < length and text[index].isdigit():
+                index += 1
+            if index < length and text[index] == ".":
+                index += 1
+                while index < length and text[index].isdigit():
+                    index += 1
+            continue
+        if character == "." and index + 1 < length and text[index + 1].isdigit():
+            pieces.append("N")
+            index += 1
+            while index < length and text[index].isdigit():
+                index += 1
+            continue
+        pieces.append(character)
+        index += 1
+    return "".join(pieces)
 
 
 def _names(expression: str) -> list[str]:
