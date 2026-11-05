@@ -407,6 +407,29 @@ _VECTOR = re.compile(r"\\(?:mathbf|boldsymbol|vec|bm)\s*\{")
 _VECTOR_PRODUCT = re.compile(r"\\(?:times|cdot|wedge|otimes)(?![A-Za-z])")
 
 
+def _collapse_space_before_underscore(text: str) -> str:
+    """Turn spaced subscripts such as ``u _0`` into ``u_0`` with a linear scan."""
+
+    pieces: list[str] = []
+    index = 0
+    length = len(text)
+    while index < length:
+        if text[index].isspace():
+            end = index + 1
+            while end < length and text[end].isspace():
+                end += 1
+            if end < length and text[end] == "_":
+                pieces.append("_")
+                index = end + 1
+                continue
+            pieces.append(text[index:end])
+            index = end
+            continue
+        pieces.append(text[index])
+        index += 1
+    return "".join(pieces)
+
+
 def _sympy_text(equation: str) -> str | None:
     """A Python-syntax spelling of a scalar LaTeX relation, or None when it uses notation SymPy must not guess.
 
@@ -442,7 +465,7 @@ def _sympy_text(equation: str) -> str | None:
     if re.search(r"[A-Za-z0-9_]\s*\[", text):
         return None
     text = text.replace("[", "(").replace("]", ")")
-    text = re.sub(r"\s++_", "_", text)
+    text = _collapse_space_before_underscore(text)
     text = re.sub(r"_\s+", "_", text)
     text = re.sub(r"\^\s+", "^", text)
     text = re.sub(r"_\(([A-Za-z0-9]+)\)", r"_\1", text)
