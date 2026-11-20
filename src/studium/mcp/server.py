@@ -14,8 +14,8 @@ from typing import BinaryIO
 
 from studium import __version__
 from studium.agents.adaptive import agent_plan, workflow_next, workflow_start, workflow_submit
-from studium.authoring.editions import create_edition, list_editions
 from studium.authoring import diagrams as diagram_store
+from studium.authoring.editions import create_edition, list_editions
 from studium.authoring.academic_blueprint import (
     get_academic_blueprint,
     scaffold_academic_blueprint,
