@@ -181,6 +181,15 @@ def workflow_start(root: Path, *, objective: object = "book", discipline: object
                 return {"status": "workflow.exists", "message": "A workflow already exists. Resume it first."}
             document = {**plan, "created_at": utc_now(),
                         "tasks": [{**t, "status": "pending", "artifacts": []} for t in plan["tasks"]]}
+            # Carry the original improvement request across MCP sessions. The
+            # edition copy contains its own local metadata, not a shared queue.
+            if objective == "edition":
+                metadata_path = root / ".studium" / "edition.json"
+                if metadata_path.is_file():
+                    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+                    document["edition_request"] = str(metadata.get("request") or "")
+                    document["source_project"] = metadata.get("source_project")
+                    document["target_version"] = metadata.get("version")
             atomic_write_text(target, json.dumps(document, ensure_ascii=False, indent=2) + "\n")
     except ProjectLocked:
         return {"status": "storage.locked", "message": "project is locked"}
@@ -200,6 +209,8 @@ def workflow_next(root: Path) -> dict[str, object]:
              and all(dep in completed for dep in t.get("depends_on", []))]
     pending = [t for t in tasks if isinstance(t, dict) and t.get("status") == "pending"]
     return {"status": "ok", "objective": data.get("objective"), "discipline": data.get("discipline"),
+            "edition_request": data.get("edition_request"),
+            "source_project": data.get("source_project"), "target_version": data.get("target_version"),
             "ready": ready, "pending_count": len(pending), "all_submitted": not pending,
             "academic_review": "not_established",
             "note": "Submitted tasks are reports, not verified facts. Apply existing Studium audits before rendering."}
