@@ -90,7 +90,14 @@ def test_stdio_claude_and_http_chatgpt_expose_identical_schemas(tmp_path):
 def test_all_claude_agents_and_skills_are_discoverable_without_tool_restrictions():
     agents = sorted((PLUGIN / "agents").glob("*.md"))
     skills = sorted((PLUGIN / "skills").glob("*/SKILL.md"))
-    assert len(agents) >= 7
+    assert len(agents) >= 16
+    names = {path.stem for path in agents}
+    assert {
+        "curriculum-architect", "concept-map-auditor", "assessment-architect",
+        "independent-solver", "figure-visualization-auditor",
+        "cross-chapter-consistency", "edition-evolution-analyst",
+        "accessibility-localization",
+    } <= names
     assert len(skills) >= 5
     for path in [*agents, *skills]:
         content = path.read_text(encoding="utf-8")
