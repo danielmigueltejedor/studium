@@ -119,6 +119,13 @@ def _discipline(root: Path, requested: object) -> tuple[str, str] | None:
     return _PROFILE_DEFAULT.get(profile, "general"), text
 
 
+def _depend(task: dict[str, object], dependency: str) -> None:
+    """Add one DAG prerequisite to an existing planned task."""
+    links = task.get("depends_on")
+    if isinstance(links, list):
+        links.append(dependency)
+
+
 def agent_plan(
     root: Path, *, objective: object = "book", discipline: object = None, level: object = None
 ) -> dict[str, object]:
@@ -132,7 +139,7 @@ def agent_plan(
         return {"status": "mcp.invalid_input", "message": "discipline must be non-empty text (max 120)"}
     key, topic = chosen
     spec = _DISCIPLINES[key]
-    tasks = [
+    tasks: list[dict[str, object]] = [
         {"id": "research", "role": "investigador de fuentes", "depends_on": [],
          "deliverable": "fuentes abiertas y fragmentos verificables con procedencia"},
         {"id": "domain", "role": str(spec["specialist"]), "depends_on": ["research"],
@@ -166,7 +173,7 @@ def agent_plan(
         }
         extra.append(curriculum)
         for task_id in ("theory", "activities"):
-            by_id[task_id]["depends_on"].append("curriculum")  # type: ignore[union-attr]
+            _depend(by_id[task_id], "curriculum")
         if objective == "edition":
             extra.append({
                 "id": "edition_analysis",
@@ -175,7 +182,7 @@ def agent_plan(
                 "depends_on": ["domain"],
                 "deliverable": "cambios concretos que mejoran la edición sin sobrescribir la anterior",
             })
-            curriculum["depends_on"].append("edition_analysis")  # type: ignore[union-attr]
+            _depend(curriculum, "edition_analysis")
     if objective in {"book", "chapter", "edition"}:
         extra.append({
             "id": "concept_map",
@@ -184,7 +191,7 @@ def agent_plan(
             "depends_on": ["theory"],
             "deliverable": "mapa de conceptos, saltos y confusiones entre contenidos",
         })
-        by_id["final_review"]["depends_on"].append("concept_map")  # type: ignore[union-attr]
+        _depend(by_id["final_review"], "concept_map")
         if key in {"history", "biology", "mathematics", "engineering", "politics", "humanities"}:
             extra.append({
                 "id": "figure_audit",
@@ -193,7 +200,7 @@ def agent_plan(
                 "depends_on": ["theory"],
                 "deliverable": "revisar figuras necesarias, procedencia, legibilidad y datos",
             })
-            by_id["final_review"]["depends_on"].append("figure_audit")  # type: ignore[union-attr]
+            _depend(by_id["final_review"], "figure_audit")
     if objective in {"book", "chapter", "edition", "activity"}:
         extra.append({
             "id": "assessment_review",
@@ -202,7 +209,7 @@ def agent_plan(
             "depends_on": ["activities"],
             "deliverable": "alineación de objetivos, actividades y rúbricas",
         })
-        by_id["pedagogy"]["depends_on"].append("assessment_review")  # type: ignore[union-attr]
+        _depend(by_id["pedagogy"], "assessment_review")
         if key in {"mathematics", "engineering", "programming"}:
             extra.append({
                 "id": "independent_solution",
@@ -211,7 +218,7 @@ def agent_plan(
                 "depends_on": ["activities"],
                 "deliverable": "solución independiente y discrepancias antes de leer la respuesta original",
             })
-            by_id["independent_review"]["depends_on"].append("independent_solution")  # type: ignore[union-attr]
+            _depend(by_id["independent_review"], "independent_solution")
     if objective in {"book", "edition"}:
         extra.append({
             "id": "cross_chapter_review",
@@ -220,7 +227,7 @@ def agent_plan(
             "depends_on": ["source_audit", "pedagogy", "concept_map"],
             "deliverable": "inconsistencias, duplicidades y contradicciones entre capítulos",
         })
-        by_id["final_review"]["depends_on"].append("cross_chapter_review")  # type: ignore[union-attr]
+        _depend(by_id["final_review"], "cross_chapter_review")
     if objective in {"book", "chapter", "edition"}:
         extra.append({
             "id": "accessibility_review",
@@ -229,7 +236,7 @@ def agent_plan(
             "depends_on": ["pedagogy"],
             "deliverable": "estructura, textos alternativos, terminología e idioma accesibles",
         })
-        by_id["final_review"]["depends_on"].append("accessibility_review")  # type: ignore[union-attr]
+        _depend(by_id["final_review"], "accessibility_review")
     tasks = [*tasks[:-1], *extra, tasks[-1]]
     return {
         "status": "ok",
