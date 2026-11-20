@@ -46,9 +46,13 @@ The CLI can inspect a proposed plan:
 studium agent-plan --project ./history --objective book --discipline "Historia medieval"
 ```
 
-The orchestration contract is a first step toward Claude Code agent packages,
-a ChatGPT integration and provider-specific parallel execution; those adapters
-are not yet implemented. The existing `studium mcp` is the integration point.
+A **Claude Code plugin** now bundles the MCP launcher, two skills and three
+specialist/reviewer agents at
+[`integrations/claude/plugin`](../integrations/claude/plugin/README.md).
+For ChatGPT, the existing authenticated HTTP MCP adapter exposes these same
+tools; use the [ChatGPT connection guide](../integrations/chatgpt/README.md).
+The client runs the specialist tasks: provider-specific autonomous backend
+inference and guaranteed parallel execution are not part of this MVP.
 
 ## Requesting a new and improved edition
 
@@ -102,13 +106,16 @@ revalidate them and bring in new evidence where appropriate.
   outside the current project workspace. Each edition has its own files.
 - All editions are **drafts** unless separate review and publication workflows
   explicitly establish something more.
-- The first version of this feature intentionally does **not** implement
-  autonomous research, multi-provider inference, new ChatGPT/Claude extension
-  installation, or continuously scheduled improvement.
+- The Claude Code plugin supplies actual skills, specialist agents and a
+  local MCP configuration. ChatGPT can call the tools via its existing
+  authenticated MCP integration.
+- This first version intentionally does **not** automatically install
+  integrations, autonomously run provider models in the backend, or
+  continuously schedule book improvements.
 
 ## Future integration work
 
-Add provider-specific skill bundles, true concurrent execution when available,
+Expand provider-specific skill bundles, true concurrent execution when available,
 reconciliation of independently authored revisions, trusted audit evidence
 rather than unverified submission IDs, and user-facing edition diff/release
 management. Validate cross-domain quality on mathematics, biology, history
