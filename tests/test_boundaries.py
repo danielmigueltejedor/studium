@@ -24,7 +24,12 @@ _ALLOWED = {
     },
     "studium.diagrams": {"studium.diagrams"},
     "studium.engineering": {"studium.diagrams", "studium.engineering"},
+    "studium.agents": {
+        "studium.storage",
+        "studium.agents",
+    },
     "studium.authoring": {
+        "studium.agents",
         "studium.diagrams",
         "studium.domain",
         "studium.policy",
@@ -35,6 +40,7 @@ _ALLOWED = {
         "studium.verification",
     },
     "studium.cli": {
+        "studium.agents",
         "studium",
         "studium.domain",
         "studium.state",
@@ -46,6 +52,7 @@ _ALLOWED = {
         "studium.authoring",
     },
     "studium.mcp": {
+        "studium.agents",
         "studium",
         "studium.diagrams",
         "studium.domain",
