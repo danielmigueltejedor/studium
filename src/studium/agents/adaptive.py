@@ -151,6 +151,86 @@ def agent_plan(
          "depends_on": ["independent_review", "source_audit", "pedagogy"],
          "deliverable": "informe de bloqueos y pasos pendientes en los quality gates de Studium"},
     ]
+    # Optional specialist stages are selected by scope and discipline rather
+    # than launching every available Claude agent for every request. The stable
+    # base tasks above remain backward compatible with existing MCP clients.
+    by_id = {str(item["id"]): item for item in tasks}
+    extra: list[dict[str, object]] = []
+    if objective in {"book", "edition"}:
+        curriculum: dict[str, object] = {
+            "id": "curriculum",
+            "role": "arquitecto curricular",
+            "recommended_agent": "curriculum-architect",
+            "depends_on": ["domain"],
+            "deliverable": "objetivos, prerrequisitos y progresión por capítulos",
+        }
+        extra.append(curriculum)
+        for task_id in ("theory", "activities"):
+            by_id[task_id]["depends_on"].append("curriculum")  # type: ignore[union-attr]
+        if objective == "edition":
+            extra.append({
+                "id": "edition_analysis",
+                "role": "analista de evolución de ediciones",
+                "recommended_agent": "edition-evolution-analyst",
+                "depends_on": ["domain"],
+                "deliverable": "cambios concretos que mejoran la edición sin sobrescribir la anterior",
+            })
+            curriculum["depends_on"].append("edition_analysis")  # type: ignore[union-attr]
+    if objective in {"book", "chapter", "edition"}:
+        extra.append({
+            "id": "concept_map",
+            "role": "revisor de conceptos y prerrequisitos",
+            "recommended_agent": "concept-map-auditor",
+            "depends_on": ["theory"],
+            "deliverable": "mapa de conceptos, saltos y confusiones entre contenidos",
+        })
+        by_id["final_review"]["depends_on"].append("concept_map")  # type: ignore[union-attr]
+        if key in {"history", "biology", "mathematics", "engineering", "politics", "humanities"}:
+            extra.append({
+                "id": "figure_audit",
+                "role": "revisor de figuras y visualizaciones",
+                "recommended_agent": "figure-visualization-auditor",
+                "depends_on": ["theory"],
+                "deliverable": "revisar figuras necesarias, procedencia, legibilidad y datos",
+            })
+            by_id["final_review"]["depends_on"].append("figure_audit")  # type: ignore[union-attr]
+    if objective in {"book", "chapter", "edition", "activity"}:
+        extra.append({
+            "id": "assessment_review",
+            "role": "arquitecto de evaluaciones",
+            "recommended_agent": "assessment-architect",
+            "depends_on": ["activities"],
+            "deliverable": "alineación de objetivos, actividades y rúbricas",
+        })
+        by_id["pedagogy"]["depends_on"].append("assessment_review")  # type: ignore[union-attr]
+        if key in {"mathematics", "engineering", "programming"}:
+            extra.append({
+                "id": "independent_solution",
+                "role": "resolutor independiente",
+                "recommended_agent": "independent-solver",
+                "depends_on": ["activities"],
+                "deliverable": "solución independiente y discrepancias antes de leer la respuesta original",
+            })
+            by_id["independent_review"]["depends_on"].append("independent_solution")  # type: ignore[union-attr]
+    if objective in {"book", "edition"}:
+        extra.append({
+            "id": "cross_chapter_review",
+            "role": "auditor de coherencia global",
+            "recommended_agent": "cross-chapter-consistency",
+            "depends_on": ["source_audit", "pedagogy", "concept_map"],
+            "deliverable": "inconsistencias, duplicidades y contradicciones entre capítulos",
+        })
+        by_id["final_review"]["depends_on"].append("cross_chapter_review")  # type: ignore[union-attr]
+    if objective in {"book", "chapter", "edition"}:
+        extra.append({
+            "id": "accessibility_review",
+            "role": "revisor de accesibilidad y localización",
+            "recommended_agent": "accessibility-localization",
+            "depends_on": ["pedagogy"],
+            "deliverable": "estructura, textos alternativos, terminología e idioma accesibles",
+        })
+        by_id["final_review"]["depends_on"].append("accessibility_review")  # type: ignore[union-attr]
+    tasks = [*tasks[:-1], *extra, tasks[-1]]
     return {
         "status": "ok",
         "objective": objective,
