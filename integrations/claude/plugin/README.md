@@ -6,7 +6,7 @@ authenticated **Streamable HTTP** MCP endpoint. Both routes dispatch through
 `studium.mcp.server.handle` and return the **same tool names, descriptions and
 JSON input schemas**; neither is a reduced or hardcoded tool list.
 
-The plugin offers additional *Claude-native* specialist agents and skills,
+The plugin offers **16 Claude-native specialist agents** and five skills,
 but their existence does not remove any MCP tool. Skills/subagents have no
 `tools` allowlist; the session's permissions and tool availability still apply.
 Claude's tool-search/discovery feature may display only relevant tools at a
@@ -44,17 +44,33 @@ binary must be installed and accessible on `PATH`.
 
 | Invoke | Skill | Typical specialist agents |
 | --- | --- | --- |
-| `/studium:book` | Create or improve a research-grounded book | librarian, subject specialist, activity designer, independent critic, editor |
-| `/studium:learn` | Teach any subject at an appropriate level | subject specialist, learning designer |
+| `/studium:book` | Create or improve a research-grounded book | curriculum architect, subject specialist, concept mapper, assessment and figure auditors, cross-chapter critic, editor |
+| `/studium:learn` | Teach any subject at an appropriate level | subject specialist, learning designer, concept map and assessment architects |
 | `/studium:research` | Research claims and collect sources | bibliography researcher, domain evidence reviewer |
-| `/studium:verify` | Check book, evidence and calculations | quantitative verifier, evidence reviewer, adversarial critic |
-| `/studium:new-edition` | Request a successor edition without overwriting the old book | multidisciplinary reviewers and editor |
+| `/studium:verify` | Check book, evidence and calculations | quantitative verifier, independent solver, domain reviewer, cross-chapter and visual auditors |
+| `/studium:new-edition` | Request a successor edition without overwriting the old book | edition evolution analyst, curriculum architect, cross-chapter critic and accessibility reviewer |
 
 These workflows can use **all current and future Studium MCP tools**, including
 source records, blueprint, authoring, math and verification, diagrams and
 rendering, quality reports, and edition management. Each subagent receives
 limited relevant context; project writes must be serialized. A reviewer
 should not see an author's conclusions before independent checking.
+
+## Intelligent agent selection
+
+The planner chooses extra stages based on both **goal and discipline**, instead
+of automatically running all 16 agents. A full book gains a curriculum plan,
+concept-map review, assessment review, cross-chapter consistency and accessibility
+review. A quantitative or programming activity gains a **blind independent
+solver**. A new edition gains an **edition evolution analyst** that plans targeted
+changes without overwriting the old book. Figure checking is used for book and
+chapter disciplines where diagrams, maps or timelines commonly matter; the
+agent still skips unnecessary visuals during execution. A quick review avoids
+the expensive drafting-oriented stages.
+
+All tasks are recorded as a dependency graph. Completion of an agent's task
+is not the same as scientific approval; the existing Studium verification and
+human-review gates remain authoritative.
 
 ## Verification and regression testing
 
