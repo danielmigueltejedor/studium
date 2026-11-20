@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "studium": {
+      "command": "studium",
+      "args": [
+        "mcp"
+      ]
+    }
+  }
+}

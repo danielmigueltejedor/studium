@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import BinaryIO
 
 from studium import __version__
+from studium.agents.adaptive import agent_plan, workflow_next, workflow_start, workflow_submit
 from studium.authoring import diagrams as diagram_store
 from studium.authoring.academic_blueprint import (
     get_academic_blueprint,
@@ -31,6 +32,7 @@ from studium.authoring.context import chapter_context, resume_packet
 from studium.authoring.coverage import source_coverage
 from studium.authoring.depth.planner import build_depth_plan, depth_plan_status
 from studium.authoring.derivations import check_derivation, list_derivations, record_derivation, remove_derivation
+from studium.authoring.editions import create_edition, list_editions
 from studium.authoring.excerpts import get_excerpt, list_excerpts, record_excerpt
 from studium.authoring.expansion import expansion_plan
 from studium.authoring.figures import check_figure, figure_usage, record_figure, remove_figure
@@ -719,6 +721,25 @@ def _dispatch(session: McpSession, name: str, arguments: Mapping[str, object]) -
         return annotate_next_action(root, project_status(root))
     if name == "studium_book_next":
         return book_next(root)
+    if name == "studium_agent_plan":
+        return agent_plan(root, objective=arguments.get("objective", "book"),
+                          discipline=arguments.get("discipline"), level=arguments.get("level"))
+    if name == "studium_agent_workflow_start":
+        return workflow_start(root, objective=arguments.get("objective", "book"),
+                              discipline=arguments.get("discipline"), level=arguments.get("level"))
+    if name == "studium_agent_workflow_next":
+        return workflow_next(root)
+    if name == "studium_agent_workflow_submit":
+        return workflow_submit(root, task_id=arguments.get("task_id"), artifacts=arguments.get("artifacts"))
+    if name == "studium_edition_create":
+        outcome = create_edition(root, request=arguments.get("request"),
+                                 version=arguments.get("version"), discipline=arguments.get("discipline"))
+        if outcome.get("status") == "created":
+            session.active = Path(str(outcome["path"]))
+        return outcome
+    if name == "studium_edition_list":
+        return list_editions(root)
+
     if name == "studium_source_capabilities":
         return source_capabilities(root)
     if name == "studium_source_status":

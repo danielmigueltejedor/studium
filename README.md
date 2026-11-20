@@ -182,6 +182,28 @@ Studium coordinates academic authoring through a sequence of research, writing, 
                    Draft PDF
 ```
 
+### Adaptive agent workflows and improved editions
+
+Studium can now **plan a team of specialists for the subject at hand** rather
+than applying a mathematics template to every discipline. For example, a
+history book gets source criticism and historiography, whereas mathematics
+receives proofs and independent problem checking. The roles can be inspected
+with `studium agent-plan --project BOOK`, or via `studium_agent_plan` on MCP.
+
+To **request an improved edition of an existing book** without overwriting the
+previous one:
+
+```bash
+studium edition --project ./my-book --request "Improve explanations, check newer sources and revise exercises"
+```
+
+The new edition inherits the draft and sources, clears stale edition reviews,
+and creates a review workflow. External AI clients must still perform the
+tasks, validate evidence and render the improved draft.
+
+See [Adaptive agents and improved editions](docs/agents-and-editions.md) for
+the workflow and its current limitations.
+
 ### Agent-driven authoring
 
 Studium exposes its functionality through the **Model Context Protocol (MCP)**.

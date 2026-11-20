@@ -1,0 +1,8 @@
+{
+  "name": "studium",
+  "description": "Complete Studium MCP toolset plus discipline-adaptive specialist agents, research, rigorous verification, universal learning and book editions",
+  "version": "0.2.0",
+  "author": {
+    "name": "Nodalia"
+  }
+}

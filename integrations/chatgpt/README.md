@@ -1,5 +1,30 @@
 # ChatGPT
 
+## Multidisciplinary agent tools and book editions
+
+The existing authenticated Studium MCP server now exposes tools for academic
+planning and edition management:
+
+- `studium_agent_plan`: choose specialist roles and educational activities
+  based on the subject and learning goals.
+- `studium_agent_workflow_start`, `studium_agent_workflow_next`,
+  `studium_agent_workflow_submit`: coordinate and record agent tasks.
+- `studium_edition_create`: on request create a **new independent draft
+  edition**, preserving the old book and sources and resetting stale audits.
+- `studium_edition_list`: inspect the family of book versions.
+
+For example, the user may ask:
+
+> Crea una nueva edición mejorada del libro de historia medieval, amplía las
+> fuentes primarias, corrige errores y revisa las actividades.
+
+ChatGPT can call `studium_edition_create` with `project` and `request`,
+then continue with `studium_agent_workflow_next` and existing academic
+authoring tools. **Creating the new edition is not the same as having generated
+and verified its revised content.** The connected AI client performs those
+operations, respecting their availability, the user's authorizations and
+Studium's quality gates.
+
 ChatGPT desktop does not take a local command on this screen:
 
 Personalizar → Complementos → Nuevo complemento

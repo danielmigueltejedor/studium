@@ -1,5 +1,24 @@
 # Claude
 
+## Install the Claude Code specialist plugin
+
+Studium offers a ready-to-load Claude Code plugin with **all the same MCP
+tools as ChatGPT** and five skills: books, improved editions, research,
+learning and verification. It additionally bundles eight specialist
+subagents for research, teaching, numerical/domain checking and editing.
+It uses the same existing local MCP core, not a second source registry.
+
+After installing Studium in your environment (`pip install -e .`), use the
+[plugin installation and validation guide](plugin/README.md) to start Claude
+Code with `--plugin-dir`. Ask Claude for a new improved edition, or invoke
+the `/studium:new-edition` skill. The old edition stays unchanged; the new
+edition needs actual authoring, source verification and academic checks before
+it is ready.
+
+**No plugin silently approves generated material.** Claude executes the agent
+tasks; Studium records sources, checks mathematical and documentary evidence
+and decides which publishing gates remain blocked.
+
 Use the local server `studium mcp`. Claude Code and Claude projects are clients of that server, not a second Studium core.
 
 A local agent may intake a path the user named explicitly. A chat attachment is an authorized handle plus bytes, passed to `studium_source_intake` the same way as ChatGPT. Do not search the home directory for PDFs.
