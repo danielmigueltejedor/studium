@@ -937,6 +937,37 @@ _TOOLS: tuple[dict[str, object], ...] = (
             "limitations of this edition. It never claims human instructor review."
         ),
     },
+
+    {
+        "name": "studium_agent_plan",
+        "class": "READ",
+        "description": "Select discipline-appropriate specialist agents, activities and verification criteria. No AI is executed.",
+    },
+    {
+        "name": "studium_agent_workflow_start",
+        "class": "WRITE",
+        "description": "Persist a dependency-ordered specialist workflow for an existing book. Clients run the agents.",
+    },
+    {
+        "name": "studium_agent_workflow_next",
+        "class": "READ",
+        "description": "Return ready agent tasks and their prerequisites; submitted work is not academic verification.",
+    },
+    {
+        "name": "studium_agent_workflow_submit",
+        "class": "WRITE",
+        "description": "Record a task's concrete artifact IDs; this never marks academic claims as verified.",
+    },
+    {
+        "name": "studium_edition_create",
+        "class": "WRITE",
+        "description": "From one improvement request create an independent next edition with inherited sources and draft, reset audits, and an adaptive revision workflow. Original untouched.",
+    },
+    {
+        "name": "studium_edition_list",
+        "class": "READ",
+        "description": "List independent edition projects for the same book and their versions.",
+    },
 )
 
 
@@ -996,6 +1027,46 @@ def _schema(tool: Mapping[str, object]) -> dict[str, object]:
                 {"required": ["slug", "topic"]},
             ],
             "additionalProperties": True,
+        }
+    elif name in {"studium_agent_plan", "studium_agent_workflow_start"}:
+        input_schema = {
+            "type": "object",
+            "properties": {
+                "project": _project_property(),
+                "objective": {"type": "string", "enum": ["book", "chapter", "activity", "edition", "review"]},
+                "discipline": {"type": "string", "minLength": 1, "maxLength": 120},
+                "level": {"type": "string", "minLength": 1, "maxLength": 100},
+            },
+            "additionalProperties": False,
+        }
+    elif name in {"studium_agent_workflow_next", "studium_edition_list"}:
+        input_schema = {
+            "type": "object", "properties": {"project": _project_property()},
+            "additionalProperties": False,
+        }
+    elif name == "studium_agent_workflow_submit":
+        input_schema = {
+            "type": "object",
+            "properties": {
+                "project": _project_property(),
+                "task_id": {"type": "string"},
+                "artifacts": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 50},
+            },
+            "required": ["task_id", "artifacts"],
+            "additionalProperties": False,
+        }
+    elif name == "studium_edition_create":
+        input_schema = {
+            "type": "object",
+            "properties": {
+                "project": _project_property(),
+                "request": {"type": "string", "minLength": 1, "maxLength": 4000,
+                            "description": "Improvement instruction, e.g. 'Nueva edición más rigurosa y con mejores ejercicios'."},
+                "version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"},
+                "discipline": {"type": "string", "minLength": 1, "maxLength": 120},
+            },
+            "required": ["request"],
+            "additionalProperties": False,
         }
     elif name in {"studium_project_list", "studium_server_info", "studium_server_reload"}:
         input_schema = {"type": "object", "properties": {}, "additionalProperties": False}
