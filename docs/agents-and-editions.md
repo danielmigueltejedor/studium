@@ -46,8 +46,8 @@ The CLI can inspect a proposed plan:
 studium agent-plan --project ./history --objective book --discipline "Historia medieval"
 ```
 
-A **Claude Code plugin** now bundles the MCP launcher, two skills and three
-specialist/reviewer agents at
+A **Claude Code plugin** now bundles the complete MCP catalog, five skills
+and eight specialist/reviewer agents at
 [`integrations/claude/plugin`](../integrations/claude/plugin/README.md).
 For ChatGPT, the existing authenticated HTTP MCP adapter exposes these same
 tools; use the [ChatGPT connection guide](../integrations/chatgpt/README.md).
