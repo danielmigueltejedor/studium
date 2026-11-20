@@ -158,6 +158,15 @@ def agent_plan(
          "depends_on": ["independent_review", "source_audit", "pedagogy"],
          "deliverable": "informe de bloqueos y pasos pendientes en los quality gates de Studium"},
     ]
+    if objective == "review":
+        # An existing work review inspects rather than generating new theory,
+        # exercises and pedagogy. This is the cheapest independent audit plan.
+        research, domain, _, _, reviewer, source_audit, _, final = tasks
+        reviewer["depends_on"] = ["domain"]
+        source_audit["depends_on"] = ["research"]
+        final["depends_on"] = ["independent_review", "source_audit"]
+        tasks = [research, domain, reviewer, source_audit, final]
+
     # Optional specialist stages are selected by scope and discipline rather
     # than launching every available Claude agent for every request. The stable
     # base tasks above remain backward compatible with existing MCP clients.
