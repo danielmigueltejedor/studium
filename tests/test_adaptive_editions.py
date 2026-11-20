@@ -94,7 +94,11 @@ def test_new_edition_is_independent_and_invalidates_old_reviews(tmp_path):
     assert metadata["publication"] == "draft"
     assert metadata["academic_review"] == "not_established"
     assert new["workflow"]["status"] == "created"
-    assert dispatch("studium_agent_workflow_next", {}, session=session)["discipline"] == "history"
+    workflow = dispatch("studium_agent_workflow_next", {}, session=session)
+    assert workflow["discipline"] == "history"
+    assert "fuentes" in workflow["edition_request"]
+    assert workflow["source_project"] == "historia"
+    assert workflow["target_version"] == "0.2.0"
 
     versions = dispatch("studium_edition_list", {}, session=session)
     assert [(v["index"], v["version"]) for v in versions["editions"]] == [(1, "0.1.0"), (2, "0.2.0")]
