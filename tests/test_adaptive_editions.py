@@ -159,8 +159,7 @@ def test_extended_agents_are_selected_by_goal_and_subject(tmp_path):
 
     quick = dispatch("studium_agent_plan", {"objective": "review", "discipline": "historia"}, session=session)
     quick_ids = {item["id"] for item in quick["tasks"]}
-    assert not {"curriculum", "edition_analysis", "figure_audit", "cross_chapter_review",
-                "assessment_review", "independent_solution"} & quick_ids
+    assert quick_ids == {"research", "domain", "independent_review", "source_audit", "final_review"}
 
 
 def test_extended_plan_has_no_broken_or_cyclic_dependencies(tmp_path):
