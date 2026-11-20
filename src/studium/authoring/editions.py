@@ -9,7 +9,7 @@ import shutil
 import tempfile
 from pathlib import Path
 
-from studium.agents.adaptive import workflow_start
+from studium.agents.adaptive import agent_plan, workflow_start
 from studium.config.resolve import is_project
 from studium.storage.init_project import load_project_toml
 from studium.storage.locking import ProjectLocked, project_lock
@@ -88,6 +88,10 @@ def create_edition(
         return {"status": "mcp.invalid_input", "message": "Describe the desired improvements (1-4000 chars)."}
     if version is not None and (not isinstance(version, str) or _SEMVER.fullmatch(version) is None):
         return {"status": "mcp.invalid_input", "message": "version must be MAJOR.MINOR.PATCH"}
+    # Reject invalid discipline before any copy is created.
+    selected = agent_plan(root, objective="edition", discipline=discipline)
+    if selected["status"] != "ok":
+        return selected
     if _has_symlinks(root):
         return {"status": "edition.unsafe_source", "message": "Cannot fork a project containing symlinks."}
 
@@ -99,19 +103,21 @@ def create_edition(
         return {"status": "edition.exists", "message": "Destination already exists."}
 
     current_version = _version(root)
+    parsed_versions = [_SEMVER.fullmatch(str(item["version"])) for item in siblings]
+    highest_existing = max(
+        (tuple(map(int, match.groups())) for match in parsed_versions if match is not None),
+        default=(0, 0, 0),
+    )
     current = _SEMVER.fullmatch(current_version)
     if current is None:
         return {"status": "edition.invalid_version", "message": "Current edition is not semantic MAJOR.MINOR.PATCH"}
     if version is None:
         # Advance from the highest existing version, not only the source book.
-        parsed = [_SEMVER.fullmatch(str(item["version"])) for item in siblings]
-        highest = max((tuple(map(int, match.groups())) for match in parsed if match is not None),
-                      default=tuple(map(int, current.groups())))
-        new_version = f"{highest[0]}.{highest[1] + 1}.0"
+        new_version = f"{highest_existing[0]}.{highest_existing[1] + 1}.0"
     else:
         new_version = version
-        if tuple(map(int, _SEMVER.fullmatch(new_version).groups())) <= tuple(map(int, current.groups())):
-            return {"status": "edition.invalid_version", "message": "New version must exceed source version."}
+        if tuple(map(int, _SEMVER.fullmatch(new_version).groups())) <= highest_existing:
+            return {"status": "edition.invalid_version", "message": "New version must exceed all existing editions."}
 
     # The new draft is not released or academically reviewed just because its
     # content came from a previously reviewed manuscript.
@@ -162,6 +168,8 @@ def create_edition(
                 "academic_review": "not_established",
             }
             atomic_write_text(draft / _METADATA, json.dumps(metadata, ensure_ascii=False, indent=2) + "\n")
+            if destination.exists():
+                return {"status": "edition.exists", "message": "Destination already exists."}
             draft.rename(destination)
     except ProjectLocked:
         return {"status": "storage.locked", "message": "project is locked"}
