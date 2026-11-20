@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 import re
 import shutil
 import tempfile
@@ -52,10 +51,9 @@ def _family(root: Path) -> str:
 
 
 def _has_symlinks(root: Path) -> bool:
-    for folder, directories, files in os.walk(root, followlinks=False):
-        if any((Path(folder) / name).is_symlink() for name in [*directories, *files]):
-            return True
-    return False
+    # Inspect only the explicitly selected project, never the user's home.
+    # pathlib does not follow directory symlinks in this traversal by default.
+    return any(path.is_symlink() for path in root.rglob("*"))
 
 
 def list_editions(root: Path) -> dict[str, object]:
