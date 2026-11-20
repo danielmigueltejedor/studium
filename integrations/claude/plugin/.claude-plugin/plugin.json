@@ -1,0 +1,8 @@
+{
+  "name": "studium",
+  "description": "Discipline-aware academic authoring, specialist review, and improved editions through the Studium MCP core",
+  "version": "0.1.0",
+  "author": {
+    "name": "Nodalia"
+  }
+}
