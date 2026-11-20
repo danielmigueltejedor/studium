@@ -1,7 +1,7 @@
 {
   "name": "studium",
-  "description": "Discipline-aware academic authoring, specialist review, and improved editions through the Studium MCP core",
-  "version": "0.1.0",
+  "description": "Complete Studium MCP toolset plus discipline-adaptive specialist agents, research, rigorous verification, universal learning and book editions",
+  "version": "0.2.0",
   "author": {
     "name": "Nodalia"
   }
