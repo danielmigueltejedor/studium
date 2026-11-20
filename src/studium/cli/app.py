@@ -9,6 +9,8 @@ import tomllib
 from pathlib import Path
 
 from studium import __version__
+from studium.agents.adaptive import agent_plan
+from studium.authoring.editions import create_edition, list_editions
 from studium.authoring.paragraphs import annotate_next_action
 from studium.cli.authoring import register as register_authoring
 from studium.cli.authoring import run as run_authoring
@@ -48,6 +50,9 @@ Workflow:
   studium next [--json] [--project PATH]
   studium book-next [--json] [--project PATH]
   studium agent-pack [--task TSK-] [--project PATH]
+  studium agent-plan [--objective book|chapter|activity|edition|review] [--discipline STR] [--project PATH]
+  studium edition --request "Improve the book" [--version X.Y.Z] [--project PATH]
+  studium editions [--project PATH]
   studium mcp [--workspace PATH] [--project PATH] [--http] [--public] [--port PORT] [--token TOKEN]
 """
 
@@ -155,6 +160,12 @@ def main(argv: list[str] | None = None) -> int:
         return _mcp(args)
     if args.command == "agent-pack":
         return _agent_pack(args)
+    if args.command == "agent-plan":
+        return _agent_plan_cli(args)
+    if args.command == "edition":
+        return _edition_cli(args)
+    if args.command == "editions":
+        return _editions_cli(args)
     parser.print_help(sys.stderr)
     return 3
 
@@ -191,6 +202,24 @@ def _build_parser() -> StudiumParser:
     pack.add_argument("--task")
     pack.add_argument("--json", action="store_true")
     pack.add_argument("--project")
+    planner = commands.add_parser("agent-plan", help=argparse.SUPPRESS)
+    planner.add_argument("--objective", choices=("book", "chapter", "activity", "edition", "review"), default="book")
+    planner.add_argument("--discipline")
+    planner.add_argument("--level")
+    planner.add_argument("--project")
+    planner.add_argument("--json", action="store_true")
+
+    edition = commands.add_parser("edition", help=argparse.SUPPRESS)
+    edition.add_argument("--request", required=True)
+    edition.add_argument("--version")
+    edition.add_argument("--discipline")
+    edition.add_argument("--project")
+    edition.add_argument("--json", action="store_true")
+
+    editions = commands.add_parser("editions", help=argparse.SUPPRESS)
+    editions.add_argument("--project")
+    editions.add_argument("--json", action="store_true")
+
     register_sources(commands)
     register_authoring(commands)
     register_mcp(commands)
@@ -355,6 +384,32 @@ def _print_writing_status(payload: dict[str, object]) -> None:
     writing = payload.get("writing_status")
     if isinstance(writing, str):
         print(writing)
+
+
+def _agent_plan_cli(args: argparse.Namespace) -> int:
+    root = _require_project(args.project)
+    if root is None:
+        return 3
+    result = agent_plan(root, objective=args.objective, discipline=args.discipline, level=args.level)
+    print(_json(result))
+    return 0 if result["status"] == "ok" else 1
+
+
+def _edition_cli(args: argparse.Namespace) -> int:
+    root = _require_project(args.project)
+    if root is None:
+        return 3
+    result = create_edition(root, request=args.request, version=args.version, discipline=args.discipline)
+    print(_json(result))
+    return 0 if result["status"] == "created" else 1
+
+
+def _editions_cli(args: argparse.Namespace) -> int:
+    root = _require_project(args.project)
+    if root is None:
+        return 3
+    print(_json(list_editions(root)))
+    return 0
 
 
 def _agent_pack(args: argparse.Namespace) -> int:
