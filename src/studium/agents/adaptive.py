@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import unicodedata
 from pathlib import Path
+from typing import TypedDict
 
 from studium.storage.init_project import load_project_toml
 from studium.storage.locking import ProjectLocked, project_lock
@@ -19,7 +20,14 @@ _WORKFLOW = ".studium/agent-workflow.json"
 
 # Domain-specific tasks are *not* interchangeable: e.g. history requires
 # primary-source interpretation, not a numerical worked problem.
-_DISCIPLINES: dict[str, dict[str, object]] = {
+class DisciplineSpec(TypedDict):
+    terms: tuple[str, ...]
+    specialist: str
+    activity: str
+    checker: str
+
+
+_DISCIPLINES: dict[str, DisciplineSpec] = {
     "history": {
         "terms": ("historia", "history", "historiografia", "medieval", "antigua", "modern history"),
         "specialist": "historiador del periodo",
