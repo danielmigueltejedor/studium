@@ -2,8 +2,10 @@
 
 ## Install the Claude Code specialist plugin
 
-Studium also offers a ready-to-load Claude Code plugin with a book skill, a
-new-edition skill and specialist subagents for independent academic review.
+Studium offers a ready-to-load Claude Code plugin with **all the same MCP
+tools as ChatGPT** and five skills: books, improved editions, research,
+learning and verification. It additionally bundles eight specialist
+subagents for research, teaching, numerical/domain checking and editing.
 It uses the same existing local MCP core, not a second source registry.
 
 After installing Studium in your environment (`pip install -e .`), use the
