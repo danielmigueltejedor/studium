@@ -134,3 +134,44 @@ def test_new_tools_are_visible_to_mcp_clients():
     assert {"studium_agent_plan", "studium_agent_workflow_start",
             "studium_agent_workflow_next", "studium_agent_workflow_submit",
             "studium_edition_create", "studium_edition_list"} <= names
+
+
+def test_extended_agents_are_selected_by_goal_and_subject(tmp_path):
+    session, _ = _topic(tmp_path, "historia-extendida", "Historia contemporánea")
+    history = dispatch("studium_agent_plan", {"objective": "book"}, session=session)
+    history_tasks = {item["id"]: item for item in history["tasks"]}
+    assert {"curriculum", "concept_map", "assessment_review", "figure_audit",
+            "cross_chapter_review", "accessibility_review"} <= set(history_tasks)
+    assert "independent_solution" not in history_tasks
+    assert "edition_analysis" not in history_tasks
+    assert "curriculum" in history_tasks["theory"]["depends_on"]
+    assert "cross_chapter_review" in history_tasks["final_review"]["depends_on"]
+
+    edition = dispatch("studium_agent_plan", {"objective": "edition"}, session=session)
+    edition_tasks = {item["id"]: item for item in edition["tasks"]}
+    assert edition_tasks["edition_analysis"]["recommended_agent"] == "edition-evolution-analyst"
+    assert "edition_analysis" in edition_tasks["curriculum"]["depends_on"]
+
+    math = dispatch("studium_agent_plan", {"objective": "book", "discipline": "matemáticas"}, session=session)
+    math_tasks = {item["id"]: item for item in math["tasks"]}
+    assert "independent_solution" in math_tasks
+    assert "independent_solution" in math_tasks["independent_review"]["depends_on"]
+
+    quick = dispatch("studium_agent_plan", {"objective": "review", "discipline": "historia"}, session=session)
+    quick_ids = {item["id"] for item in quick["tasks"]}
+    assert not {"curriculum", "edition_analysis", "figure_audit", "cross_chapter_review",
+                "assessment_review", "independent_solution"} & quick_ids
+
+
+def test_extended_plan_has_no_broken_or_cyclic_dependencies(tmp_path):
+    session, _ = _topic(tmp_path, "biologia-extendida", "Biología molecular")
+    for objective in ("book", "chapter", "activity", "edition", "review"):
+        plan = dispatch("studium_agent_plan", {"objective": objective}, session=session)
+        all_ids = {task["id"] for task in plan["tasks"]}
+        done = set()
+        while len(done) < len(all_ids):
+            ready = [task["id"] for task in plan["tasks"]
+                     if task["id"] not in done and set(task["depends_on"]) <= done]
+            assert ready, f"cycle or unknown dependency in {objective}"
+            done.update(ready)
+        assert done == all_ids
