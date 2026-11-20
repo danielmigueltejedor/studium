@@ -20,7 +20,7 @@ The client calls `studium_agent_plan` with the project and, optionally,
 `objective`, `discipline`, and `level`. The response contains a dependency
 graph, roles, suggested educational activities and verification criteria.
 
-The planner distinguishes history, biology, politics, mathematics, engineering,
+The planner coordinates 16 available Claude specialist agents, adding the curriculum architect, concept map auditor, assessment architect, independent solver, visual auditor, cross-chapter checker, edition evolution analyst and accessibility/localization reviewer. It chooses the relevant stages by objective and discipline rather than launching all agents for every job.\n\nThe planner distinguishes history, biology, politics, mathematics, engineering,
 programming, languages, humanities, and generic subjects. The generic route does
 **not** require an equation or numerical problem. New subjects work through a
 topic-specific specialist and methods appropriate to the learning goals; an
