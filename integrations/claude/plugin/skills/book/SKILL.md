@@ -20,6 +20,16 @@ You have access to the **same entire Studium MCP server** used by ChatGPT: sourc
    - `adversarial-critic`: cross-chapter conflict, wrong premises and unsupported leaps;
    - `scientific-editor`: language, consistency, accessibility, layout and diagrams;
    - `evidence-reviewer`: independent final scrutiny.
+   Additional specialists are selected **conditionally**, not launched in every job:
+   - `curriculum-architect`: large books and revised course structure;
+   - `edition-evolution-analyst`: only a requested new/improved edition;
+   - `concept-map-auditor`: conceptual and prerequisite gaps in chapters;
+   - `assessment-architect`: learning-objective alignment and rubrics;
+   - `independent-solver`: separately solves quantitative/code problems before comparing solutions;
+   - `figure-visualization-auditor`: only when scientific diagrams, charts, maps or timelines add learning value;
+   - `cross-chapter-consistency`: comprehensive book-level contradictions and duplicates;
+   - `accessibility-localization`: readable structure and final multilingual/accessibility checks.
+   For small factual answers, use only a researcher and verifier if necessary. For a whole book, prioritize curriculum before drafting, independent checking before final review, and cross-chapter consistency near completion. Honor the actual dependency graph from `studium_agent_plan`; the client must not manufacture agent submissions for skipped work.
 4. Specialists must consume bounded context and produce *real* Studium artifact IDs from documented tools. For independent checking, do not leak the original author's rationale or conclusion before the reviewer forms their own analysis. Run parallel **only independent read-only work** when supported; serialize competing project writes.
 5. Submit a task through `studium_agent_workflow_submit` **only after** its artifacts exist. Submission is not academic verification. Resume the DAG until complete or a real blocker is reached.
 6. Follow `studium_book_next` and chapter-specific completeness/gates; use the actual `studium_source_coverage`, `studium_quality_report`, math/domain verification, contradiction scan and book review as appropriate, then render **only when permitted**. Present unresolved limitations rather than inventing a passing status.
