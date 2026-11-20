@@ -15,7 +15,6 @@ from typing import BinaryIO
 from studium import __version__
 from studium.agents.adaptive import agent_plan, workflow_next, workflow_start, workflow_submit
 from studium.authoring import diagrams as diagram_store
-from studium.authoring.editions import create_edition, list_editions
 from studium.authoring.academic_blueprint import (
     get_academic_blueprint,
     scaffold_academic_blueprint,
@@ -33,6 +32,7 @@ from studium.authoring.context import chapter_context, resume_packet
 from studium.authoring.coverage import source_coverage
 from studium.authoring.depth.planner import build_depth_plan, depth_plan_status
 from studium.authoring.derivations import check_derivation, list_derivations, record_derivation, remove_derivation
+from studium.authoring.editions import create_edition, list_editions
 from studium.authoring.excerpts import get_excerpt, list_excerpts, record_excerpt
 from studium.authoring.expansion import expansion_plan
 from studium.authoring.figures import check_figure, figure_usage, record_figure, remove_figure
