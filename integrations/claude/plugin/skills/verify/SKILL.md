@@ -7,4 +7,6 @@ Locate the project with `studium_project_status`, check `studium_server_info` if
 
 Use an independent evidence reviewer plus a quantitative verifier when appropriate. Subject to core tool permissions, apply `studium_source_coverage`, `studium_equation_report`, `studium_problem_check`, `studium_computation_check`, `studium_math_verify`, `studium_contradiction_scan`, `studium_book_review`, `studium_quality_report` or other tools that actually exist and match the matter. Do not treat absent tools as available or ignore a hard blocker.
 
+For full books, include `cross-chapter-consistency` to catch global conflicts; include `concept-map-auditor` if the conceptual pathway is unclear, `figure-visualization-auditor` for evidence-bearing visuals, and `accessibility-localization` for language and usable formats. Select only checks that suit the work: neither a math verifier nor a figure auditor is mandatory for an unrelated short essay. An agent report is independent scrutiny, not a deterministic pass.
+
 Respond with a traceable distinction between passed tests, reproduced arithmetic, conflicting or missing sources, remaining review issues and human approval. Never declare `ACADEMICALLY_REVIEWED` automatically. Return specific artifact IDs and repair priorities.
